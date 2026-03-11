@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>🍽️ Serveur — La Marmitte Express</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, onSnapshot, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",
+  authDomain: "la-marmitte-express.firebaseapp.com",
+  projectId: "la-marmitte-express",
+  storageBucket: "la-marmitte-express.firebasestorage.app",
+  messagingSenderId: "215969803476",
+  appId: "1:215969803476:web:39ee4de2cf4475f3c2df41"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+
+let menu = null;
+let tables = {};
+let cart = [];
+let selectedTable = null;
+
+// Load menu from Firebase
+onSnapshot(doc(db, 'config', 'menu'), snap => {
+  if(snap.exists()){
+    menu = snap.data();
+    renderMenu();
+    renderTables();
+    setStatus('connected');
+  } else {
+    document.getElementById('menu-empty').style.display='block';
+    setStatus('no-menu');
+  }
+});
+
+// Load tables status
+onSnapshot(collection(db, 'tables'), snap => {
+  tables = {};
+  snap.forEach(d => tables[d.id] = {...d.data(), _id: d.id});
+  renderTables();
+});
+
+function setStatus(s){
+  const el = document.getElementById('status-bar');
+  if(s==='connected'){ el.style.background='rgba(34,201,122,.15)'; el.style.color='#22c97a'; el.textContent='🟢 Connecté à la caisse'; }
+  else if(s==='no-menu'){ el.style.background='rgba(245,166,35,.1)'; el.style.color='#f5a623'; el.textContent='⚠️ Carte non publiée — demandez au caissier de publier'; }
+  else { el.style.background='rgba(232,64,64,.1)'; el.style.color='#e84040'; el.textContent='🔴 Hors ligne'; }
+}
+
+function renderTables(){
+  const el = document.getElementById('table-list');
+  if(!el) return;
+  const tbls = Object.values(tables).filter(t=>t.tableId);
+  if(!tbls.length){
+    // Show default numbered tables if none in Firebase
+    el.innerHTML = [1,2,3,4,5,6,7,8].map(n=>`
+      <button class="tbl-btn" onclick="selectTable('t${n}','${n}')" id="tbtn-t${n}">
+        <div class="tbl-num">${n}</div>
+        <div class="tbl-status free">Libre</div>
+      </button>`).join('');
+    return;
+  }
+  el.innerHTML = tbls.sort((a,b)=>parseInt(a.number||0)-parseInt(b.number||0)).map(t=>{
+    const isOcc = t.status==='occupied';
+    return `<button class="tbl-btn${selectedTable===t.tableId?' selected':''}" onclick="selectTable('${t.tableId}','${t.number||t.tableId}')" id="tbtn-${t.tableId}">
+      <div class="tbl-num">${t.number||'?'}</div>
+      <div class="tbl-status ${isOcc?'occupied':'free'}">${isOcc?'En cours':'Libre'}</div>
+      ${isOcc?`<div class="tbl-total">${(t.total||0).toFixed(2).replace('.',',')}€</div>`:''}
+    </button>`;
+  }).join('');
+}
+
+function selectTable(id, num){
+  selectedTable = id;
+  document.querySelectorAll('.tbl-btn').forEach(b=>b.classList.remove('selected'));
+  const btn = document.getElementById('tbtn-'+id);
+  if(btn) btn.classList.add('selected');
+  document.getElementById('selected-table-name').textContent = 'Table '+num;
+  document.getElementById('step-table').style.display='none';
+  document.getElementById('step-menu').style.display='flex';
+  renderCart();
+  if(menu) renderMenu();
+}
+
+function goBackToTables(){
+  selectedTable=null;
+  cart=[];
+  document.getElementById('step-table').style.display='flex';
+  document.getElementById('step-menu').style.display='none';
+}
+
+function renderMenu(){
+  if(!menu || !selectedTable) return;
+  const tabs = document.getElementById('menu-tabs');
+  const content = document.getElementById('menu-content');
+  if(!tabs||!content) return;
+  const cats = menu.cats||[];
+  if(!cats.length){ content.innerHTML='<div style="padding:20px;color:#888;text-align:center">Carte vide — publiez depuis la caisse</div>'; return; }
+  // Render tabs
+  let activeCat = tabs.dataset.active || cats[0]?.id;
+  tabs.innerHTML = cats.map(c=>`<button class="mtab${activeCat===c.id?' active':''}" onclick="switchMenuTab('${c.id}')">${c.icon||''} ${c.name}</button>`).join('');
+  tabs.dataset.active = activeCat;
+  // Render products for active cat
+  const prods = (menu.products||[]).filter(p=>p.cat===activeCat);
+  // Group by section
+  const sections = [];
+  prods.forEach(p=>{
+    const sec = p.section||'';
+    let s = sections.find(x=>x.name===sec);
+    if(!s){ s={name:sec,items:[]}; sections.push(s); }
+    s.items.push(p);
+  });
+  let html='';
+  sections.forEach(sec=>{
+    if(sec.name) html+=`<div class="sec-sep">${sec.name.toUpperCase()}</div>`;
+    sec.items.forEach(p=>{
+      const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
+      html+=`<div class="prod-row" onclick="addToCart('${p.id}','${esc(p.name)}',${p.price})">
+        <div class="prod-info">
+          <div class="prod-name">${p.pdj?'⭐ ':''}${p.name}</div>
+          ${p.sub?`<div class="prod-sub">${p.sub}</div>`:''}
+        </div>
+        <div class="prod-right">
+          <div class="prod-price">${p.price.toFixed(2).replace('.',',')}€</div>
+          ${inCart?`<div class="prod-badge">${inCart}</div>`:'<div class="prod-add">+</div>'}
+        </div>
+      </div>`;
+    });
+  });
+  content.innerHTML = html||'<div style="padding:20px;color:#888;text-align:center">Aucun article</div>';
+}
+
+function switchMenuTab(catId){
+  const tabs = document.getElementById('menu-tabs');
+  tabs.dataset.active = catId;
+  renderMenu();
+}
+
+function addToCart(pid, name, price){
+  const ex = cart.find(r=>r.pid===pid);
+  if(ex) ex.qty++;
+  else cart.push({pid, name, price:parseFloat(price), qty:1});
+  renderCart();
+  renderMenu();
+  // Bounce animation
+  const btn = document.getElementById('cart-fab');
+  btn.classList.remove('bounce'); void btn.offsetWidth; btn.classList.add('bounce');
+}
+
+function removeFromCart(pid){
+  const ex = cart.find(r=>r.pid===pid);
+  if(!ex) return;
+  if(ex.qty>1) ex.qty--;
+  else cart = cart.filter(r=>r.pid!==pid);
+  renderCart();
+  renderMenu();
+}
+
+function renderCart(){
+  const badge = document.getElementById('cart-badge');
+  const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
+  const count = cart.reduce((s,r)=>s+r.qty,0);
+  badge.textContent = count||'';
+  badge.style.display = count?'flex':'none';
+  document.getElementById('send-btn').disabled = !cart.length || !selectedTable;
+  // Cart panel
+  const panel = document.getElementById('cart-panel');
+  if(!panel) return;
+  if(!cart.length){
+    panel.querySelector('#cart-items').innerHTML='<div style="padding:20px;text-align:center;color:#888">Panier vide</div>';
+    panel.querySelector('#cart-total').textContent='0,00€';
+    return;
+  }
+  panel.querySelector('#cart-items').innerHTML = cart.map(r=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:600">${r.name}</div>
+        <div style="font-size:12px;color:#888">${r.price.toFixed(2).replace('.',',')}€/u</div>
+      </div>
+      <button onclick="removeFromCart('${r.pid}')" style="width:28px;height:28px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;font-size:14px;font-weight:700;border:none;cursor:pointer">−</button>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;width:24px;text-align:center">${r.qty}</div>
+      <button onclick="addToCart('${r.pid}','${esc(r.name)}',${r.price})" style="width:28px;height:28px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;font-size:14px;font-weight:700;border:none;cursor:pointer">+</button>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:60px;text-align:right">${(r.qty*r.price).toFixed(2).replace('.',',')}€</div>
+    </div>`).join('');
+  panel.querySelector('#cart-total').textContent = total.toFixed(2).replace('.',',')+'€';
+}
+
+function openCart(){
+  document.getElementById('cart-overlay').style.display='flex';
+  renderCart();
+}
+function closeCart(){ document.getElementById('cart-overlay').style.display='none'; }
+
+async function sendOrder(){
+  if(!cart.length||!selectedTable) return;
+  const btn = document.getElementById('send-btn');
+  btn.disabled=true; btn.textContent='Envoi...';
+  try{
+    const note = document.getElementById('order-note')?.value||'';
+    await addDoc(collection(db,'orders'),{
+      tableId: selectedTable,
+      items: cart.map(r=>({pid:r.pid,name:r.name,price:r.price,qty:r.qty})),
+      note,
+      status: 'pending',
+      source: 'waiter',
+      sentAt: serverTimestamp()
+    });
+    cart=[];
+    renderCart();
+    renderMenu();
+    closeCart();
+    showSuccess();
+  }catch(e){
+    btn.disabled=false; btn.textContent='🚀 Envoyer';
+    alert('Erreur: '+e.message);
+  }
+}
+
+function showSuccess(){
+  const el = document.getElementById('success-toast');
+  el.style.display='flex';
+  setTimeout(()=>{ el.style.display='none'; goBackToTables(); },2500);
+}
+
+function esc(s){ return String(s||'').replace(/'/g,"\\'"); }
+
+// Expose to global
+window.selectTable=selectTable; window.goBackToTables=goBackToTables;
+window.switchMenuTab=switchMenuTab; window.addToCart=addToCart;
+window.removeFromCart=removeFromCart; window.openCart=openCart;
+window.closeCart=closeCart; window.sendOrder=sendOrder;
+</script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--text:#f0f0f0;--muted:#6b7280;--green:#22c97a;--accent:#f5a623;--red:#e84040;--blue:#4a9eff;--radius:14px}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+
+/* Header */
+#app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.app-logo{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px}
+.app-logo span{color:var(--accent)}
+#status-bar{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;margin-left:auto}
+
+/* Steps */
+.step{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#step-menu{display:none}
+
+/* Table selection */
+.step-title{padding:14px 16px 8px;font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;color:var(--muted)}
+#table-list{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:10px 16px;overflow-y:auto;flex:1}
+.tbl-btn{background:var(--card);border:2px solid var(--border);border-radius:var(--radius);padding:14px 8px;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:4px}
+.tbl-btn:active,.tbl-btn.selected{border-color:var(--accent);background:rgba(245,166,35,.1)}
+.tbl-num{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--accent)}
+.tbl-status{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px}
+.tbl-status.free{background:rgba(34,201,122,.12);color:var(--green)}
+.tbl-status.occupied{background:rgba(245,166,35,.12);color:var(--accent)}
+.tbl-total{font-family:'Bebas Neue',sans-serif;font-size:14px;color:var(--green)}
+
+/* Menu step header */
+#menu-step-header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.back-btn{width:36px;height:36px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+#selected-table-name{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px;color:var(--accent)}
+
+/* Menu tabs */
+#menu-tabs{display:flex;gap:6px;padding:10px 16px;overflow-x:auto;flex-shrink:0;scrollbar-width:none;background:var(--surface);border-bottom:1px solid var(--border)}
+#menu-tabs::-webkit-scrollbar{display:none}
+.mtab{height:34px;padding:0 14px;border-radius:20px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .15s;flex-shrink:0}
+.mtab.active{background:rgba(245,166,35,.15);border-color:var(--accent);color:var(--accent)}
+
+/* Products */
+#menu-content{flex:1;overflow-y:auto;padding:8px 0}
+.sec-sep{padding:6px 16px;font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--muted);background:rgba(255,255,255,.02);border-top:1px solid var(--border);margin-top:4px}
+.prod-row{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;active:background:var(--card)}
+.prod-row:active{background:var(--card)}
+.prod-info{flex:1}
+.prod-name{font-size:14px;font-weight:600}
+.prod-sub{font-size:11px;color:var(--muted);margin-top:2px}
+.prod-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.prod-price{font-family:'Bebas Neue',sans-serif;font-size:16px;color:var(--green)}
+.prod-add{width:26px;height:26px;border-radius:50%;background:rgba(245,166,35,.15);color:var(--accent);font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.prod-badge{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#000;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center}
+
+/* Cart FAB */
+#cart-fab{position:fixed;bottom:24px;right:20px;width:58px;height:58px;border-radius:50%;background:var(--accent);color:#000;font-size:22px;border:none;cursor:pointer;box-shadow:0 4px 20px rgba(245,166,35,.5);display:none;align-items:center;justify-content:center;z-index:50}
+#cart-badge{position:absolute;top:-4px;right:-4px;width:22px;height:22px;border-radius:50%;background:#e84040;color:#fff;font-size:11px;font-weight:800;display:none;align-items:center;justify-content:center;border:2px solid var(--bg)}
+@keyframes bounce{0%,100%{transform:scale(1)}50%{transform:scale(1.2)}}
+.bounce{animation:bounce .3s ease}
+
+/* Cart overlay */
+#cart-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;display:none;align-items:flex-end;justify-content:center}
+#cart-panel{background:var(--surface);border-radius:24px 24px 0 0;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:0}
+.cart-handle{width:40px;height:4px;border-radius:2px;background:var(--border);margin:12px auto 0}
+.cart-title{padding:12px 16px;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+#cart-items{flex:1;overflow-y:auto;padding:0 16px}
+.cart-footer{padding:14px 16px;border-top:1px solid var(--border)}
+.cart-total-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.cart-total-lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase}
+#cart-total{font-family:'Bebas Neue',sans-serif;font-size:26px;color:var(--green)}
+#order-note{width:100%;height:52px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--text);margin-bottom:10px;resize:none}
+#order-note:focus{border-color:var(--accent);outline:none}
+#send-btn{width:100%;height:52px;border-radius:14px;background:var(--accent);color:#000;font-size:16px;font-weight:800;cursor:pointer;border:none;transition:opacity .15s}
+#send-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* Success toast */
+#success-toast{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.success-icon{font-size:64px}
+.success-msg{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:2px;color:var(--green)}
+.success-sub{font-size:14px;color:var(--muted)}
+
+/* Menu empty */
+#menu-empty{display:none;padding:40px 20px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<div id="app-header">
+  <div style="font-size:22px">🍽️</div>
+  <div>
+    <div class="app-logo">La <span>Marmitte</span> Express</div>
+    <div style="font-size:10px;color:var(--muted);font-weight:700">INTERFACE SERVEUR</div>
+  </div>
+  <div id="status-bar">⏳ Connexion...</div>
+</div>
+
+<!-- STEP 1: Choose table -->
+<div class="step" id="step-table">
+  <div class="step-title">🪑 CHOISIR UNE TABLE</div>
+  <div id="menu-empty">⚠️ Carte non publiée.<br>Demandez au caissier de cliquer sur ☁️ Publier.</div>
+  <div id="table-list"></div>
+</div>
+
+<!-- STEP 2: Take order -->
+<div class="step" id="step-menu">
+  <div id="menu-step-header">
+    <button class="back-btn" onclick="goBackToTables()">←</button>
+    <span id="selected-table-name">Table —</span>
+    <span style="font-size:12px;color:var(--muted);margin-left:4px">· Commande en cours</span>
+  </div>
+  <div id="menu-tabs"></div>
+  <div id="menu-content"></div>
+</div>
+
+<!-- Cart FAB -->
+<button id="cart-fab" onclick="openCart()" style="display:flex">
+  🛒
+  <div id="cart-badge"></div>
+</button>
+
+<!-- Cart overlay -->
+<div id="cart-overlay" onclick="if(event.target===this)closeCart()">
+  <div id="cart-panel">
+    <div class="cart-handle"></div>
+    <div class="cart-title">
+      🛒 Commande
+      <button onclick="closeCart()" style="background:var(--card);border:1px solid var(--border);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px">✕</button>
+    </div>
+    <div id="cart-items"></div>
+    <div class="cart-footer">
+      <textarea id="order-note" placeholder="Note pour la cuisine (optionnel)…"></textarea>
+      <div class="cart-total-row">
+        <div class="cart-total-lbl">Total commande</div>
+        <div id="cart-total">0,00€</div>
+      </div>
+      <button id="send-btn" onclick="sendOrder()" disabled>🚀 Envoyer la commande</button>
+    </div>
+  </div>
+</div>
+
+<!-- Success toast -->
+<div id="success-toast">
+  <div class="success-icon">✅</div>
+  <div class="success-msg">Commande envoyée !</div>
+  <div class="success-sub">La caisse a été notifiée</div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Générateur QR — La Marmitte Express</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'DM Sans',sans-serif;background:#0c0d10;color:#f0f0f0;min-height:100vh;padding:24px}
+h1{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:2px;color:#f5a623;margin-bottom:4px}
+.sub{font-size:13px;color:#6b7280;margin-bottom:24px}
+.config-box{background:#13141a;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:20px;margin-bottom:24px;max-width:600px}
+.config-box label{display:block;font-size:11px;font-weight:700;letter-spacing:.5px;color:#6b7280;text-transform:uppercase;margin-bottom:6px;margin-top:14px}
+.config-box label:first-of-type{margin-top:0}
+input[type=text],input[type=number]{width:100%;height:42px;background:#1a1c24;border:1.5px solid rgba(255,255,255,.1);border-radius:10px;padding:0 14px;font-size:14px;color:#f0f0f0}
+input:focus{border-color:#f5a623;outline:none}
+.btn{height:44px;padding:0 20px;border-radius:10px;background:#f5a623;color:#000;font-weight:700;font-size:14px;cursor:pointer;border:none;margin-top:16px}
+.btn-sec{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);color:#f0f0f0}
+.qr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;max-width:900px}
+.qr-card{background:#13141a;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
+.qr-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;color:#f5a623}
+.qr-box{background:#fff;border-radius:10px;padding:10px;display:inline-block}
+.qr-url{font-size:10px;color:#6b7280;word-break:break-all;max-width:180px}
+.print-btn{height:32px;padding:0 14px;border-radius:8px;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.2);color:#f5a623;font-size:11px;font-weight:700;cursor:pointer}
+@media print{
+  body{background:#fff;color:#000;padding:10px}
+  .config-box,.no-print{display:none}
+  .qr-card{border:1px solid #ddd;break-inside:avoid;background:#fff}
+  .qr-title,.qr-url{color:#000}
+  h1,.sub{display:none}
+}
+</style>
+</head>
+<body>
+
+<h1>🔲 Générateur de QR Codes</h1>
+<p class="sub">Créez les QR codes à imprimer et poser sur chaque table</p>
+
+<div class="config-box no-print">
+  <label>URL de votre fichier client.html (hébergé)</label>
+  <input type="text" id="base-url" placeholder="https://votresite.com/client.html" value="">
+  <div style="font-size:11px;color:#6b7280;margin-top:4px">💡 Exemple si hébergé sur GitHub Pages : https://monsite.github.io/client.html</div>
+
+  <label>Nombre de tables</label>
+  <input type="number" id="table-count" value="8" min="1" max="50">
+
+  <label>Numéro de la première table</label>
+  <input type="number" id="table-start" value="1" min="1">
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="btn" onclick="generateQRCodes()">🔲 Générer les QR Codes</button>
+    <button class="btn btn-sec no-print" onclick="window.print()">🖨️ Imprimer tout</button>
+  </div>
+</div>
+
+<div id="qr-output" class="qr-grid"></div>
+
+<script>
+function generateQRCodes(){
+  const baseUrl = document.getElementById('base-url').value.trim() || window.location.href.replace('qrcodes.html','client.html');
+  const count = parseInt(document.getElementById('table-count').value)||8;
+  const start = parseInt(document.getElementById('table-start').value)||1;
+  const output = document.getElementById('qr-output');
+  output.innerHTML='';
+
+  for(let i=start; i<start+count; i++){
+    const url = baseUrl+'?table='+i+'&id=t'+i;
+    const card = document.createElement('div');
+    card.className='qr-card';
+    card.innerHTML=`
+      <div class="qr-title">🍽️ TABLE ${i}</div>
+      <div class="qr-box" id="qr-${i}"></div>
+      <div class="qr-url">${url}</div>
+      <div style="font-size:11px;color:#6b7280">Scannez pour commander</div>
+      <button class="print-btn no-print" onclick="printSingle(${i})">🖨️ Imprimer</button>
+    `;
+    output.appendChild(card);
+    // Generate QR
+    new QRCode(document.getElementById('qr-'+i), {
+      text: url,
+      width: 150,
+      height: 150,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  }
+}
+
+function printSingle(num){
+  const card = document.getElementById('qr-'+num)?.closest('.qr-card');
+  if(!card) return;
+  const w = window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Table ${num}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
+  <style>body{font-family:sans-serif;text-align:center;padding:40px;background:#fff}
+  h2{font-family:'Bebas Neue',sans-serif;font-size:36px;color:#f5a623;margin-bottom:8px}
+  p{color:#888;font-size:14px;margin-top:12px}</style>
+  </head><body>
+  <h2>🍽️ TABLE ${num}</h2>
+  ${card.querySelector('.qr-box').innerHTML}
+  <p>Scannez ce QR code pour commander</p>
+  <p style="font-size:12px;color:#bbb;margin-top:20px">La Marmitte Express</p>
+  <script>window.onload=()=>{window.print();window.close()}<\/script>
+  </body></html>`);
+  w.document.close();
+}
+
+// Auto-detect URL
+const autoUrl = window.location.href.replace('qrcodes.html','client.html').split('?')[0];
+document.getElementById('base-url').value = autoUrl !== window.location.href.split('?')[0] ? autoUrl : '';
+</script>
+</body>
+</html>
