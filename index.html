@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>La Marmite Express — Accueil</title>
+<meta name="description" content="La Marmite Express — Système de caisse & commande en ligne pour votre restaurant">
+<meta name="theme-color" content="#f5a623">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--accent:#f5a623;--green:#22c97a;--blue:#4a9eff;--red:#e84040;--purple:#9b6bff;--text:#f0f0f4;--muted:#656878;--radius:20px}
+html,body{min-height:100vh;min-height:100dvh;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
+
+/* Background effect */
+body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(ellipse at 30% 20%,rgba(245,166,35,.06) 0%,transparent 50%),radial-gradient(ellipse at 70% 80%,rgba(34,201,122,.04) 0%,transparent 50%);pointer-events:none;z-index:0}
+
+.container{max-width:900px;margin:0 auto;padding:24px 20px 60px;position:relative;z-index:1}
+
+/* Header */
+.header{text-align:center;padding:40px 0 20px}
+.logo-emoji{font-size:56px;display:block;margin-bottom:8px;animation:bounce 2s ease infinite}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.logo-text{font-family:'Bebas Neue',sans-serif;font-size:42px;letter-spacing:3px;line-height:1}
+.logo-text span{color:var(--accent)}
+.tagline{font-size:13px;color:var(--muted);font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-top:6px}
+.header-line{width:60px;height:3px;background:var(--accent);border-radius:2px;margin:20px auto 0}
+
+/* Grid */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:36px}
+@media(max-width:600px){.grid{grid-template-columns:1fr;gap:12px}}
+
+/* Cards */
+.app-card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:28px 24px;cursor:pointer;transition:all .2s ease;position:relative;overflow:hidden;text-decoration:none;color:var(--text);display:flex;flex-direction:column;gap:12px}
+.app-card:hover{transform:translateY(-4px);border-color:rgba(245,166,35,.3);box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.app-card:active{transform:scale(.97)}
+.app-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:2px 2px 0 0;opacity:.8}
+
+.app-card.caisse::before{background:var(--accent)}
+.app-card.serveur::before{background:var(--blue)}
+.app-card.client::before{background:var(--green)}
+.app-card.qrcode::before{background:var(--purple)}
+
+.card-icon{font-size:36px;line-height:1}
+.card-title{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:1.5px;line-height:1}
+.card-desc{font-size:13px;color:var(--muted);line-height:1.5}
+.card-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:4px 10px;border-radius:20px;width:fit-content}
+
+.caisse .card-title{color:var(--accent)}
+.caisse .card-badge{background:rgba(245,166,35,.1);color:var(--accent);border:1px solid rgba(245,166,35,.2)}
+
+.serveur .card-title{color:var(--blue)}
+.serveur .card-badge{background:rgba(74,158,255,.1);color:var(--blue);border:1px solid rgba(74,158,255,.2)}
+
+.client .card-title{color:var(--green)}
+.client .card-badge{background:rgba(34,201,122,.1);color:var(--green);border:1px solid rgba(34,201,122,.2)}
+
+.qrcode .card-title{color:var(--purple)}
+.qrcode .card-badge{background:rgba(155,107,255,.1);color:var(--purple);border:1px solid rgba(155,107,255,.2)}
+
+/* Status bar */
+.status-section{margin-top:36px;padding:20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+.status-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1.5px;color:var(--muted);margin-bottom:12px}
+.status-row{display:flex;align-items:center;gap:10px;padding:8px 0}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.status-dot.on{background:var(--green);box-shadow:0 0 8px rgba(34,201,122,.4)}
+.status-dot.off{background:var(--red)}
+.status-label{font-size:13px;font-weight:600;flex:1}
+.status-val{font-size:12px;color:var(--muted)}
+
+/* Footer */
+.footer{text-align:center;margin-top:40px;padding-top:20px;border-top:1px solid var(--border)}
+.footer-text{font-size:11px;color:var(--muted);line-height:1.8}
+.footer-text a{color:var(--accent);text-decoration:none}
+
+/* Install banner */
+#install-banner{display:none;margin-top:24px;background:linear-gradient(135deg,rgba(245,166,35,.1),rgba(34,201,122,.08));border:1px solid rgba(245,166,35,.2);border-radius:var(--radius);padding:16px 20px;text-align:center}
+#install-banner.show{display:block}
+.install-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:6px}
+.install-desc{font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5}
+.install-btn{height:44px;padding:0 24px;border-radius:12px;background:var(--accent);color:#000;font-weight:800;font-size:14px;border:none;cursor:pointer;transition:transform .1s}
+.install-btn:active{transform:scale(.96)}
+
+/* Animations */
+.app-card{opacity:0;transform:translateY(20px);animation:fadeUp .4s ease forwards}
+.app-card:nth-child(1){animation-delay:.1s}
+.app-card:nth-child(2){animation-delay:.2s}
+.app-card:nth-child(3){animation-delay:.3s}
+.app-card:nth-child(4){animation-delay:.4s}
+@keyframes fadeUp{to{opacity:1;transform:translateY(0)}}
+.status-section{opacity:0;animation:fadeUp .4s ease .5s forwards}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <span class="logo-emoji">🍲</span>
+    <div class="logo-text">La <span>Marmite</span> Express</div>
+    <div class="tagline">Système de gestion restaurant</div>
+    <div class="header-line"></div>
+  </div>
+
+  <div class="grid">
+    <a href="marmite-express-caisse.html" class="app-card caisse">
+      <div class="card-icon">💰</div>
+      <div class="card-title">Caisse</div>
+      <div class="card-desc">Gestion des ventes, plan de salle, encaissements, administration du menu et historique TVA</div>
+      <div class="card-badge">🔒 Accès protégé</div>
+    </a>
+
+    <a href="serveur.html" class="app-card serveur">
+      <div class="card-icon">🍽️</div>
+      <div class="card-title">Serveur</div>
+      <div class="card-desc">Prise de commande depuis la salle avec choix cuisson, garniture et envoi en cuisine</div>
+      <div class="card-badge">📱 Optimisé mobile</div>
+    </a>
+
+    <a href="client.html" class="app-card client">
+      <div class="card-icon">📋</div>
+      <div class="card-title">Client</div>
+      <div class="card-desc">Interface de commande en ligne pour les clients — accessible via QR code sur chaque table</div>
+      <div class="card-badge">🔗 Via QR code</div>
+    </a>
+
+    <a href="qrcodes.html" class="app-card qrcode">
+      <div class="card-icon">🔲</div>
+      <div class="card-title">QR Codes</div>
+      <div class="card-desc">Génération et impression des QR codes à poser sur chaque table du restaurant</div>
+      <div class="card-badge">🖨️ Imprimable</div>
+    </a>
+  </div>
+
+  <!-- Install PWA banner -->
+  <div id="install-banner">
+    <div class="install-title">📲 Installer l'application</div>
+    <div class="install-desc">Ajoutez La Marmite Express à votre écran d'accueil pour un accès rapide, comme une vraie app !</div>
+    <button class="install-btn" id="install-btn" onclick="installPWA()">Installer</button>
+  </div>
+
+  <!-- Firebase status -->
+  <div class="status-section">
+    <div class="status-title">État du système</div>
+    <div class="status-row">
+      <div class="status-dot" id="dot-firebase"></div>
+      <div class="status-label">Firebase</div>
+      <div class="status-val" id="val-firebase">Vérification…</div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot" id="dot-menu"></div>
+      <div class="status-label">Menu publié</div>
+      <div class="status-val" id="val-menu">—</div>
+    </div>
+    <div class="status-row">
+      <div class="status-dot" id="dot-pwa"></div>
+      <div class="status-label">PWA installée</div>
+      <div class="status-val" id="val-pwa">—</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-text">
+      La Marmite Express — Système de caisse · Est. 2024<br>
+      Hébergé sur <a href="https://github.com" target="_blank">GitHub Pages</a>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",
+  authDomain: "la-marmitte-express.firebaseapp.com",
+  projectId: "la-marmitte-express",
+  storageBucket: "la-marmitte-express.firebasestorage.app",
+  messagingSenderId: "215969803476",
+  appId: "1:215969803476:web:39ee4de2cf4475f3c2df41"
+};
+
+try {
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  
+  document.getElementById('dot-firebase').classList.add('on');
+  document.getElementById('val-firebase').textContent = 'Connecté ✓';
+
+  // Check menu
+  onSnapshot(doc(db, 'config', 'menu'), snap => {
+    if(snap.exists()){
+      const data = snap.data();
+      const count = (data.products||[]).length;
+      const cats = (data.cats||[]).length;
+      document.getElementById('dot-menu').classList.add('on');
+      document.getElementById('val-menu').textContent = count+' produits · '+cats+' catégories';
+    } else {
+      document.getElementById('dot-menu').classList.add('off');
+      document.getElementById('val-menu').textContent = 'Non publié — ouvrez la Caisse → Publier';
+    }
+  });
+} catch(e){
+  document.getElementById('dot-firebase').classList.add('off');
+  document.getElementById('val-firebase').textContent = 'Erreur de connexion';
+}
+
+// PWA status
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+document.getElementById('dot-pwa').classList.add(isStandalone ? 'on' : 'off');
+document.getElementById('val-pwa').textContent = isStandalone ? 'Oui ✓' : 'Non — ajoutez à l\'écran d\'accueil';
+</script>
+
+<script>
+// PWA Install
+let deferredPrompt = null;
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById('install-banner').classList.add('show');
+});
+
+function installPWA(){
+  if(!deferredPrompt) return;
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(r => {
+    document.getElementById('install-banner').classList.remove('show');
+    deferredPrompt = null;
+  });
+}
+window.installPWA = installPWA;
+
+window.addEventListener('appinstalled', () => {
+  document.getElementById('install-banner').classList.remove('show');
+  document.getElementById('dot-pwa').classList.remove('off');
+  document.getElementById('dot-pwa').classList.add('on');
+  document.getElementById('val-pwa').textContent = 'Oui ✓';
+});
+
+// Register service worker
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+
+</body>
+</html>
