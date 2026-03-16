@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QR Codes — La Marmitte Express</title>
+<meta name="theme-color" content="#f5a623">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+const firebaseConfig={apiKey:"AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",authDomain:"la-marmitte-express.firebaseapp.com",projectId:"la-marmitte-express",storageBucket:"la-marmitte-express.firebasestorage.app",messagingSenderId:"215969803476",appId:"1:215969803476:web:39ee4de2cf4475f3c2df41"};
+const app=initializeApp(firebaseConfig);
+const db=getFirestore(app);
+
+onSnapshot(doc(db,'config','menu'), snap => {
+  if(!snap.exists()){
+    document.getElementById('status').textContent='❌ Plan de salle non publié. Ouvrez la Caisse → Publier.';
+    return;
+  }
+  const data=snap.data();
+  const layout=data.salleLayout||[];
+  const tables=layout.filter(e=>e.type==='table-round'||e.type==='table-rect');
+  if(!tables.length){
+    document.getElementById('status').textContent='❌ Aucune table trouvée dans le plan de salle.';
+    return;
+  }
+  document.getElementById('status').textContent='✅ '+tables.length+' tables trouvées — QR codes générés automatiquement';
+  document.getElementById('table-count').textContent=tables.length+' tables';
+  
+  // Detect base URL
+  const base=window.location.href.replace(/qrcodes\.html.*/,'')+'client.html';
+  
+  const grid=document.getElementById('qr-grid');
+  grid.innerHTML='';
+  tables.sort((a,b)=>(parseInt(a.number)||0)-(parseInt(b.number)||0));
+  tables.forEach(t=>{
+    const num=t.number||'?';
+    const url=base+'?table='+num+'&id='+t.id;
+    const card=document.createElement('div');
+    card.className='qr-card';
+    card.innerHTML=`
+      <div class="qr-num">TABLE ${num}</div>
+      <div class="qr-box" id="qr-${t.id}"></div>
+      <div class="qr-url">${url}</div>
+    `;
+    grid.appendChild(card);
+    // Generate QR
+    setTimeout(()=>{
+      new QRCode(document.getElementById('qr-'+t.id),{text:url,width:180,height:180,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    },50);
+  });
+});
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--text:#f0f0f0;--muted:#656878;--accent:#f5a623;--green:#22c97a;--radius:16px}
+html,body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.container{max-width:1100px;margin:0 auto;padding:24px 20px 60px}
+.hdr{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+.hdr a{height:34px;padding:0 14px;border-radius:10px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;display:flex;align-items:center;gap:4px}
+.title{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:2px}
+.title span{color:var(--accent)}
+.subtitle{font-size:12px;color:var(--muted);margin-top:2px}
+#status{font-size:12px;color:var(--muted);margin-bottom:16px;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:12px}
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:24px}
+#table-count{font-size:13px;font-weight:700;color:var(--accent)}
+.print-btn{height:40px;padding:0 20px;border-radius:12px;background:var(--accent);color:#000;font-weight:800;font-size:14px;border:none;cursor:pointer}
+.print-btn:active{transform:scale(.97)}
+#qr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.qr-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;text-align:center}
+.qr-num{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px;color:var(--accent);margin-bottom:12px}
+.qr-box{display:flex;justify-content:center;margin-bottom:10px}
+.qr-box img{border-radius:8px}
+.qr-url{font-size:8px;color:var(--muted);word-break:break-all;line-height:1.4}
+@media print{
+  body{background:#fff;color:#000}
+  .hdr,.toolbar,#status{display:none}
+  #qr-grid{grid-template-columns:repeat(2,1fr);gap:20px}
+  .qr-card{border:2px solid #000;break-inside:avoid;page-break-inside:avoid}
+  .qr-num{color:#000}
+  .qr-url{color:#666}
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="hdr">
+    <a href="index.html">← Accueil</a>
+    <div>
+      <div class="title">🔲 QR <span>Codes</span></div>
+      <div class="subtitle">Générés automatiquement depuis le plan de salle</div>
+    </div>
+  </div>
+  <div id="status">⏳ Chargement du plan de salle depuis Firebase…</div>
+  <div class="toolbar">
+    <div id="table-count">—</div>
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimer tout</button>
+  </div>
+  <div id="qr-grid"></div>
+</div>
+</body>
+</html>

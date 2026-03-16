@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cuisine — La Marmitte Express</title>
+<meta name="theme-color" content="#e84040">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, collection, onSnapshot, updateDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+const firebaseConfig = {
+  apiKey: "AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",
+  authDomain: "la-marmitte-express.firebaseapp.com",
+  projectId: "la-marmitte-express",
+  storageBucket: "la-marmitte-express.firebasestorage.app",
+  messagingSenderId: "215969803476",
+  appId: "1:215969803476:web:39ee4de2cf4475f3c2df41"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+let orders = {};
+let menuData = null;
+let drinkProductIds = new Set();
+let previousOrderCount = 0;
+let soundEnabled = true;
+
+// Load menu to identify drink categories
+onSnapshot(doc(db, 'config', 'menu'), snap => {
+  if(snap.exists()){
+    menuData = snap.data();
+    const drinkKw = ['boisson','bière','vin','cocktail','apéritif','digestif','soft','alcool','champagne','mousseux','rosé','blanc','rouge'];
+    const drinkCatIds = new Set();
+    (menuData.cats||[]).forEach(c => {
+      if(drinkKw.some(kw => c.name.toLowerCase().includes(kw))) drinkCatIds.add(c.id);
+    });
+    drinkProductIds = new Set();
+    (menuData.products||[]).forEach(p => {
+      if(drinkCatIds.has(p.cat)) drinkProductIds.add(p.id);
+    });
+  }
+});
+
+onSnapshot(collection(db, 'orders'), snap => {
+  const newOrders = {};
+  snap.forEach(d => newOrders[d.id] = {...d.data(), _id: d.id});
+  const activeStatuses = ['pending','received','preparing'];
+  const newActive = Object.values(newOrders).filter(o => activeStatuses.includes(o.status));
+  const oldActive = Object.values(orders).filter(o => activeStatuses.includes(o.status));
+  if(newActive.length > oldActive.length && previousOrderCount > 0){
+    playNotifSound();
+    if(Notification.permission === 'granted') new Notification('Nouvelle commande !', {body:'Commande en cuisine', icon:'icon-192.png'});
+  }
+  previousOrderCount = newActive.length;
+  orders = newOrders;
+  renderOrders();
+  updateStats();
+  document.getElementById('status-dot').classList.add('on');
+  document.getElementById('status-text').textContent = 'Connecté';
+});
+
+async function setStatus(id, s){ try{ await updateDoc(doc(db,'orders',id),{status:s,updatedAt:serverTimestamp()}); }catch(e){} }
+async function clearDone(id){ try{ await deleteDoc(doc(db,'orders',id)); }catch(e){} }
+window.setStatus = setStatus;
+window.clearDone = clearDone;
+
+function filterFood(items){
+  if(!items) return [];
+  return items.filter(i => !drinkProductIds.has(i.pid));
+}
+
+function renderOrders(){
+  const all = Object.values(orders).sort((a,b) => {
+    const t = x => x?.sentAt?.seconds || 0;
+    return t(a) - t(b);
+  });
+  const mapOrder = o => { const f=filterFood(o.items); return f.length>0?{...o,items:f}:null; };
+  const received = all.filter(o=>o.status==='received'||o.status==='pending').map(mapOrder).filter(Boolean);
+  const preparing = all.filter(o=>o.status==='preparing').map(mapOrder).filter(Boolean);
+  const ready = all.filter(o=>o.status==='ready').map(mapOrder).filter(Boolean);
+
+  document.getElementById('col-new').innerHTML = received.length ? received.map(o=>orderCard(o,'new')).join('') : '<div class="empty-col">Aucune commande</div>';
+  document.getElementById('col-prep').innerHTML = preparing.length ? preparing.map(o=>orderCard(o,'prep')).join('') : '<div class="empty-col">Rien en préparation</div>';
+  document.getElementById('col-ready').innerHTML = ready.length ? ready.map(o=>orderCard(o,'ready')).join('') : '<div class="empty-col">Rien de prêt</div>';
+
+  ['new','prep','ready'].forEach(k => {
+    const b=document.getElementById('badge-'+k);
+    const n=k==='new'?received.length:k==='prep'?preparing.length:ready.length;
+    b.textContent=n; b.style.display=n?'flex':'none';
+  });
+
+  // Summary
+  const activeItems = [...received,...preparing].flatMap(o=>o.items||[]);
+  const sum={};
+  activeItems.forEach(i=>{
+    const key=i.name;
+    if(!sum[key]) sum[key]={name:i.name,qty:0};
+    sum[key].qty+=i.qty;
+  });
+  const arr=Object.values(sum).sort((a,b)=>b.qty-a.qty);
+  document.getElementById('summary-bar').innerHTML = arr.length
+    ? arr.map(s=>`<div class="stag"><span class="stag-qty">${s.qty}×</span> ${s.name}</div>`).join('')
+    : '<div style="color:var(--muted);font-size:12px">Aucune commande active</div>';
+}
+
+function orderCard(o, type){
+  const items = o.items||[];
+  const tbl = o.tableNum ? 'Table '+o.tableNum : '?';
+  const time = o.sentAt?.toDate ? o.sentAt.toDate().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
+  let actions = '';
+  if(type==='new') actions=`<button class="obtn prep-btn" onclick="setStatus('${o._id}','preparing')">🔥 En préparation</button>`;
+  else if(type==='prep') actions=`<button class="obtn ready-btn" onclick="setStatus('${o._id}','ready')">✅ Prêt !</button>`;
+  else actions=`<button class="obtn done-btn" onclick="setStatus('${o._id}','served')">🍽️ Servi</button><button class="obtn clr-btn" onclick="clearDone('${o._id}')">✕</button>`;
+
+  return `<div class="ocard ${type}">
+    <div class="ocard-hd"><div class="ocard-tbl">${tbl}</div><div class="ocard-time">${time}</div></div>
+    <div class="ocard-body">
+      ${items.map(i=>{
+        const opts=[i.cuisson,i.garniture].filter(Boolean);
+        return `<div class="ocard-row">
+          <span class="ocard-qty">${i.qty}×</span>
+          <span class="ocard-nm">${i.name}</span>
+          ${opts.length?`<div class="ocard-tags">${opts.map(o=>`<span class="otag">${o}</span>`).join('')}</div>`:''}
+        </div>`;
+      }).join('')}
+    </div>
+    ${o.note?`<div class="ocard-note">⚠️ ALLERGÈNE : ${o.note}</div>`:''}
+    <div class="ocard-act">${actions}</div>
+  </div>`;
+}
+
+function updateStats(){
+  const all=Object.values(orders);
+  const active=all.filter(o=>['pending','received','preparing'].includes(o.status));
+  document.getElementById('stat-active').textContent=active.length;
+  const today=new Date().toDateString();
+  document.getElementById('stat-today').textContent=all.filter(o=>{const d=o.sentAt?.toDate?o.sentAt.toDate():null;return d&&d.toDateString()===today;}).length;
+}
+
+function playNotifSound(){
+  if(!soundEnabled) return;
+  try{
+    const ctx=new AudioContext();
+    [0,.15,.3].forEach((d,i)=>{const o=ctx.createOscillator();const g=ctx.createGain();o.connect(g);g.connect(ctx.destination);o.frequency.setValueAtTime([880,1100,1320][i],ctx.currentTime+d);g.gain.setValueAtTime(.25,ctx.currentTime+d);g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+d+.2);o.start(ctx.currentTime+d);o.stop(ctx.currentTime+d+.2);});
+  }catch(e){}
+}
+function toggleSound(){soundEnabled=!soundEnabled;document.getElementById('sound-btn').textContent=soundEnabled?'🔔':'🔕';}
+window.toggleSound=toggleSound;
+function toggleSummary(){document.getElementById('summary-panel').classList.toggle('open');}
+window.toggleSummary=toggleSummary;
+if('Notification' in window&&Notification.permission==='default')Notification.requestPermission();
+</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--text:#f0f0f0;--muted:#656878;--accent:#f5a623;--green:#22c97a;--red:#e84040;--blue:#4a9eff;--radius:14px}
+html,body{height:100%;height:100dvh;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);overflow:hidden;display:flex;flex-direction:column}
+.hdr{height:48px;display:flex;align-items:center;padding:0 10px;gap:8px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.hdr-logo{font-family:'Bebas Neue',sans-serif;font-size:17px;letter-spacing:1px}.hdr-logo span{color:var(--red)}
+.hdr-badge{font-size:8px;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(232,64,64,.12);color:var(--red);border:1px solid rgba(232,64,64,.2)}
+.hdr-stats{margin-left:auto;display:flex;gap:10px;align-items:center}
+.stat{text-align:center}.stat-v{font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--accent);line-height:1}.stat-l{font-size:7px;color:var(--muted);font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+.sbtn{width:32px;height:32px;border-radius:50%;background:var(--card);border:1px solid var(--border);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.status{display:flex;align-items:center;gap:4px;font-size:9px;font-weight:600}
+.sdot{width:6px;height:6px;border-radius:50%;background:var(--muted)}.sdot.on{background:var(--green);box-shadow:0 0 6px rgba(34,201,122,.4)}
+.hbtn{height:28px;padding:0 10px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:9px;font-weight:700;cursor:pointer;text-decoration:none;display:flex;align-items:center;gap:3px}
+.sum-btn{height:28px;padding:0 10px;border-radius:8px;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.2);color:var(--accent);font-size:9px;font-weight:700;cursor:pointer}
+
+/* Summary panel */
+#summary-panel{max-height:0;overflow:hidden;transition:max-height .3s;background:var(--surface);border-bottom:1px solid var(--border)}
+#summary-panel.open{max-height:180px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+#summary-bar{padding:8px 10px;display:flex;flex-wrap:wrap;gap:4px}
+.stag{display:flex;align-items:center;gap:3px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:3px 10px;font-size:12px;font-weight:600}
+.stag-qty{font-family:'Bebas Neue',sans-serif;font-size:17px;color:var(--accent)}
+
+/* Board */
+.board{display:flex;flex:1;min-height:0;overflow:hidden}
+.column{flex:1;display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--border)}.column:last-child{border-right:none}
+.col-hd{padding:8px 10px;display:flex;align-items:center;gap:5px;border-bottom:1px solid var(--border);flex-shrink:0}
+.col-t{font-family:'Bebas Neue',sans-serif;font-size:13px;letter-spacing:1.5px;flex:1}
+.col-b{min-width:18px;height:18px;padding:0 4px;border-radius:9px;font-size:9px;font-weight:800;display:none;align-items:center;justify-content:center}
+.col-new .col-t{color:var(--red)}.col-new .col-b{background:rgba(232,64,64,.15);color:var(--red)}
+.col-prep .col-t{color:var(--accent)}.col-prep .col-b{background:rgba(245,166,35,.15);color:var(--accent)}
+.col-ready .col-t{color:var(--green)}.col-ready .col-b{background:rgba(34,201,122,.15);color:var(--green)}
+.col-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:6px;display:flex;flex-direction:column;gap:6px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent}
+.col-scroll::-webkit-scrollbar{width:4px}.col-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:2px}
+.empty-col{padding:20px;text-align:center;color:var(--muted);font-size:11px}
+
+/* Cards */
+.ocard{background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.ocard.new{border-color:rgba(232,64,64,.5);animation:pulse 2s ease infinite}
+.ocard.prep{border-color:rgba(245,166,35,.35)}
+.ocard.ready{border-color:rgba(34,201,122,.35)}
+.ocard-hd{padding:6px 10px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border)}
+.ocard-tbl{font-family:'Bebas Neue',sans-serif;font-size:19px;color:var(--accent);flex:1}
+.ocard-time{font-size:10px;color:var(--muted);font-weight:600}
+.ocard-body{padding:6px 10px}
+.ocard-row{padding:3px 0;border-bottom:1px solid rgba(255,255,255,.03)}.ocard-row:last-child{border:none}
+.ocard-qty{font-family:'Bebas Neue',sans-serif;font-size:19px;color:var(--accent);margin-right:5px}
+.ocard-nm{font-size:14px;font-weight:700}
+.ocard-tags{display:flex;gap:3px;margin-top:2px;flex-wrap:wrap}
+.otag{font-size:11px;font-weight:700;color:#000;background:var(--accent);padding:1px 8px;border-radius:20px}
+.ocard-note{padding:6px 10px;background:rgba(232,64,64,.1);border-top:1px solid rgba(232,64,64,.15);font-size:13px;color:var(--red);font-weight:700}
+.ocard-act{padding:5px 8px;display:flex;gap:4px;border-top:1px solid var(--border)}
+.obtn{flex:1;height:36px;border-radius:10px;font-weight:700;font-size:12px;cursor:pointer;border:none;transition:all .1s}
+.obtn:active{transform:scale(.96)}
+.prep-btn{background:rgba(245,166,35,.15);color:var(--accent);border:1px solid rgba(245,166,35,.25)}
+.ready-btn{background:var(--green);color:#000}
+.done-btn{background:rgba(74,158,255,.12);color:var(--blue);border:1px solid rgba(74,158,255,.2);flex:3}
+.clr-btn{background:rgba(232,64,64,.1);color:var(--red);border:1px solid rgba(232,64,64,.15);flex:1;font-size:14px}
+@keyframes pulse{0%,100%{box-shadow:0 2px 15px rgba(232,64,64,.08)}50%{box-shadow:0 2px 25px rgba(232,64,64,.22)}}
+@media(max-width:768px){
+  .board{flex-direction:column}
+  .column{border-right:none;border-bottom:1px solid var(--border);flex:1;min-height:0}
+  .hdr{flex-wrap:wrap;height:auto;padding:6px 8px;gap:4px}
+}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <a href="index.html" class="hbtn">← Accueil</a>
+  <div class="hdr-logo">🔥 <span>Cuisine</span></div>
+  <div class="hdr-badge">EN DIRECT</div>
+  <div class="status"><div class="sdot" id="status-dot"></div><span id="status-text" style="color:var(--muted)">…</span></div>
+  <button class="sum-btn" onclick="toggleSummary()">📋 Résumé</button>
+  <div class="hdr-stats">
+    <div class="stat"><div class="stat-v" id="stat-active">0</div><div class="stat-l">En cours</div></div>
+    <div class="stat"><div class="stat-v" id="stat-today">0</div><div class="stat-l">Aujourd'hui</div></div>
+    <button class="sbtn" id="sound-btn" onclick="toggleSound()">🔔</button>
+  </div>
+</div>
+<div id="summary-panel"><div id="summary-bar"></div></div>
+<div class="board">
+  <div class="column col-new">
+    <div class="col-hd"><div class="col-t">🔴 Nouvelles</div><div class="col-b" id="badge-new">0</div></div>
+    <div class="col-scroll" id="col-new"><div class="empty-col">En attente…</div></div>
+  </div>
+  <div class="column col-prep">
+    <div class="col-hd"><div class="col-t">🟠 En préparation</div><div class="col-b" id="badge-prep">0</div></div>
+    <div class="col-scroll" id="col-prep"><div class="empty-col">Rien en préparation</div></div>
+  </div>
+  <div class="column col-ready">
+    <div class="col-hd"><div class="col-t">🟢 Prêts</div><div class="col-b" id="badge-ready">0</div></div>
+    <div class="col-scroll" id="col-ready"><div class="empty-col">Rien de prêt</div></div>
+  </div>
+</div>
+</body>
+</html>
