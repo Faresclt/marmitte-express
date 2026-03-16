@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Commander — La Marmitte Express</title>
+<meta name="theme-color" content="#f5a623">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",
+  authDomain: "la-marmitte-express.firebaseapp.com",
+  projectId: "la-marmitte-express",
+  storageBucket: "la-marmitte-express.firebasestorage.app",
+  messagingSenderId: "215969803476",
+  appId: "1:215969803476:web:39ee4de2cf4475f3c2df41"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+
+// Get table number from URL: client.html?table=3
+const params = new URLSearchParams(window.location.search);
+let tableNum = params.get('table') || null;
+let tableId = params.get('id') || (tableNum ? 't'+tableNum : null);
+
+let menu = null;
+let cart = [];
+let productImages = {};
+
+// Update page title and table display
+function updateTableDisplay(){
+  document.getElementById('table-display').textContent = tableNum || '?';
+  document.title = tableNum ? `Table ${tableNum} — Commander` : 'Serveur — La Marmitte Express';
+}
+updateTableDisplay();
+
+// Show table picker if no table selected
+function showTablePicker(){
+  const picker = document.getElementById('table-picker');
+  if(!picker) return;
+  if(!menu || !menu.salleLayout || !menu.salleLayout.length){
+    picker.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted)">Plan de salle non disponible.<br>Publiez depuis la caisse.</div>';
+    picker.style.display='flex';
+    return;
+  }
+  const tables = menu.salleLayout.filter(e=>e.type==='table-round'||e.type==='table-rect');
+  picker.innerHTML = `
+    <div style="width:100%;max-width:500px;padding:20px">
+      <div style="text-align:center;margin-bottom:20px">
+        <div style="font-size:36px;margin-bottom:8px">🍽️</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:2px">Choisir une <span style="color:var(--accent)">table</span></div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">Sélectionnez la table à servir</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:10px">
+        ${tables.map(t=>`
+          <button onclick="pickTable('${t.id}','${t.number||''}')" style="
+            height:80px;border-radius:14px;
+            background:var(--card);border:2px solid var(--border);
+            color:var(--text);cursor:pointer;
+            display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+            transition:all .15s;font-family:'DM Sans',sans-serif;
+          " onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+            <div style="font-family:'Bebas Neue',sans-serif;font-size:24px;color:var(--accent)">${t.number||'?'}</div>
+            <div style="font-size:10px;color:var(--muted);font-weight:600">${t.seats||0} cvts</div>
+          </button>`).join('')}
+      </div>
+    </div>`;
+  picker.style.display='flex';
+}
+
+function pickTable(id, num){
+  tableId = id;
+  tableNum = num;
+  updateTableDisplay();
+  document.getElementById('table-picker').style.display='none';
+  document.getElementById('app').style.display='flex';
+  renderMenu();
+}
+
+// Change table button
+function changeTable(){
+  cart = [];
+  updateCartBar();
+  document.getElementById('app').style.display='none';
+  showTablePicker();
+}
+
+window.pickTable = pickTable;
+window.changeTable = changeTable;
+
+// Load images from Firebase (batched)
+async function loadImages(batchCount){
+  for(let i=0; i<batchCount; i++){
+    try{
+      const snap = await getDoc(doc(db, 'config', 'images_'+i));
+      if(snap.exists()){
+        const data = snap.data();
+        if(data.images) Object.assign(productImages, data.images);
+      }
+    }catch(e){ console.warn('Image batch '+i+' load error:', e); }
+  }
+  renderMenu();
+}
+
+// Load menu
+onSnapshot(doc(db, 'config', 'menu'), snap => {
+  if(snap.exists()){
+    menu = snap.data();
+    // Store serveur PIN for lock screen
+    window._serveurPin = menu.serveurPin || null;
+    // If already unlocked or no PIN set, show app directly
+    if(!window._serveurPin || window._serveurPin === '0000' || sessionStorage.getItem('serveur_unlocked')==='1'){
+      unlockApp();
+    }
+    const b = menu.branding||{};
+    if(b.name) document.getElementById('resto-name').innerHTML = b.name.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>');
+    if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+    renderMenu();
+    if(menu.imageBatches && menu.imageBatches > 0){
+      loadImages(menu.imageBatches);
+    }
+  } else {
+    document.getElementById('loading').innerHTML='<div style="text-align:center;padding:40px"><div style="font-size:48px">⚠️</div><div style="color:#888;margin-top:12px">Carte non disponible.<br>Appelez un serveur.</div></div>';
+  }
+});
+
+function unlockApp(){
+  sessionStorage.setItem('serveur_unlocked','1');
+  const pin = document.getElementById('pin-screen');
+  if(pin) pin.style.display='none';
+  document.getElementById('loading').style.display='none';
+  // If table already set (from URL), go to menu directly
+  if(tableNum && tableId){
+    document.getElementById('app').style.display='flex';
+  } else {
+    // Show table picker
+    showTablePicker();
+  }
+  // Start listening to orders for notifications
+  startOrderNotifications();
+}
+window.unlockApp = unlockApp;
+
+// ── Order notifications (kitchen → serveur) ──
+let knownReadyOrders = new Set();
+let orderListenerStarted = false;
+
+function startOrderNotifications(){
+  if(orderListenerStarted) return;
+  orderListenerStarted = true;
+  
+  // Request notification permission
+  if('Notification' in window && Notification.permission === 'default'){
+    Notification.requestPermission();
+  }
+  
+  onSnapshot(collection(db, 'orders'), snap => {
+    snap.forEach(d => {
+      const order = d.data();
+      const id = d.id;
+      if(order.status === 'ready' && !knownReadyOrders.has(id)){
+        knownReadyOrders.add(id);
+        // Only notify if we have known orders (skip first load)
+        if(knownReadyOrders.size > 1 || orderListenerStarted){
+          const tNum = order.tableNum || order.tableId || '?';
+          showServeurNotif('🟢 Commande prête — Table '+tNum);
+          // Browser notification
+          if(Notification.permission === 'granted'){
+            new Notification('Commande prête !', {body: 'Table '+tNum+' — à servir', icon: 'icon-192.png'});
+          }
+        }
+      }
+      // Clean up served/deleted orders
+      if(order.status === 'served') knownReadyOrders.delete(id);
+    });
+  });
+}
+
+function showServeurNotif(msg){
+  // Sound
+  try{
+    const ctx = new AudioContext();
+    const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.setValueAtTime(660, ctx.currentTime);
+    o.frequency.setValueAtTime(880, ctx.currentTime+0.1);
+    o.frequency.setValueAtTime(1100, ctx.currentTime+0.2);
+    g.gain.setValueAtTime(0.3, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.4);
+    o.start(ctx.currentTime); o.stop(ctx.currentTime+0.4);
+  }catch(e){}
+  // Visual toast
+  let t = document.getElementById('serveur-toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'serveur-toast';
+    t.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%) translateY(-10px);padding:12px 20px;border-radius:14px;font-weight:700;font-size:13px;z-index:1000;pointer-events:none;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5);background:var(--green);color:#000;opacity:0;transition:all .25s';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  t.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateX(-50%) translateY(-10px)'; }, 4000);
+}
+
+function renderMenu(){
+  if(!menu) return;
+  const tabs = document.getElementById('menu-tabs');
+  const content = document.getElementById('menu-content');
+  const cats = menu.cats||[];
+  if(!cats.length) return;
+
+  let activeCat = tabs.dataset.active || cats[0]?.id;
+  tabs.innerHTML = cats.map(c=>`
+    <button class="mtab${activeCat===c.id?' active':''}" onclick="switchTab('${c.id}')">
+      ${c.icon||''} ${c.name}
+    </button>`).join('');
+  tabs.dataset.active = activeCat;
+
+  const prods = (menu.products||[]).filter(p=>p.cat===activeCat);
+  const sections = [];
+  prods.forEach(p=>{
+    const sec = p.section||'';
+    let s = sections.find(x=>x.name===sec);
+    if(!s){ s={name:sec,items:[]}; sections.push(s); }
+    s.items.push(p);
+  });
+
+  let html='';
+  sections.forEach(sec=>{
+    if(sec.name) html+=`<div class="sec-sep">${sec.name.toUpperCase()}</div>`;
+    sec.items.forEach(p=>{
+      const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
+      const img = productImages[p.id];
+      const imgHtml = img
+        ? `<div class="prod-img"><img src="${img}" alt="${p.name}" loading="lazy"></div>`
+        : '';
+      const outOfStock = p.stock!==undefined && p.stock>=0 && p.stock===0;
+      html+=`<div class="prod-card${img?' has-img':''}${outOfStock?' sold-out':''}">
+        ${imgHtml}
+        <div class="prod-info">
+          <div class="prod-name">${p.pdj?'⭐ ':''}${p.name}</div>
+          ${p.sub?`<div class="prod-sub">${p.sub}</div>`:''}
+          ${(p.hasCuisson||p.hasGarniture)?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${p.hasCuisson?'🔥 Cuisson':''}${p.hasCuisson&&p.hasGarniture?' · ':''}${p.hasGarniture?'🍟 Garniture':''}</div>`:''}
+          <div class="prod-price">${p.price.toFixed(2).replace('.',',')} €</div>
+        </div>
+        <div class="prod-actions">
+          ${outOfStock ? `<span style="font-size:12px;font-weight:700;color:var(--red);background:rgba(232,64,64,.1);padding:6px 14px;border-radius:20px">Épuisé</span>` :
+            inCart ? `
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--accent)">${inCart} dans le panier</span>
+              <button class="add-btn" onclick="addProduct('${p.id}',${p.price},'${esc(p.name)}')">+</button>
+            </div>` :
+            `<button class="add-btn" onclick="addProduct('${p.id}',${p.price},'${esc(p.name)}')">+ Ajouter</button>`
+          }
+        </div>
+      </div>`;
+    });
+  });
+  content.innerHTML = html||'<div style="padding:30px;text-align:center;color:#888">Aucun article</div>';
+}
+
+function changeQty(pid, price, delta, name, cuisson, garniture, tva){
+  const ex = cart.find(r=>r.pid===pid && (r.cuisson||'')===(cuisson||'') && (r.garniture||'')===(garniture||''));
+  if(ex){ ex.qty+=delta; if(ex.qty<=0) cart=cart.filter(r=>r!==ex); }
+  else if(delta>0) cart.push({pid,name,price:parseFloat(price),qty:1,tva:parseFloat(tva)||10,cuisson:cuisson||null,garniture:garniture||null});
+  updateCartBar();
+  renderMenu();
+}
+
+let pendingOptProduct = null;
+
+function addProduct(pid, price, name){
+  const p = (menu.products||[]).find(x=>x.id===pid);
+  if(p && (p.hasCuisson || p.hasGarniture)){
+    openOptionsModal(p);
+    return;
+  }
+  const tva = p ? (p.tva||10) : 10;
+  changeQty(pid, price, 1, name, null, null, tva);
+}
+
+function openOptionsModal(p){
+  pendingOptProduct = p;
+  const opts = menu.options||{};
+  const cuissons = opts.cuissons||[];
+  const garnitures = opts.garnitures||[];
+  let html = `<div style="font-size:16px;font-weight:700;margin-bottom:16px">${p.name}</div>`;
+  if(p.hasCuisson && cuissons.length){
+    html+=`<div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🔥 Cuisson</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-cuisson-btns">
+        ${cuissons.map((c,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${c}" onclick="selChip(this,'cuisson')">${c}</button>`).join('')}
+      </div>
+    </div>`;
+  }
+  if(p.hasGarniture && garnitures.length){
+    html+=`<div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🍟 Garniture</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-garniture-btns">
+        ${garnitures.map((g,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${g}" onclick="selChip(this,'garniture')">${g}</button>`).join('')}
+      </div>
+    </div>`;
+  }
+  html+=`<div style="display:flex;gap:8px;margin-top:8px">
+    <button onclick="closeOptModal()" style="flex:1;height:44px;border-radius:12px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-weight:700;font-size:14px;cursor:pointer">Annuler</button>
+    <button onclick="confirmOpt()" style="flex:1;height:44px;border-radius:12px;background:var(--accent);border:none;color:#000;font-weight:800;font-size:14px;cursor:pointer">✓ Ajouter</button>
+  </div>`;
+  document.getElementById('opt-modal-body').innerHTML = html;
+  document.getElementById('opt-modal').style.display = 'flex';
+}
+
+function selChip(el){
+  el.parentElement.querySelectorAll('.opt-chip').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+}
+
+function confirmOpt(){
+  if(!pendingOptProduct) return;
+  const p = pendingOptProduct;
+  const cuissonEl = document.querySelector('#opt-cuisson-btns .opt-chip.sel');
+  const garnitureEl = document.querySelector('#opt-garniture-btns .opt-chip.sel');
+  changeQty(p.id, p.price, 1, p.name, cuissonEl?cuissonEl.dataset.val:null, garnitureEl?garnitureEl.dataset.val:null, p.tva||10);
+  closeOptModal();
+}
+
+function closeOptModal(){
+  document.getElementById('opt-modal').style.display = 'none';
+  pendingOptProduct = null;
+}
+
+function updateCartBar(){
+  const count = cart.reduce((s,r)=>s+r.qty,0);
+  const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
+  const bar = document.getElementById('cart-bar');
+  bar.style.display = count ? 'flex' : 'none';
+  document.getElementById('cart-count').textContent = count+' article'+(count>1?'s':'');
+  document.getElementById('cart-total-bar').textContent = total.toFixed(2).replace('.',',')+'€';
+}
+
+function switchTab(id){
+  const tabs=document.getElementById('menu-tabs');
+  tabs.dataset.active=id;
+  renderMenu();
+}
+
+function openCartPanel(){
+  const panel = document.getElementById('cart-panel');
+  panel.style.display='flex';
+  document.getElementById('cp-error').style.display='none';
+  renderCartPanel();
+}
+function closeCartPanel(){ document.getElementById('cart-panel').style.display='none'; }
+
+function renderCartPanel(){
+  const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
+  document.getElementById('cp-items').innerHTML = cart.map(r=>{
+    const optTxt = [r.cuisson, r.garniture].filter(Boolean).join(' · ');
+    return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+      <div style="flex:1">
+        <div style="font-size:15px;font-weight:600">${r.name}</div>
+        ${optTxt?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${optTxt}</div>`:''}
+        <div style="font-size:12px;color:#888">${r.price.toFixed(2).replace('.',',')}€/u</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button onclick="changeQty('${r.pid}',${r.price},-1,'${esc(r.name)}','${r.cuisson||''}','${r.garniture||''}',${r.tva||10});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
+        <span style="font-family:'Bebas Neue',sans-serif;font-size:22px">${r.qty}</span>
+        <button onclick="changeQty('${r.pid}',${r.price},1,'${esc(r.name)}','${r.cuisson||''}','${r.garniture||''}',${r.tva||10});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
+      </div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:65px;text-align:right">${(r.qty*r.price).toFixed(2).replace('.',',')}€</div>
+    </div>`;
+  }).join('');
+  document.getElementById('cp-total').textContent = total.toFixed(2).replace('.',',')+'€';
+  document.getElementById('cp-send').disabled = !cart.length;
+}
+
+async function sendOrder(){
+  if(!cart.length) return;
+  const btn = document.getElementById('cp-send');
+  btn.disabled=true; btn.textContent='⏳ Envoi en cours...';
+  
+  // Timeout safety — si Firebase ne répond pas en 10s
+  const timeoutId = setTimeout(()=>{
+    btn.disabled=false; btn.textContent='✅ Confirmer la commande';
+    document.getElementById('cp-error').textContent='⚠️ Délai dépassé. Vérifiez votre connexion et réessayez.';
+    document.getElementById('cp-error').style.display='block';
+  }, 10000);
+  
+  try{
+    const note = document.getElementById('cp-note')?.value||'';
+    await addDoc(collection(db,'orders'),{
+      tableId,
+      tableNum: tableNum,
+      items: cart.map(r=>({pid:r.pid,name:r.name,price:r.price,qty:r.qty,tva:r.tva||10,cuisson:r.cuisson||null,garniture:r.garniture||null})),
+      note,
+      status: 'pending',
+      source: 'client',
+      sentAt: serverTimestamp()
+    });
+    clearTimeout(timeoutId);
+    cart=[];
+    updateCartBar();
+    closeCartPanel();
+    showConfirmation();
+  }catch(e){
+    clearTimeout(timeoutId);
+    btn.disabled=false; btn.textContent='✅ Confirmer la commande';
+    const errEl = document.getElementById('cp-error');
+    errEl.textContent = '❌ Erreur : '+e.message+'. Appelez un serveur.';
+    errEl.style.display='block';
+    console.error('Firebase error:',e);
+  }
+}
+
+function showConfirmation(){
+  document.getElementById('confirm-screen').style.display='flex';
+  setTimeout(()=>{
+    document.getElementById('confirm-screen').style.display='none';
+    renderMenu();
+  }, 3000);
+}
+
+function esc(s){ return String(s||'').replace(/'/g,"\\'"); }
+window.switchTab=switchTab; window.changeQty=changeQty; window.addProduct=addProduct;
+window.openCartPanel=openCartPanel; window.closeCartPanel=closeCartPanel;
+window.renderCartPanel=renderCartPanel; window.sendOrder=sendOrder;
+window.selChip=selChip; window.confirmOpt=confirmOpt; window.closeOptModal=closeOptModal;
+</script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--text:#f0f0f0;--muted:#6b7280;--green:#22c97a;--accent:#f5a623;--red:#e84040;--radius:16px}
+html{height:100%;height:100dvh}
+body{height:100%;height:100dvh;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;overflow:hidden}
+
+/* Header */
+#app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+.table-pill{background:var(--accent);color:#000;font-family:'Bebas Neue',sans-serif;font-size:18px;padding:4px 14px;border-radius:20px;letter-spacing:1px;flex-shrink:0}
+#resto-name{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px}
+.tagline{font-size:10px;color:var(--muted);font-weight:700}
+
+/* Main app */
+#app{flex:1;display:none;flex-direction:column;overflow:hidden;min-height:0}
+#loading{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+
+/* Tabs */
+#menu-tabs{display:flex;gap:8px;padding:10px 16px;overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;scrollbar-width:none}
+#menu-tabs::-webkit-scrollbar{display:none}
+.mtab{height:36px;padding:0 16px;border-radius:20px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .15s;flex-shrink:0}
+.mtab.active{background:rgba(245,166,35,.15);border-color:var(--accent);color:var(--accent)}
+
+/* Products */
+#menu-content{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-bottom:110px;min-height:0}
+.sec-sep{padding:8px 16px;font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--muted);background:rgba(255,255,255,.02);border-top:1px solid var(--border);margin-top:6px}
+.prod-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.prod-card.sold-out{opacity:.5}
+.prod-img{width:64px;height:64px;border-radius:12px;overflow:hidden;flex-shrink:0;background:var(--card)}
+.prod-img img{width:100%;height:100%;object-fit:cover;display:block}
+.prod-info{flex:1}
+.prod-name{font-size:15px;font-weight:600;margin-bottom:2px}
+.prod-sub{font-size:12px;color:var(--muted);margin-bottom:6px;line-height:1.4}
+.prod-price{font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--green)}
+.prod-actions{flex-shrink:0}
+.add-btn{height:36px;padding:0 16px;border-radius:20px;background:rgba(245,166,35,.15);border:1px solid rgba(245,166,35,.3);color:var(--accent);font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
+.add-btn:active{background:rgba(245,166,35,.3)}
+.qty-ctrl{display:flex;align-items:center;gap:8px}
+.qty-ctrl button{width:32px;height:32px;border-radius:50%;border:none;font-size:18px;font-weight:700;cursor:pointer}
+.qty-ctrl button:first-child{background:rgba(232,64,64,.12);color:var(--red)}
+.qty-ctrl button:last-child{background:rgba(34,201,122,.12);color:var(--green)}
+.qty-ctrl span{font-family:'Bebas Neue',sans-serif;font-size:22px;min-width:24px;text-align:center}
+
+/* Cart bar */
+#cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--accent);padding:14px 20px;display:none;align-items:center;justify-content:space-between;cursor:pointer;z-index:40}
+#cart-count{font-size:14px;font-weight:700;color:#000}
+#cart-total-bar{font-family:'Bebas Neue',sans-serif;font-size:20px;color:#000}
+.cart-arrow{font-size:18px;color:#000}
+
+/* Cart panel */
+#cart-panel{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;display:none;align-items:flex-end}
+.cart-inner{background:var(--surface);border-radius:24px 24px 0 0;width:100%;max-height:88dvh;display:flex;flex-direction:column}
+.cp-handle{width:40px;height:4px;border-radius:2px;background:var(--border);margin:12px auto 4px;flex-shrink:0}
+.cp-header{padding:10px 16px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.cp-header h3{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px}
+.cp-close{width:32px;height:32px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:16px;cursor:pointer}
+#cp-items{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 16px;min-height:0}
+.cp-footer{padding:14px 16px;border-top:1px solid var(--border)}
+#cp-note{width:100%;height:50px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--text);resize:none;margin-bottom:10px;font-family:'DM Sans',sans-serif}
+#cp-note:focus{border-color:var(--accent);outline:none}
+.cp-total-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.cp-total-lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+#cp-total{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--green)}
+#cp-send{width:100%;height:54px;border-radius:var(--radius);background:var(--accent);color:#000;font-size:16px;font-weight:800;cursor:pointer;border:none;letter-spacing:.5px;transition:opacity .15s}
+#cp-send:disabled{opacity:.4;cursor:not-allowed}
+
+/* Confirmation screen */
+#confirm-screen{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.confirm-icon{font-size:72px;animation:pop .4s ease}
+@keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.2)}100%{transform:scale(1)}}
+.confirm-title{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:var(--green)}
+.confirm-sub{font-size:14px;color:var(--muted);text-align:center;line-height:1.6}
+
+/* Options modal */
+#opt-modal{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:150;display:none;align-items:center;justify-content:center;padding:16px}
+#opt-modal-inner{background:var(--surface);border-radius:20px;width:100%;max-width:360px;padding:20px;border:1px solid var(--border)}
+.opt-chip{height:36px;padding:0 14px;border-radius:20px;background:var(--card);border:1.5px solid var(--border);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+.opt-chip:active{transform:scale(.95)}
+.opt-chip.sel{border-color:var(--accent);background:rgba(245,166,35,.12);color:var(--accent)}
+
+/* PIN lock screen */
+#pin-screen{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:0}
+.pin-logo{font-size:48px;margin-bottom:8px}
+.pin-title{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:2px;margin-bottom:4px}
+.pin-title span{color:var(--accent)}
+.pin-sub{font-size:12px;color:var(--muted);margin-bottom:24px}
+.pin-dots{display:flex;gap:12px;margin-bottom:24px}
+.pin-dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);transition:all .15s}
+.pin-dot.filled{background:var(--accent);border-color:var(--accent)}
+.pin-numpad{display:grid;grid-template-columns:repeat(3,72px);gap:10px}
+.pin-key{height:58px;border-radius:14px;background:var(--card);border:1px solid var(--border);color:var(--text);font-size:22px;font-weight:600;cursor:pointer;transition:all .1s;display:flex;align-items:center;justify-content:center}
+.pin-key:active{transform:scale(.92);background:var(--accent);color:#000}
+.pin-key.del{background:rgba(232,64,64,.08);color:var(--red);border-color:rgba(232,64,64,.15);font-size:18px}
+.pin-key.zero{grid-column:span 2}
+.pin-error{font-size:12px;color:var(--red);margin-top:12px;height:16px;opacity:0;transition:opacity .2s}
+@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
+.shake{animation:shake .4s ease}
+</style>
+</head>
+<body>
+
+<!-- PIN LOCK SCREEN -->
+<div id="pin-screen">
+  <div class="pin-logo">🍽️</div>
+  <div class="pin-title">Espace <span>Serveur</span></div>
+  <div class="pin-sub">Entrez le code d'accès</div>
+  <div class="pin-dots" id="pin-dots">
+    <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+  </div>
+  <div class="pin-numpad">
+    <button class="pin-key" onclick="pinPress('1')">1</button>
+    <button class="pin-key" onclick="pinPress('2')">2</button>
+    <button class="pin-key" onclick="pinPress('3')">3</button>
+    <button class="pin-key" onclick="pinPress('4')">4</button>
+    <button class="pin-key" onclick="pinPress('5')">5</button>
+    <button class="pin-key" onclick="pinPress('6')">6</button>
+    <button class="pin-key" onclick="pinPress('7')">7</button>
+    <button class="pin-key" onclick="pinPress('8')">8</button>
+    <button class="pin-key" onclick="pinPress('9')">9</button>
+    <button class="pin-key zero" onclick="pinPress('0')">0</button>
+    <button class="pin-key del" onclick="pinPress('del')">⌫</button>
+  </div>
+  <div class="pin-error" id="pin-error">Code incorrect</div>
+</div>
+
+<div id="app-header">
+  <a href="index.html" style="text-decoration:none">
+    <div class="table-pill" style="background:var(--blue)">🍽️ SERVEUR</div>
+  </a>
+  <div class="table-pill" id="table-pill-num" onclick="changeTable()" style="cursor:pointer" title="Changer de table">TABLE <span id="table-display">?</span> ✎</div>
+  <div style="flex:1">
+    <div id="resto-name">La <span style="color:var(--accent)">Marmitte</span> Express</div>
+    <div class="tagline">PRISE DE COMMANDE</div>
+  </div>
+</div>
+
+<div id="loading">
+  <div style="text-align:center">
+    <div style="font-size:40px;margin-bottom:12px">⏳</div>
+    <div style="font-size:14px">Chargement de la carte…</div>
+  </div>
+</div>
+
+<!-- Table picker (shown when no table selected) -->
+<div id="table-picker" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:50;align-items:center;justify-content:center;overflow-y:auto"></div>
+
+<div id="app">
+  <div id="menu-tabs"></div>
+  <div id="menu-content"></div>
+</div>
+
+<!-- Cart sticky bar -->
+<div id="cart-bar" onclick="openCartPanel()">
+  <div id="cart-count">0 article</div>
+  <div id="cart-total-bar">0,00€</div>
+  <div class="cart-arrow">→</div>
+</div>
+
+<!-- Cart panel -->
+<div id="cart-panel" onclick="if(event.target===this)closeCartPanel()">
+  <div class="cart-inner">
+    <div class="cp-handle"></div>
+    <div class="cp-header">
+      <h3>🛒 Votre commande</h3>
+      <button class="cp-close" onclick="closeCartPanel()">✕</button>
+    </div>
+    <div id="cp-items"></div>
+    <div class="cp-footer">
+      <textarea id="cp-note" placeholder="Note pour la cuisine (allergies, cuisson…)"></textarea>
+      <div id="cp-error" style="display:none;font-size:12px;color:#e84040;margin-bottom:10px;padding:10px;background:rgba(232,64,64,.08);border-radius:8px;border:1px solid rgba(232,64,64,.2)"></div>
+      <div class="cp-total-row">
+        <div class="cp-total-lbl">Total</div>
+        <div id="cp-total">0,00€</div>
+      </div>
+      <button id="cp-send" onclick="sendOrder()" disabled>✅ Confirmer la commande</button>
+    </div>
+  </div>
+</div>
+
+<!-- Options modal -->
+<div id="opt-modal" onclick="if(event.target===this)closeOptModal()">
+  <div id="opt-modal-inner">
+    <div id="opt-modal-body"></div>
+  </div>
+</div>
+
+<!-- Confirmation -->
+<div id="confirm-screen">
+  <div class="confirm-icon">🎉</div>
+  <div class="confirm-title">Commande envoyée !</div>
+  <div class="confirm-sub">Votre commande a bien été transmise.<br>Un serveur s'occupera de vous.</div>
+</div>
+
+<!-- PIN logic -->
+<script>
+let pinEntry = '';
+
+function pinPress(v){
+  if(v==='del'){
+    pinEntry=pinEntry.slice(0,-1);
+  } else {
+    if(pinEntry.length>=4) return;
+    pinEntry+=v;
+  }
+  updatePinDots();
+  if(pinEntry.length===4) checkPin();
+}
+
+function updatePinDots(){
+  const dots=document.querySelectorAll('#pin-dots .pin-dot');
+  dots.forEach((d,i)=>d.classList.toggle('filled',i<pinEntry.length));
+}
+
+function checkPin(){
+  const correctPin = window._serveurPin;
+  if(!correctPin || correctPin==='0000' || pinEntry===correctPin){
+    // Success
+    if(window.unlockApp) window.unlockApp();
+  } else {
+    // Wrong
+    const dots=document.getElementById('pin-dots');
+    dots.classList.add('shake');
+    document.getElementById('pin-error').style.opacity='1';
+    setTimeout(()=>{
+      dots.classList.remove('shake');
+      document.getElementById('pin-error').style.opacity='0';
+      pinEntry='';
+      updatePinDots();
+    },900);
+  }
+}
+
+// Keyboard support
+document.addEventListener('keydown', e=>{
+  const pinVisible = document.getElementById('pin-screen')?.style.display!=='none';
+  if(!pinVisible) return;
+  if(e.key>='0'&&e.key<='9') pinPress(e.key);
+  else if(e.key==='Backspace') pinPress('del');
+});
+
+window.pinPress = pinPress;
+</script>
+
+</body>
+</html>
