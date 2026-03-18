@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Commander — La Marmitte Express</title>
+<meta name="theme-color" content="#f5a623">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",
+  authDomain: "la-marmitte-express.firebaseapp.com",
+  projectId: "la-marmitte-express",
+  storageBucket: "la-marmitte-express.firebasestorage.app",
+  messagingSenderId: "215969803476",
+  appId: "1:215969803476:web:39ee4de2cf4475f3c2df41"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+
+// Get table number from URL: client.html?table=3
+const params = new URLSearchParams(window.location.search);
+const tableNum = params.get('table') || '?';
+const tableId = params.get('id') || ('t'+tableNum);
+
+let menu = null;
+let cart = [];
+let productImages = {}; // {productId: base64_thumbnail}
+
+// Update page title and table display
+document.getElementById('table-display').textContent = tableNum;
+document.title = `Table ${tableNum} — Commander`;
+
+// Load images from Firebase (batched)
+async function loadImages(batchCount){
+  for(let i=0; i<batchCount; i++){
+    try{
+      const snap = await getDoc(doc(db, 'config', 'images_'+i));
+      if(snap.exists()){
+        const data = snap.data();
+        if(data.images) Object.assign(productImages, data.images);
+      }
+    }catch(e){ console.warn('Image batch '+i+' load error:', e); }
+  }
+  // Re-render with images
+  renderMenu();
+}
+
+// Load menu
+onSnapshot(doc(db, 'config', 'menu'), snap => {
+  if(snap.exists()){
+    menu = snap.data();
+    // Apply branding
+    const b = menu.branding||{};
+    if(b.name) document.getElementById('resto-name').innerHTML = b.name.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>');
+    if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+    renderMenu();
+    document.getElementById('loading').style.display='none';
+    document.getElementById('app').style.display='flex';
+    // Load images if available
+    if(menu.imageBatches && menu.imageBatches > 0){
+      loadImages(menu.imageBatches);
+    }
+  } else {
+    document.getElementById('loading').innerHTML='<div style="text-align:center;padding:40px"><div style="font-size:48px">⚠️</div><div style="color:#888;margin-top:12px">Carte non disponible.<br>Appelez un serveur.</div></div>';
+  }
+});
+
+function renderMenu(){
+  if(!menu) return;
+  const tabs = document.getElementById('menu-tabs');
+  const content = document.getElementById('menu-content');
+  const cats = menu.cats||[];
+  if(!cats.length) return;
+
+  let activeCat = tabs.dataset.active || cats[0]?.id;
+  tabs.innerHTML = cats.map(c=>`
+    <button class="mtab${activeCat===c.id?' active':''}" onclick="switchTab('${c.id}')">
+      ${c.icon||''} ${c.name}
+    </button>`).join('');
+  tabs.dataset.active = activeCat;
+
+  const prods = (menu.products||[]).filter(p=>p.cat===activeCat);
+  const sections = [];
+  prods.forEach(p=>{
+    const sec = p.section||'';
+    let s = sections.find(x=>x.name===sec);
+    if(!s){ s={name:sec,items:[]}; sections.push(s); }
+    s.items.push(p);
+  });
+
+  let html='';
+  sections.forEach(sec=>{
+    if(sec.name) html+=`<div class="sec-sep">${sec.name.toUpperCase()}</div>`;
+    sec.items.forEach(p=>{
+      const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
+      const img = (p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null);
+      const imgHtml = img 
+        ? `<div class="prod-img"><img src="${img}" alt="${p.name}" loading="lazy"></div>` 
+        : '';
+      const outOfStock = p.stock!==undefined && p.stock>=0 && p.stock===0;
+      html+=`<div class="prod-card${img?' has-img':''}${outOfStock?' sold-out':''}">
+        ${imgHtml}
+        <div class="prod-info">
+          <div class="prod-name">${p.pdj?'⭐ ':''}${(p.pdj && menu.platDuJour && menu.platDuJour.nom) ? menu.platDuJour.nom : p.name}</div>
+          ${p.sub?`<div class="prod-sub">${p.sub}</div>`:''}
+          ${(p.hasCuisson||p.hasGarniture)?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${p.hasCuisson?'🔥 Cuisson':''}${p.hasCuisson&&p.hasGarniture?' · ':''}${p.hasGarniture?'🍟 Garniture':''}</div>`:''}
+          <div class="prod-price">${p.price.toFixed(2).replace('.',',')} €</div>
+        </div>
+        <div class="prod-actions">
+          ${outOfStock ? `<span style="font-size:12px;font-weight:700;color:var(--red);background:rgba(232,64,64,.1);padding:6px 14px;border-radius:20px">Épuisé</span>` :
+            inCart ? `
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--accent)">${inCart} dans le panier</span>
+              <button class="add-btn" onclick="addProduct('${p.id}',${p.price},'${esc(p.name)}')">+</button>
+            </div>` :
+            `<button class="add-btn" onclick="addProduct('${p.id}',${p.price},'${esc(p.name)}')">+ Ajouter</button>`
+          }
+        </div>
+      </div>`;
+    });
+  });
+  content.innerHTML = html||'<div style="padding:30px;text-align:center;color:#888">Aucun article</div>';
+}
+
+function changeQty(pid, price, delta, name, cuisson, garniture, tva){
+  // For products with options, find by pid+cuisson+garniture
+  const ex = cart.find(r=>r.pid===pid && (r.cuisson||'')===(cuisson||'') && (r.garniture||'')===(garniture||''));
+  if(ex){ ex.qty+=delta; if(ex.qty<=0) cart=cart.filter(r=>r!==ex); }
+  else if(delta>0) cart.push({pid,name,price:parseFloat(price),qty:1,tva:parseFloat(tva)||10,cuisson:cuisson||null,garniture:garniture||null});
+  updateCartBar();
+  renderMenu();
+}
+
+// Options picker for products with cuisson/garniture
+let pendingOptProduct = null;
+
+function addProduct(pid, price, name){
+  const p = (menu.products||[]).find(x=>x.id===pid);
+  if(p && (p.hasCuisson || p.hasGarniture)){
+    openOptionsModal(p);
+    return;
+  }
+  const tva = p ? (p.tva||10) : 10;
+  changeQty(pid, price, 1, name, null, null, tva);
+}
+
+function openOptionsModal(p){
+  pendingOptProduct = p;
+  const opts = menu.options||{};
+  const cuissons = opts.cuissons||[];
+  const garnitures = opts.garnitures||[];
+  let html = `<div style="font-size:16px;font-weight:700;margin-bottom:16px">${p.name}</div>`;
+  if(p.hasCuisson && cuissons.length){
+    html+=`<div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🔥 Cuisson</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-cuisson-btns">
+        ${cuissons.map((c,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${c}" onclick="selChip(this,'cuisson')">${c}</button>`).join('')}
+      </div>
+    </div>`;
+  }
+  if(p.hasGarniture && garnitures.length){
+    html+=`<div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🍟 Garniture</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-garniture-btns">
+        ${garnitures.map((g,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${g}" onclick="selChip(this,'garniture')">${g}</button>`).join('')}
+      </div>
+    </div>`;
+  }
+  html+=`<div style="display:flex;gap:8px;margin-top:8px">
+    <button onclick="closeOptModal()" style="flex:1;height:44px;border-radius:12px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-weight:700;font-size:14px;cursor:pointer">Annuler</button>
+    <button onclick="confirmOpt()" style="flex:1;height:44px;border-radius:12px;background:var(--accent);border:none;color:#000;font-weight:800;font-size:14px;cursor:pointer">✓ Ajouter</button>
+  </div>`;
+  document.getElementById('opt-modal-body').innerHTML = html;
+  document.getElementById('opt-modal').style.display = 'flex';
+}
+
+function selChip(el, group){
+  el.parentElement.querySelectorAll('.opt-chip').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel');
+}
+
+function confirmOpt(){
+  if(!pendingOptProduct) return;
+  const p = pendingOptProduct;
+  const cuissonEl = document.querySelector('#opt-cuisson-btns .opt-chip.sel');
+  const garnitureEl = document.querySelector('#opt-garniture-btns .opt-chip.sel');
+  const cuisson = cuissonEl ? cuissonEl.dataset.val : null;
+  const garniture = garnitureEl ? garnitureEl.dataset.val : null;
+  changeQty(p.id, p.price, 1, p.name, cuisson, garniture, p.tva||10);
+  closeOptModal();
+}
+
+function closeOptModal(){
+  document.getElementById('opt-modal').style.display = 'none';
+  pendingOptProduct = null;
+}
+
+function updateCartBar(){
+  const count = cart.reduce((s,r)=>s+r.qty,0);
+  const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
+  const bar = document.getElementById('cart-bar');
+  bar.style.display = count ? 'flex' : 'none';
+  document.getElementById('cart-count').textContent = count+' article'+(count>1?'s':'');
+  document.getElementById('cart-total-bar').textContent = total.toFixed(2).replace('.',',')+'€';
+}
+
+function switchTab(id){
+  const tabs=document.getElementById('menu-tabs');
+  tabs.dataset.active=id;
+  renderMenu();
+}
+
+function openCartPanel(){
+  const panel = document.getElementById('cart-panel');
+  panel.style.display='flex';
+  renderCartPanel();
+}
+function closeCartPanel(){ document.getElementById('cart-panel').style.display='none'; }
+
+function renderCartPanel(){
+  const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
+  document.getElementById('cp-items').innerHTML = cart.map(r=>{
+    const optTxt = [r.cuisson, r.garniture].filter(Boolean).join(' · ');
+    return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+      <div style="flex:1">
+        <div style="font-size:15px;font-weight:600">${r.name}</div>
+        ${optTxt?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${optTxt}</div>`:''}
+        <div style="font-size:12px;color:#888">${r.price.toFixed(2).replace('.',',')}€/u</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button onclick="changeQty('${r.pid}',${r.price},-1,'${esc(r.name)}','${r.cuisson||''}','${r.garniture||''}',${r.tva||10});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
+        <span style="font-family:'Bebas Neue',sans-serif;font-size:22px">${r.qty}</span>
+        <button onclick="changeQty('${r.pid}',${r.price},1,'${esc(r.name)}','${r.cuisson||''}','${r.garniture||''}',${r.tva||10});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
+      </div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:65px;text-align:right">${(r.qty*r.price).toFixed(2).replace('.',',')}€</div>
+    </div>`;
+  }).join('');
+  document.getElementById('cp-total').textContent = total.toFixed(2).replace('.',',')+'€';
+  document.getElementById('cp-send').disabled = !cart.length;
+}
+
+async function sendOrder(){
+  if(!cart.length) return;
+  const btn = document.getElementById('cp-send');
+  btn.disabled=true; btn.textContent='Envoi en cours...';
+  try{
+    const note = document.getElementById('cp-note')?.value||'';
+    await addDoc(collection(db,'orders'),{
+      tableId,
+      tableNum: tableNum,
+      items: cart.map(r=>({pid:r.pid,name:r.name,price:r.price,qty:r.qty,tva:r.tva||10,cuisson:r.cuisson||null,garniture:r.garniture||null})),
+      note,
+      status: 'pending',
+      source: 'client',
+      sentAt: serverTimestamp()
+    });
+    cart=[];
+    updateCartBar();
+    closeCartPanel();
+    showConfirmation();
+  }catch(e){
+    btn.disabled=false; btn.textContent='✅ Confirmer la commande';
+    alert('Erreur de connexion. Réessayez ou appelez un serveur.');
+  }
+}
+
+function showConfirmation(){
+  document.getElementById('confirm-screen').style.display='flex';
+  setTimeout(()=>{
+    document.getElementById('confirm-screen').style.display='none';
+    renderMenu();
+  }, 3000);
+}
+
+function esc(s){ return String(s||'').replace(/'/g,"\\'"); }
+window.switchTab=switchTab; window.changeQty=changeQty; window.addProduct=addProduct;
+window.openCartPanel=openCartPanel; window.closeCartPanel=closeCartPanel;
+window.renderCartPanel=renderCartPanel; window.sendOrder=sendOrder;
+window.selChip=selChip; window.confirmOpt=confirmOpt; window.closeOptModal=closeOptModal;
+</script>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--text:#f0f0f0;--muted:#6b7280;--green:#22c97a;--accent:#f5a623;--red:#e84040;--radius:16px}
+html,body{height:100%;overflow:hidden}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column}
+
+/* Header */
+#app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+.table-pill{background:var(--accent);color:#000;font-family:'Bebas Neue',sans-serif;font-size:18px;padding:4px 14px;border-radius:20px;letter-spacing:1px}
+#resto-name{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px}
+.tagline{font-size:10px;color:var(--muted);font-weight:700}
+
+/* Main app */
+#app{flex:1;display:none;flex-direction:column;overflow:hidden}
+#loading{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+
+/* Tabs */
+#menu-tabs{display:flex;gap:8px;padding:10px 16px;overflow-x:auto;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;scrollbar-width:none}
+#menu-tabs::-webkit-scrollbar{display:none}
+.mtab{height:36px;padding:0 16px;border-radius:20px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .15s;flex-shrink:0}
+.mtab.active{background:rgba(245,166,35,.15);border-color:var(--accent);color:var(--accent)}
+
+/* Products */
+#menu-content{flex:1;overflow-y:auto;padding-bottom:100px}
+.sec-sep{padding:8px 16px;font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--muted);background:rgba(255,255,255,.02);border-top:1px solid var(--border);margin-top:6px}
+.prod-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.prod-card.sold-out{opacity:.5}
+.prod-img{width:64px;height:64px;border-radius:12px;overflow:hidden;flex-shrink:0;background:var(--card)}
+.prod-img img{width:100%;height:100%;object-fit:cover;display:block}
+.prod-info{flex:1}
+.prod-name{font-size:15px;font-weight:600;margin-bottom:2px}
+.prod-sub{font-size:12px;color:var(--muted);margin-bottom:6px;line-height:1.4}
+.prod-price{font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--green)}
+.prod-actions{flex-shrink:0}
+.add-btn{height:36px;padding:0 16px;border-radius:20px;background:rgba(245,166,35,.15);border:1px solid rgba(245,166,35,.3);color:var(--accent);font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
+.add-btn:active{background:rgba(245,166,35,.3)}
+.qty-ctrl{display:flex;align-items:center;gap:8px}
+.qty-ctrl button{width:32px;height:32px;border-radius:50%;border:none;font-size:18px;font-weight:700;cursor:pointer}
+.qty-ctrl button:first-child{background:rgba(232,64,64,.12);color:var(--red)}
+.qty-ctrl button:last-child{background:rgba(34,201,122,.12);color:var(--green)}
+.qty-ctrl span{font-family:'Bebas Neue',sans-serif;font-size:22px;min-width:24px;text-align:center}
+
+/* Cart bar */
+#cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--accent);padding:14px 20px;display:none;align-items:center;justify-content:space-between;cursor:pointer;z-index:40}
+#cart-count{font-size:14px;font-weight:700;color:#000}
+#cart-total-bar{font-family:'Bebas Neue',sans-serif;font-size:20px;color:#000}
+.cart-arrow{font-size:18px;color:#000}
+
+/* Cart panel */
+#cart-panel{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;display:none;align-items:flex-end}
+.cart-inner{background:var(--surface);border-radius:24px 24px 0 0;width:100%;max-height:88vh;display:flex;flex-direction:column}
+.cp-handle{width:40px;height:4px;border-radius:2px;background:var(--border);margin:12px auto 4px}
+.cp-header{padding:10px 16px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.cp-header h3{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px}
+.cp-close{width:32px;height:32px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:16px;cursor:pointer}
+#cp-items{flex:1;overflow-y:auto;padding:0 16px}
+.cp-footer{padding:14px 16px;border-top:1px solid var(--border)}
+#cp-note{width:100%;height:50px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--text);resize:none;margin-bottom:10px;font-family:'DM Sans',sans-serif}
+#cp-note:focus{border-color:var(--accent);outline:none}
+.cp-total-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.cp-total-lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+#cp-total{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--green)}
+#cp-send{width:100%;height:54px;border-radius:var(--radius);background:var(--accent);color:#000;font-size:16px;font-weight:800;cursor:pointer;border:none;letter-spacing:.5px;transition:opacity .15s}
+#cp-send:disabled{opacity:.4;cursor:not-allowed}
+
+/* Confirmation screen */
+#confirm-screen{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.confirm-icon{font-size:72px;animation:pop .4s ease}
+@keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.2)}100%{transform:scale(1)}}
+.confirm-title{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:var(--green)}
+.confirm-sub{font-size:14px;color:var(--muted);text-align:center;line-height:1.6}
+
+/* Options modal */
+#opt-modal{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:150;display:none;align-items:center;justify-content:center;padding:16px}
+#opt-modal-inner{background:var(--surface);border-radius:20px;width:100%;max-width:360px;padding:20px;border:1px solid var(--border)}
+.opt-chip{height:36px;padding:0 14px;border-radius:20px;background:var(--card);border:1.5px solid var(--border);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+.opt-chip:active{transform:scale(.95)}
+.opt-chip.sel{border-color:var(--accent);background:rgba(245,166,35,.12);color:var(--accent)}
+</style>
+</head>
+<body>
+
+<div id="app-header">
+  <div class="table-pill">TABLE <span id="table-display">?</span></div>
+  <div>
+    <div id="resto-name">La <span style="color:var(--accent)">Marmitte</span> Express</div>
+    <div class="tagline">COMMANDER EN LIGNE</div>
+  </div>
+</div>
+
+<div id="loading">
+  <div style="text-align:center">
+    <div style="font-size:40px;margin-bottom:12px">⏳</div>
+    <div style="font-size:14px">Chargement de la carte…</div>
+  </div>
+</div>
+
+<div id="app">
+  <div id="menu-tabs"></div>
+  <div id="menu-content"></div>
+</div>
+
+<!-- Cart sticky bar -->
+<div id="cart-bar" onclick="openCartPanel()">
+  <div id="cart-count">0 article</div>
+  <div id="cart-total-bar">0,00€</div>
+  <div class="cart-arrow">→</div>
+</div>
+
+<!-- Cart panel -->
+<div id="cart-panel" onclick="if(event.target===this)closeCartPanel()">
+  <div class="cart-inner">
+    <div class="cp-handle"></div>
+    <div class="cp-header">
+      <h3>🛒 Votre commande</h3>
+      <button class="cp-close" onclick="closeCartPanel()">✕</button>
+    </div>
+    <div id="cp-items"></div>
+    <div class="cp-footer">
+      <textarea id="cp-note" placeholder="Note pour la cuisine (allergies, cuisson…)"></textarea>
+      <div class="cp-total-row">
+        <div class="cp-total-lbl">Total</div>
+        <div id="cp-total">0,00€</div>
+      </div>
+      <button id="cp-send" onclick="sendOrder()" disabled>✅ Confirmer la commande</button>
+    </div>
+  </div>
+</div>
+
+<!-- Options modal -->
+<div id="opt-modal" onclick="if(event.target===this)closeOptModal()">
+  <div id="opt-modal-inner">
+    <div id="opt-modal-body"></div>
+  </div>
+</div>
+
+<!-- Confirmation -->
+<div id="confirm-screen">
+  <div class="confirm-icon">🎉</div>
+  <div class="confirm-title">Commande envoyée !</div>
+  <div class="confirm-sub">Votre commande a bien été transmise.<br>Un serveur s'occupera de vous.</div>
+</div>
+
+</body>
+</html>
