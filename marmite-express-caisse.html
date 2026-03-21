@@ -1249,11 +1249,8 @@ function delImg(n){ try{localStorage.removeItem(imgKey(n));}catch(e){} }
 
 // ═══════ DEFAULT DATA ═══════
 const DEFAULT_CATS = [
-  {id:'boissons',name:'Boissons',icon:'🥤'},
-  {id:'bieres',name:'Bières',icon:'🍺'},
-  {id:'cocktails',name:'Cocktails',icon:'🍹'},
-  {id:'vins',name:'Vins',icon:'🍷'},
-  {id:'digestifs',name:'Digestifs',icon:'🥃'},
+  {id:'softs',name:'Boissons Fraîches',icon:'🥤',noCuisine:true},
+  {id:'alcools',name:'Alcools',icon:'🍷',noCuisine:true},
   {id:'entrees',name:'Entrées',icon:'🥗'},
   {id:'plats',name:'Plats',icon:'🍽️'},
   {id:'salades',name:'Salades',icon:'🥬'},
@@ -1263,96 +1260,102 @@ const DEFAULT_PRODUCTS = [
   // ══════════════════════════════════════════════
   // BOISSONS (TVA 10% — softs, eaux, jus)
   // ══════════════════════════════════════════════
-  {id:'p1',cat:'boissons',name:'Coca / Soda',sub:'Coca, Fanta, Oasis, Ice Tea, Perrier…',price:4.00,tva:10,active:true,hasSirop:true,imgUrl:'images/soda.png'},
-  {id:'p2',cat:'boissons',name:'Sirops',sub:'Grenadine, menthe, kiwi, passion…',price:3.50,tva:10,active:true,imgUrl:'images/sirop-menthe-a-l_eau.png'},
-  {id:'p3',cat:'boissons',name:'Jus de fruits',sub:'Tomate, fraise, ananas, orange',price:4.00,tva:10,active:true,imgUrl:'images/jus-de-fruit.png'},
-  {id:'p4',cat:'boissons',name:'Bière 0%',sub:'Loft, Desperados sans alcool',price:4.00,tva:10,active:true,hasSirop:true,imgUrl:'images/biere-ss-alcool.png'},
-  {id:'p5',cat:'boissons',name:'Diabolo',sub:'Menthe / Grenadine / Citron',price:3.50,tva:10,active:true,imgUrl:'images/diabolo.png'},
-  {id:'p6',cat:'boissons',name:'Mocktail',sub:'Cocktail sans alcool maison',price:4.50,tva:10,active:true,imgUrl:'images/mocktail.png'},
-  {id:'p7',cat:'boissons',name:'St Pellegrino 50cl',sub:'Eau gazeuse',price:3.50,tva:10,active:true,hasSirop:true,section:'Eaux',imgUrl:'images/50-cl-st-pelligrino.png'},
-  {id:'p8',cat:'boissons',name:'St Pellegrino 1L',sub:'Eau gazeuse grand format',price:5.00,tva:10,active:true,imgUrl:'images/1l-st-pelligrino.png'},
-  {id:'p9',cat:'boissons',name:'Vittel 50cl',sub:'Eau plate',price:3.50,tva:10,active:true,hasSirop:true,imgUrl:'images/vittel-50-cl.png'},
+  // BOISSONS FRAÎCHES (cat: softs — TVA 10%)
   // ══════════════════════════════════════════════
-  // BIERES (TVA 20% — alcools)
+  {id:'p7',cat:'softs',name:'St Pellegrino 50cl',sub:'Eau gazeuse',price:3.50,tva:10,active:true,hasSirop:true,section:'Eaux',imgUrl:'images/50-cl-st-pelligrino.png'},
+  {id:'p8',cat:'softs',name:'St Pellegrino 1L',sub:'Eau gazeuse grand format',price:5.00,tva:10,active:true,imgUrl:'images/1l-st-pelligrino.png'},
+  {id:'p9',cat:'softs',name:'Vittel 50cl',sub:'Eau plate',price:3.50,tva:10,active:true,hasSirop:true,imgUrl:'images/vittel-50-cl.png'},
+  {id:'p1',cat:'softs',name:'Coca / Soda',sub:'Coca, Fanta, Oasis, Ice Tea, Perrier…',price:4.00,tva:10,active:true,hasSirop:true,section:'Softs',imgUrl:'images/soda.png'},
+  {id:'p2',cat:'softs',name:'Sirops',sub:'Grenadine, menthe, kiwi, passion…',price:3.50,tva:10,active:true,imgUrl:'images/sirop-menthe-a-l_eau.png'},
+  {id:'p5',cat:'softs',name:'Diabolo',sub:'Menthe / Grenadine / Citron',price:3.50,tva:10,active:true,imgUrl:'images/diabolo.png'},
+  {id:'p3',cat:'softs',name:'Jus de fruits',sub:'Tomate, fraise, ananas, orange',price:4.00,tva:10,active:true,section:'Jus',imgUrl:'images/jus-de-fruit.png'},
+  {id:'p4',cat:'softs',name:'Bière 0%',sub:'Loft, Desperados sans alcool',price:4.00,tva:10,active:true,hasSirop:true,section:'Sans alcool',imgUrl:'images/biere-ss-alcool.png'},
+  {id:'p6',cat:'softs',name:'Mocktail',sub:'Cocktail sans alcool maison',price:4.50,tva:10,active:true,imgUrl:'images/mocktail.png'},
   // ══════════════════════════════════════════════
-  {id:'p20',cat:'bieres',name:'Blonde 25cl',sub:'Pression',price:4.00,tva:20,active:true,hasSirop:true,section:'Pression',imgUrl:'images/demi-blonde.png'},
-  {id:'p21',cat:'bieres',name:'Blonde 50cl',sub:'Pression',price:8.00,tva:20,active:true,hasSirop:true,imgUrl:'images/pinte-blonde.png'},
-  {id:'p22',cat:'bieres',name:'Blanche 25cl',sub:'Pression',price:4.50,tva:20,active:true,hasSirop:true,imgUrl:'images/blanche-25.png'},
-  {id:'p23',cat:'bieres',name:'Blanche 50cl',sub:'Pression',price:9.50,tva:20,active:true,hasSirop:true,imgUrl:'images/blanche-50.png'},
-  {id:'p24',cat:'bieres',name:'Ambrée 25cl',sub:'Pression',price:4.50,tva:20,active:true,hasSirop:true,imgUrl:'images/biere-ambree-25cl.png'},
-  {id:'p25',cat:'bieres',name:'Ambrée 50cl',sub:'Pression',price:9.50,tva:20,active:true,hasSirop:true,imgUrl:'images/biere-ambre-50-cl.png'},
-  {id:'p25b',cat:'bieres',name:'Rouge 50cl',sub:'Pression',price:10.00,tva:20,active:true,hasSirop:true,imgUrl:'images/50-cl-rouge.png'},
-  {id:'p26',cat:'bieres',name:'Desperados',sub:'Bière tequila',price:5.00,tva:20,active:true,section:'Bouteilles',imgUrl:'images/desperados.png'},
-  {id:'p27',cat:'bieres',name:'Chimay Blonde',sub:'Trappiste belge',price:5.00,tva:20,active:true,imgUrl:'images/chimay.png'},
-  {id:'p28',cat:'bieres',name:'Duvel',sub:'Blonde forte belge',price:5.00,tva:20,active:true,imgUrl:'images/duvel-1.png'},
-  {id:'p63',cat:'bieres',name:'Mort Subite',sub:'Lambic belge',price:5.00,tva:20,active:true,imgUrl:'images/mort-subitee.png'},
-  {id:'p64',cat:'bieres',name:'Kriek Cerise',sub:'Bière fruitée belge',price:5.00,tva:20,active:true,imgUrl:'images/kriek-cerise.png'},
-  {id:'p65',cat:'bieres',name:'Black Licorne',sub:'Bière noire alsacienne',price:5.00,tva:20,active:true,imgUrl:'images/black-licorne.png'},
-  {id:'p29',cat:'bieres',name:'Panaché',sub:'Bière + limonade',price:4.00,tva:20,active:true,hasSirop:true,section:'Aromatisées',imgUrl:'images/panache.png'},
-  {id:'p30',cat:'bieres',name:'Monaco',sub:'Bière + grenadine',price:4.00,tva:20,active:true,imgUrl:'images/monaco.png'},
-  {id:'p66',cat:'bieres',name:'Picon Bière',sub:'Bière + amer Picon',price:5.00,tva:20,active:true,imgUrl:'images/picon-biere.png'},
+  // ALCOOLS (cat: alcools — TVA 20%)
   // ══════════════════════════════════════════════
-  // COCKTAILS (TVA 20%)
-  // ══════════════════════════════════════════════
-  {id:'p10',cat:'cocktails',name:'Ricard / Pastis',sub:'Apéritif anisé',price:4.00,tva:20,active:true,section:'Apéritifs',imgUrl:'images/ricard.png'},
-  {id:'p11',cat:'cocktails',name:'Martini',sub:'Rouge ou Blanc',price:4.00,tva:20,active:true,imgUrl:'images/martini.png'},
-  {id:'p12',cat:'cocktails',name:'Kir Tranquille',sub:'Vin blanc + crème de cassis',price:4.00,tva:20,active:true,imgUrl:'images/kir-blanc.png'},
-  {id:'p67',cat:'cocktails',name:'Kir Pétillant',sub:'Crémant + crème de cassis',price:4.50,tva:20,active:true,imgUrl:'images/kir-petillant.png'},
-  {id:'p68',cat:'cocktails',name:'Americano',sub:'Campari, vermouth rouge, soda',price:6.00,tva:20,active:true,imgUrl:'images/americano.png'},
-  {id:'p69',cat:'cocktails',name:'Campari',sub:'Amer italien',price:5.00,tva:20,active:true,imgUrl:'images/campari.png'},
-  {id:'p13',cat:'cocktails',name:'Mojito',sub:'Rhum, citron vert, menthe',price:8.00,tva:20,active:true,section:'Cocktails',imgUrl:'images/mojito.png'},
-  {id:'p14',cat:'cocktails',name:'Apérol Spritz',sub:'Apérol, prosecco, orange',price:8.00,tva:20,active:true,imgUrl:'images/aperol-spritz.png'},
-  {id:'p15',cat:'cocktails',name:'Sangria',sub:'Vin rouge, fruits, épices',price:6.00,tva:20,active:true,imgUrl:'images/sangria.png'},
-  {id:'p16',cat:'cocktails',name:'Gin Tonic',sub:'Gin + Schweppes tonic',price:6.00,tva:20,active:true,imgUrl:'images/gin-tonic.png'},
-  {id:'p17',cat:'cocktails',name:'Cuba Libre',sub:'Rhum, Coca, citron vert',price:7.00,tva:20,active:true,imgUrl:'images/cuba-libre.png'},
-  {id:'p18',cat:'cocktails',name:'Shooter',sub:'Au choix',price:3.50,tva:20,active:true,section:'Shooters',imgUrl:'images/shoot.png'},
-  {id:'p19',cat:'cocktails',name:'1m de Shooters',sub:'Rangée festive !',price:30.00,tva:20,active:true,imgUrl:'images/1-m-de-shoot.png'},
-  // ══════════════════════════════════════════════
-  // VINS (TVA 20%) — avec double tarif Verre/Bouteille
-  // ══════════════════════════════════════════════
-  {id:'p31',cat:'vins',name:"L'Antocyane (verre)",sub:'AOP vin de Loir 2022',price:4.50,tva:20,active:true,section:'Vins Rouges',imgUrl:'images/verre-de-vin-rouge.png'},
-  {id:'p32',cat:'vins',name:'Côte de Bœuf (verre)',sub:'IGP Syrah Marselan',price:6.00,tva:20,active:true,imgUrl:'images/verre-de-vin-rouge.png'},
-  {id:'p70',cat:'vins',name:'Chinon (bouteille)',sub:'AOP Loire — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
-  {id:'p33',cat:'vins',name:'Chardonnay Moelleux',sub:'IGP 2022 — verre',price:5.50,tva:20,active:true,section:'Vins Blancs',imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p34',cat:'vins',name:'Chardonnay Sec',sub:'IGP Jean Giner — verre',price:5.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  // Double tarif: Jasnière Vert Galant
-  {id:'p71',cat:'vins',name:'Jasnière Vert Galant (verre)',sub:'AOC Jasnière — verre',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p72',cat:'vins',name:'Jasnière Vert Galant (bout.)',sub:'AOC Jasnière — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  // Double tarif: Jasnière Cuvée du Perrés
-  {id:'p73',cat:'vins',name:'Jasnière Cuvée Perrés (verre)',sub:'AOC Jasnière — verre',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p74',cat:'vins',name:'Jasnière Cuvée Perrés (bout.)',sub:'AOC Jasnière — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  // Rosés
-  {id:'p35',cat:'vins',name:'Iles de Beauté',sub:'IGP Rosé Corse — verre',price:4.50,tva:20,active:true,section:'Vins Rosés',imgUrl:'images/verre-vin-rose.png'},
-  // Double tarif: Montagne Blanche Rosé
-  {id:'p75',cat:'vins',name:'Montagne Blanche (verre)',sub:'Rosé — verre',price:4.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
-  {id:'p76',cat:'vins',name:'Montagne Blanche (bout.)',sub:'Rosé — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
-  // Double tarif: Cabernet d'Anjou
-  {id:'p77',cat:'vins',name:"Cabernet d'Anjou (verre)",sub:'Rosé demi-sec — verre',price:5.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
-  {id:'p78',cat:'vins',name:"Cabernet d'Anjou (bout.)",sub:'Rosé demi-sec — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
-  // Double tarif: Vouvray Bulles
-  {id:'p79',cat:'vins',name:'Vouvray Bulles (verre)',sub:'AOC effervescent — verre',price:6.00,tva:20,active:true,section:'Effervescents',imgUrl:'images/kir-petillant.png'},
-  {id:'p80',cat:'vins',name:'Vouvray Bulles (bout.)',sub:'AOC effervescent — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/kir-petillant.png'},
-  // Double tarif: Champagne
-  {id:'p36',cat:'vins',name:'Champagne N. Feuillatte (coupe)',sub:'Grande réserve BRUT — coupe',price:9.00,tva:20,active:true,section:'Champagne',imgUrl:'images/piscine-rose.png'},
-  {id:'p81',cat:'vins',name:'Champagne N. Feuillatte (bout.)',sub:'Grande réserve BRUT — bouteille 75cl',price:60.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
-  // ══════════════════════════════════════════════
-  // DIGESTIFS (TVA 20%)
-  // ══════════════════════════════════════════════
-  {id:'p82',cat:'digestifs',name:'Get 27',sub:'Liqueur de menthe',price:6.00,tva:20,active:true,section:'Liqueurs',imgUrl:'images/get-27.png'},
-  {id:'p83',cat:'digestifs',name:"Bailey's",sub:'Crème de whisky irlandais',price:7.00,tva:20,active:true,imgUrl:'images/baileys.png'},
-  {id:'p84',cat:'digestifs',name:'Cointreau',sub:'Liqueur triple sec',price:7.00,tva:20,active:true,imgUrl:'images/cointreau.png'},
-  {id:'p85',cat:'digestifs',name:'Curaçao',sub:'Liqueur orangée',price:6.00,tva:20,active:true,imgUrl:'images/curacao.png'},
-  {id:'p86',cat:'digestifs',name:'Menthe-Pastille',sub:'Liqueur de menthe douce',price:6.00,tva:20,active:true,imgUrl:'images/menthe-pastille.png'},
-  {id:'p87',cat:'digestifs',name:'Poire Williams',sub:'Eau-de-vie de poire',price:7.00,tva:20,active:true,section:'Eaux-de-vie',imgUrl:'images/poire.png'},
-  {id:'p88',cat:'digestifs',name:'Calvados',sub:'Eau-de-vie normande',price:7.00,tva:20,active:true,imgUrl:'images/calvados.png'},
-  {id:'p89',cat:'digestifs',name:'Cognac',sub:'Fine Champagne',price:8.00,tva:20,active:true,section:'Spiritueux Premium',imgUrl:'images/cognac.png'},
-  {id:'p90',cat:'digestifs',name:'Armagnac',sub:'Bas-Armagnac traditionnel',price:8.00,tva:20,active:true,imgUrl:'images/armagnac.png'},
-  {id:'p91',cat:'digestifs',name:'Rhum Ambré',sub:'Rhum vieilli',price:7.00,tva:20,active:true,imgUrl:'images/rhum-ambre.png'},
-  {id:'p92',cat:'digestifs',name:'Rhum Arrangé',sub:'Rhum maison aux fruits',price:6.00,tva:20,active:true,imgUrl:'images/rhum-arrange.png'},
-  {id:'p93',cat:'digestifs',name:'Jack Daniel\'s',sub:'Tennessee Whiskey',price:8.00,tva:20,active:true,imgUrl:'images/jack-daniel.png'},
-  {id:'p94',cat:'digestifs',name:'Clan Campbell',sub:'Blended Scotch Whisky',price:7.00,tva:20,active:true,imgUrl:'images/clan-campbell.png'},
-  {id:'p95',cat:'digestifs',name:'Aberlour',sub:'Single Malt Speyside',price:8.00,tva:20,active:true,imgUrl:'images/aberlour.png'},
-  {id:'p96',cat:'digestifs',name:'Vodka',sub:'Premium',price:6.00,tva:20,active:true,imgUrl:'images/vodka.png'},
+  // ── Bières Pression ──
+  {id:'p20',cat:'alcools',name:'Blonde 25cl',sub:'Pression',price:4.00,tva:20,active:true,hasSirop:true,section:'Bières Pression',imgUrl:'images/demi-blonde.png'},
+  {id:'p21',cat:'alcools',name:'Blonde 50cl',sub:'Pression',price:8.00,tva:20,active:true,hasSirop:true,imgUrl:'images/pinte-blonde.png'},
+  {id:'p22',cat:'alcools',name:'Blanche 25cl',sub:'Pression',price:4.50,tva:20,active:true,hasSirop:true,imgUrl:'images/blanche-25.png'},
+  {id:'p23',cat:'alcools',name:'Blanche 50cl',sub:'Pression',price:9.50,tva:20,active:true,hasSirop:true,imgUrl:'images/blanche-50.png'},
+  {id:'p24',cat:'alcools',name:'Ambrée 25cl',sub:'Pression',price:4.50,tva:20,active:true,hasSirop:true,imgUrl:'images/biere-ambree-25cl.png'},
+  {id:'p25',cat:'alcools',name:'Ambrée 50cl',sub:'Pression',price:9.50,tva:20,active:true,hasSirop:true,imgUrl:'images/biere-ambre-50-cl.png'},
+  {id:'p25b',cat:'alcools',name:'Rouge 50cl',sub:'Pression',price:10.00,tva:20,active:true,hasSirop:true,imgUrl:'images/50-cl-rouge.png'},
+  // ── Bières Bouteilles ──
+  {id:'p26',cat:'alcools',name:'Desperados',sub:'Bière tequila',price:5.00,tva:20,active:true,section:'Bières Bouteilles',imgUrl:'images/desperados.png'},
+  {id:'p27',cat:'alcools',name:'Chimay Blonde',sub:'Trappiste belge',price:5.00,tva:20,active:true,imgUrl:'images/chimay.png'},
+  {id:'p28',cat:'alcools',name:'Duvel',sub:'Blonde forte belge',price:5.00,tva:20,active:true,imgUrl:'images/duvel-1.png'},
+  {id:'p63',cat:'alcools',name:'Mort Subite',sub:'Lambic belge',price:5.00,tva:20,active:true,imgUrl:'images/mort-subitee.png'},
+  {id:'p64',cat:'alcools',name:'Kriek Cerise',sub:'Bière fruitée belge',price:5.00,tva:20,active:true,imgUrl:'images/kriek-cerise.png'},
+  {id:'p65',cat:'alcools',name:'Black Licorne',sub:'Bière noire alsacienne',price:5.00,tva:20,active:true,imgUrl:'images/black-licorne.png'},
+  // ── Bières Aromatisées ──
+  {id:'p29',cat:'alcools',name:'Panaché',sub:'Bière + limonade',price:4.00,tva:20,active:true,hasSirop:true,section:'Bières Aromatisées',imgUrl:'images/panache.png'},
+  {id:'p30',cat:'alcools',name:'Monaco',sub:'Bière + grenadine',price:4.00,tva:20,active:true,imgUrl:'images/monaco.png'},
+  {id:'p66',cat:'alcools',name:'Picon Bière',sub:'Bière + amer Picon',price:5.00,tva:20,active:true,imgUrl:'images/picon-biere.png'},
+  // ── Vins Rouges (verre ballon, robe pourpre) ──
+  {id:'p31',cat:'alcools',name:"L'Antocyane (verre)",sub:'AOP vin de Loir 2022',price:4.50,tva:20,active:true,section:'Vins Rouges',imgUrl:'images/verre-de-vin-rouge.png'},
+  {id:'p32',cat:'alcools',name:'Côte de Bœuf (verre)',sub:'IGP Syrah Marselan',price:6.00,tva:20,active:true,imgUrl:'images/verre-de-vin-rouge.png'},
+  {id:'p70',cat:'alcools',name:'Chinon (bouteille)',sub:'AOP Loire — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p97',cat:'alcools',name:'Saumur Champigny (bout.)',sub:'AOP Loire — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p98',cat:'alcools',name:'Côte du Rhône (bout.)',sub:'AOP Rhône — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p99',cat:'alcools',name:'Graves de Vayres (bout.)',sub:'AOP Bordeaux — bouteille 75cl',price:26.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p100',cat:'alcools',name:'Lussac St-Émilion (bout.)',sub:'AOP Bordeaux — bouteille 75cl',price:32.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p101',cat:'alcools',name:'St Nicolas de Bourgueil (bout.)',sub:'AOP Loire — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p102',cat:'alcools',name:'Pauillac (bout.)',sub:'AOP Médoc — bouteille 75cl',price:45.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  // ── Vins Blancs (verre tulipe, robe or pâle) ──
+  {id:'p33',cat:'alcools',name:'Chardonnay Moelleux (verre)',sub:'IGP 2022',price:5.50,tva:20,active:true,section:'Vins Blancs',imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p34',cat:'alcools',name:'Chardonnay Sec (verre)',sub:'IGP Jean Giner',price:5.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p71',cat:'alcools',name:'Jasnière Vert Galant (verre)',sub:'AOC Jasnière',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p72',cat:'alcools',name:'Jasnière Vert Galant (bout.)',sub:'AOC Jasnière — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p73',cat:'alcools',name:'Jasnière Cuvée Perrés (verre)',sub:'AOC Jasnière',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p74',cat:'alcools',name:'Jasnière Cuvée Perrés (bout.)',sub:'AOC Jasnière — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p103',cat:'alcools',name:'Chablis (bout.)',sub:'AOP Bourgogne — bouteille 75cl',price:30.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  // ── Vins Rosés (robe pétale de rose/saumon) ──
+  {id:'p35',cat:'alcools',name:'Iles de Beauté (verre)',sub:'IGP Rosé Corse',price:4.50,tva:20,active:true,section:'Vins Rosés',imgUrl:'images/verre-vin-rose.png'},
+  {id:'p75',cat:'alcools',name:'Montagne Blanche (verre)',sub:'Rosé',price:4.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
+  {id:'p76',cat:'alcools',name:'Montagne Blanche (bout.)',sub:'Rosé — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  {id:'p77',cat:'alcools',name:"Cabernet d'Anjou (verre)",sub:'Rosé demi-sec',price:5.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
+  {id:'p78',cat:'alcools',name:"Cabernet d'Anjou (bout.)",sub:'Rosé demi-sec — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  {id:'p104',cat:'alcools',name:'Côte de Provence (bout.)',sub:'AOP Provence — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  // ── Effervescents (flûte/coupe, robe or clair, bulles fines — PAS de rosé) ──
+  {id:'p79',cat:'alcools',name:'Vouvray Bulles (verre)',sub:'AOC effervescent blanc',price:6.00,tva:20,active:true,section:'Effervescents',imgUrl:'images/kir-petillant.png'},
+  {id:'p80',cat:'alcools',name:'Vouvray Bulles (bout.)',sub:'AOC effervescent blanc — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/kir-petillant.png'},
+  {id:'p36',cat:'alcools',name:'Champagne N. Feuillatte (coupe)',sub:'Grande réserve BRUT — coupe',price:9.00,tva:20,active:true,section:'Champagne',imgUrl:'images/piscine-rose.png'},
+  {id:'p81',cat:'alcools',name:'Champagne N. Feuillatte (bout.)',sub:'Grande réserve BRUT — bouteille 75cl',price:60.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  // ── Apéritifs ──
+  {id:'p10',cat:'alcools',name:'Ricard / Pastis',sub:'Apéritif anisé',price:4.00,tva:20,active:true,section:'Apéritifs',imgUrl:'images/ricard.png'},
+  {id:'p11',cat:'alcools',name:'Martini',sub:'Rouge ou Blanc',price:4.00,tva:20,active:true,imgUrl:'images/martini.png'},
+  {id:'p12',cat:'alcools',name:'Kir Tranquille',sub:'Vin blanc + crème de cassis',price:4.00,tva:20,active:true,imgUrl:'images/kir-blanc.png'},
+  {id:'p67',cat:'alcools',name:'Kir Pétillant',sub:'Crémant + crème de cassis',price:4.50,tva:20,active:true,imgUrl:'images/kir-petillant.png'},
+  {id:'p68',cat:'alcools',name:'Americano',sub:'Campari, vermouth rouge, soda',price:6.00,tva:20,active:true,imgUrl:'images/americano.png'},
+  {id:'p69',cat:'alcools',name:'Campari',sub:'Amer italien',price:5.00,tva:20,active:true,imgUrl:'images/campari.png'},
+  // ── Cocktails ──
+  {id:'p13',cat:'alcools',name:'Mojito',sub:'Rhum, citron vert, menthe',price:8.00,tva:20,active:true,section:'Cocktails',imgUrl:'images/mojito.png'},
+  {id:'p14',cat:'alcools',name:'Apérol Spritz',sub:'Apérol, prosecco, orange',price:8.00,tva:20,active:true,imgUrl:'images/aperol-spritz.png'},
+  {id:'p15',cat:'alcools',name:'Sangria',sub:'Vin rouge, fruits, épices',price:6.00,tva:20,active:true,imgUrl:'images/sangria.png'},
+  {id:'p16',cat:'alcools',name:'Gin Tonic',sub:'Gin + Schweppes tonic',price:6.00,tva:20,active:true,imgUrl:'images/gin-tonic.png'},
+  {id:'p17',cat:'alcools',name:'Cuba Libre',sub:'Rhum, Coca, citron vert',price:7.00,tva:20,active:true,imgUrl:'images/cuba-libre.png'},
+  {id:'p18',cat:'alcools',name:'Shooter',sub:'Au choix',price:3.50,tva:20,active:true,section:'Shooters',imgUrl:'images/shoot.png'},
+  {id:'p19',cat:'alcools',name:'1m de Shooters',sub:'Rangée festive !',price:30.00,tva:20,active:true,imgUrl:'images/1-m-de-shoot.png'},
+  // ── Digestifs — Liqueurs ──
+  {id:'p82',cat:'alcools',name:'Get 27',sub:'Liqueur de menthe',price:6.00,tva:20,active:true,section:'Digestifs — Liqueurs',imgUrl:'images/get-27.png'},
+  {id:'p83',cat:'alcools',name:"Bailey's",sub:'Crème de whisky irlandais',price:7.00,tva:20,active:true,imgUrl:'images/baileys.png'},
+  {id:'p84',cat:'alcools',name:'Cointreau',sub:'Liqueur triple sec',price:7.00,tva:20,active:true,imgUrl:'images/cointreau.png'},
+  {id:'p85',cat:'alcools',name:'Curaçao',sub:'Liqueur orangée',price:6.00,tva:20,active:true,imgUrl:'images/curacao.png'},
+  {id:'p86',cat:'alcools',name:'Menthe-Pastille',sub:'Liqueur de menthe douce',price:6.00,tva:20,active:true,imgUrl:'images/menthe-pastille.png'},
+  // ── Digestifs — Eaux-de-vie ──
+  {id:'p87',cat:'alcools',name:'Poire Williams',sub:'Eau-de-vie de poire',price:7.00,tva:20,active:true,section:'Digestifs — Eaux-de-vie',imgUrl:'images/poire.png'},
+  {id:'p88',cat:'alcools',name:'Calvados',sub:'Eau-de-vie normande',price:7.00,tva:20,active:true,imgUrl:'images/calvados.png'},
+  // ── Digestifs — Spiritueux Premium ──
+  {id:'p89',cat:'alcools',name:'Cognac',sub:'Fine Champagne',price:8.00,tva:20,active:true,section:'Digestifs — Spiritueux Premium',imgUrl:'images/cognac.png'},
+  {id:'p90',cat:'alcools',name:'Armagnac',sub:'Bas-Armagnac traditionnel',price:8.00,tva:20,active:true,imgUrl:'images/armagnac.png'},
+  {id:'p91',cat:'alcools',name:'Rhum Ambré',sub:'Rhum vieilli',price:7.00,tva:20,active:true,imgUrl:'images/rhum-ambre.png'},
+  {id:'p92',cat:'alcools',name:'Rhum Arrangé',sub:'Rhum maison aux fruits',price:6.00,tva:20,active:true,imgUrl:'images/rhum-arrange.png'},
+  {id:'p93',cat:'alcools',name:'Jack Daniel\'s',sub:'Tennessee Whiskey',price:8.00,tva:20,active:true,imgUrl:'images/jack-daniel.png'},
+  {id:'p94',cat:'alcools',name:'Clan Campbell',sub:'Blended Scotch Whisky',price:7.00,tva:20,active:true,imgUrl:'images/clan-campbell.png'},
+  {id:'p95',cat:'alcools',name:'Aberlour',sub:'Single Malt Speyside',price:8.00,tva:20,active:true,imgUrl:'images/aberlour.png'},
+  {id:'p96',cat:'alcools',name:'Vodka',sub:'Premium',price:6.00,tva:20,active:true,imgUrl:'images/vodka.png'},
   // ══════════════════════════════════════════════
   // ENTREES (TVA 10%)
   // ══════════════════════════════════════════════
@@ -3266,7 +3269,7 @@ function publishMenu(){
   const activeProducts = products.filter(p=>p.active);
   const menuData = {
     cats: cats.filter(c=>activeProducts.some(p=>p.cat===c.id)),
-    products: activeProducts.map(p=>({id:p.id,cat:p.cat,name:p.name,sub:p.sub||'',price:p.price,section:p.section||'',pdj:!!p.pdj,hasCuisson:!!p.hasCuisson,hasGarniture:!!p.hasGarniture,tva:p.tva||10,stock:p.stock===undefined?-1:p.stock,imgUrl:p.imgUrl||null})),
+    products: activeProducts.map(p=>({id:p.id,cat:p.cat,name:p.name,sub:p.sub||'',price:p.price,section:p.section||'',pdj:!!p.pdj,hasCuisson:!!p.hasCuisson,hasGarniture:!!p.hasGarniture,hasVariant:!!p.hasVariant,hasSirop:!!p.hasSirop,variants:p.variants||null,tva:p.tva||10,stock:p.stock===undefined?-1:p.stock,imgUrl:p.imgUrl||null})),
     branding: {name:branding.name, accent:branding.accent, emoji:branding.emoji},
     options: {
       cuissons: (settings.cuissons||'').split(',').map(s=>s.trim()).filter(Boolean),

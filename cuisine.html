@@ -84,6 +84,9 @@ body{font-family:'DM Sans',sans-serif;background:#0a0b0e;color:#f0f0f4;height:10
 .tbtn-done{background:rgba(74,158,255,.12);color:#4a9eff;border:2px solid rgba(74,158,255,.2);flex:3}
 .tbtn-clr{background:rgba(232,64,64,.1);color:#e84040;border:2px solid rgba(232,64,64,.15);flex:1;font-size:22px}
 
+@keyframes unlockPulse{0%,100%{box-shadow:0 0 0 rgba(232,64,64,0)}50%{box-shadow:0 0 12px rgba(232,64,64,.4)}}
+#audio-unlock.unlocked{background:rgba(34,201,122,.15) !important;border-color:rgba(34,201,122,.4) !important;color:#22c97a !important;animation:none !important;pointer-events:none}
+
 @media(max-width:900px){
   .board{flex-direction:column}
   .col{border-right:none;border-bottom:2px solid rgba(255,255,255,.07);flex:1;min-height:0}
@@ -103,6 +106,7 @@ body{font-family:'DM Sans',sans-serif;background:#0a0b0e;color:#f0f0f4;height:10
     <div class="kpi"><div class="kpi-v" id="s-tod">0</div><div class="kpi-l">Aujourd'hui</div></div>
     <button class="snd-btn active" id="snd" onclick="toggleSound()" title="Sonnerie nouvelle commande">🔔</button>
     <button class="voice-btn active" id="voiceBtn" onclick="toggleVoice()" title="Lecture vocale des plats">🔊</button>
+    <button class="hbtn" id="audio-unlock" onclick="unlockAudio()" style="background:rgba(232,64,64,.15);border-color:rgba(232,64,64,.4);color:#e84040;font-weight:800;animation:unlockPulse 2s ease infinite">🔈 Activer le son</button>
   </div>
 </div>
 
@@ -299,18 +303,69 @@ function playSound() {
   } catch(e) {}
 }
 
+// ── Audio unlock system (contourne les restrictions navigateur) ──
+let audioUnlocked = false;
+let audioCtx = null;
+let speechQueue = [];
+
+window.unlockAudio = function() {
+  const btn = document.getElementById('audio-unlock');
+  // 1. Unlock AudioContext
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = audioCtx.createBuffer(1, 1, 22050);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start(0);
+  } catch(e) {}
+  // 2. Unlock SpeechSynthesis with silent utterance
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    const silentUtt = new SpeechSynthesisUtterance('');
+    silentUtt.volume = 0;
+    silentUtt.lang = 'fr-FR';
+    window.speechSynthesis.speak(silentUtt);
+    // Then speak confirmation
+    setTimeout(() => {
+      const confirm = new SpeechSynthesisUtterance('Audio activé. En attente de commandes.');
+      confirm.lang = 'fr-FR';
+      confirm.rate = 1;
+      confirm.pitch = 1;
+      confirm.volume = 1;
+      window.speechSynthesis.speak(confirm);
+    }, 200);
+  }
+  audioUnlocked = true;
+  btn.textContent = '🔊 Son activé';
+  btn.classList.add('unlocked');
+  // Process any queued orders
+  speechQueue.forEach(o => speakOrder(o));
+  speechQueue = [];
+};
+
 function speakOrder(order) {
   if (!('speechSynthesis' in window)) return;
+  if (!audioUnlocked) { speechQueue.push(order); return; }
   const items = filterCuisineItems(order.items || []);
   if (!items.length) return;
   const tbl = order.tableNum || order.tableId || '?';
-  const liste = items.map(i => `${i.qty} ${i.name}`).join(', ');
-  const texte = `Nouvelle commande, table ${tbl} : ${liste}`;
+  const liste = items.map(i => {
+    let desc = `${i.qty} ${i.name}`;
+    if (i.cuisson) desc += `, cuisson ${i.cuisson}`;
+    if (i.garniture) desc += `, avec ${i.garniture}`;
+    return desc;
+  }).join('. ');
+  const texte = `Nouvelle commande, table ${tbl}. ${liste}.`;
+  // Cancel any ongoing speech
   window.speechSynthesis.cancel();
   const utt = new SpeechSynthesisUtterance(texte);
   utt.lang = 'fr-FR';
-  utt.rate = 0.95;
-  utt.pitch = 1;
+  utt.rate = 0.92;
+  utt.pitch = 1.05;
+  utt.volume = 1;
+  // Workaround: Chrome sometimes pauses long utterances
+  utt.onpause = () => window.speechSynthesis.resume();
   window.speechSynthesis.speak(utt);
 }
 
