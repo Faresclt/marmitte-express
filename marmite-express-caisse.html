@@ -1165,6 +1165,68 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
   </div>
 </div>
 
+
+<!-- ══ MODAL PLAT DU JOUR ══ -->
+<div class="modal-overlay" id="pdj-modal" onclick="if(event.target===this)closePdjModal()">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-head">
+      <h3 style="font-family:'Bebas Neue',sans-serif;letter-spacing:1px;color:var(--accent);font-size:18px">⭐ PLAT DU JOUR</h3>
+      <div class="modal-close" onclick="closePdjModal()">✕</div>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Produit à modifier</label>
+        <select class="form-input" id="pdj-prod-select" onchange="pdjLoadProductImg()"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nom du plat du jour <span style="color:var(--accent)">*</span></label>
+        <input class="form-input" id="pdj-nom" placeholder="Ex : Pâtes Carbonara maison">
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button onclick="generatePdjDesc()" id="pdj-btn-desc" style="flex:1;height:40px;border-radius:var(--radius-sm);background:rgba(155,107,255,.12);color:#9b6bff;border:1px solid rgba(155,107,255,.3);font-weight:700;font-size:12px">✨ Générer description IA</button>
+        <button onclick="generatePdjImage()" id="pdj-btn-img" style="flex:1;height:40px;border-radius:var(--radius-sm);background:rgba(0,212,170,.1);color:#00d4aa;border:1px solid rgba(0,212,170,.3);font-weight:700;font-size:12px">🎨 Générer photo IA</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description courte</label>
+        <textarea class="form-textarea" id="pdj-desc" placeholder="Ingrédients, précisions..." rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Photo du plat</label>
+        <div id="pdj-img-box" style="position:relative;width:100%;height:160px;border:2px dashed var(--border);border-radius:var(--radius);overflow:hidden;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;cursor:pointer;background:var(--card);transition:border-color .2s" onclick="document.getElementById('pdj-img-input').click()" onmouseover="document.getElementById('pdj-img-ov').style.display='flex'" onmouseout="document.getElementById('pdj-img-ov').style.display='none'">
+          <input type="file" id="pdj-img-input" accept="image/*" onchange="handlePdjImg(event)" style="display:none">
+          <img id="pdj-img-preview" src="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+          <div id="pdj-img-ov" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff">Changer la photo</div>
+          <span id="pdj-img-ph" style="font-size:36px">🍽️</span>
+          <span style="font-size:11px;color:var(--muted)">Cliquer pour importer</span>
+        </div>
+        <div id="pdj-ia-img-status" style="font-size:11px;color:var(--muted);margin-top:6px;min-height:16px;text-align:center"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn mbtn-cancel" onclick="closePdjModal()">Annuler</button>
+      <button class="mbtn mbtn-save" onclick="savePlatDuJour()">✓ Valider</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ POPUP QUOTIDIENNE PDJ ══ -->
+<div class="modal-overlay" id="pdj-daily-modal" onclick="if(event.target===this)closePdjDaily()" style="z-index:600">
+  <div class="modal-box" style="max-width:420px">
+    <div class="modal-head" style="background:rgba(245,166,35,.08)">
+      <h3 style="font-family:'Bebas Neue',sans-serif;letter-spacing:1px;color:var(--accent);font-size:16px">☀️ BONJOUR — PLAT DU JOUR</h3>
+      <div class="modal-close" onclick="closePdjDaily()">✕</div>
+    </div>
+    <div class="modal-body" style="text-align:center;padding:24px 20px">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Voulez-vous mettre à jour le plat du jour ?</div>
+      <div id="pdj-daily-current" style="background:var(--card);border-radius:var(--radius);padding:14px;margin-bottom:20px;font-size:14px;font-weight:600;color:var(--text)"></div>
+    </div>
+    <div class="modal-foot" style="gap:8px">
+      <button class="mbtn mbtn-cancel" onclick="closePdjDaily()">Non, garder tel quel</button>
+      <button class="mbtn mbtn-save" onclick="closePdjDaily();openPdjModal()">✏️ Modifier</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -3570,127 +3632,189 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(se) se.addEventListener('click', e=>{ if(e.target===se) deselectAll(); });
 });
 
-  // ========= PLAT DU JOUR MODAL =========
-  let pdjImgData = null;
+// ════════════════════════════════════════════════
+// ⭐ PLAT DU JOUR — Modal Admin + Popup quotidienne
+// ════════════════════════════════════════════════
+const GEMINI_KEY_PDJ = 'AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ';
+let pdjImgData = null;
 
-  function openPdjModal() {
-    pdjImgData = null;
-    // Remplir le select des produits PDJ
-    const sel = document.getElementById('pdj-prod-select');
-    const pdjProds = products.filter(p => p.pdj);
-    sel.innerHTML = pdjProds.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-    // Pré-remplir avec données existantes du premier PDJ
-    const saved = LS.get('platDuJour', null);
-    if (saved) {
-      document.getElementById('pdj-nom').value = saved.nom || '';
-      document.getElementById('pdj-desc').value = saved.desc || '';
-      if (saved.selectedId) sel.value = saved.selectedId;
-    } else {
-      document.getElementById('pdj-nom').value = '';
-      document.getElementById('pdj-desc').value = '';
-    }
-    // Reset image
-    document.getElementById('pdj-img-preview').style.display = 'none';
-    document.getElementById('pdj-img-ph').style.display = '';
-    document.getElementById('pdj-img-overlay').style.display = 'none';
-    // Charger l'image existante du produit PDJ sélectionné
-    const selId = sel.value;
-    if (selId) {
-      const img = getImg(selId) || (products.find(p=>p.id===selId)||{}).imgUrl;
-      if (img) {
-        document.getElementById('pdj-img-preview').src = img;
-        document.getElementById('pdj-img-preview').style.display = 'block';
-        document.getElementById('pdj-img-ph').style.display = 'none';
-        document.getElementById('pdj-img-overlay').style.display = 'flex';
-        pdjImgData = img;
-      }
-    }
-    document.getElementById('pdj-modal').classList.add('show');
+function openPdjModal() {
+  pdjImgData = null;
+  const sel = document.getElementById('pdj-prod-select');
+  const pdjProds = products.filter(p => p.pdj);
+  sel.innerHTML = pdjProds.length
+    ? pdjProds.map(p => '<option value="' + p.id + '">' + p.name + '</option>').join('')
+    : '<option value="">Aucun produit marqué "Plat du jour"</option>';
+  const saved = LS.get('platDuJour', null);
+  if (saved) {
+    document.getElementById('pdj-nom').value = saved.nom || '';
+    document.getElementById('pdj-desc').value = saved.desc || '';
+    if (saved.selectedId) sel.value = saved.selectedId;
+  } else {
+    document.getElementById('pdj-nom').value = '';
+    document.getElementById('pdj-desc').value = '';
   }
+  document.getElementById('pdj-ia-img-status').textContent = '';
+  pdjLoadProductImg();
+  document.getElementById('pdj-modal').classList.add('show');
+}
 
-  function closePdjModal() {
-    document.getElementById('pdj-modal').classList.remove('show');
+function pdjLoadProductImg() {
+  const sel = document.getElementById('pdj-prod-select');
+  const selId = sel.value;
+  const prev = document.getElementById('pdj-img-preview');
+  const ph = document.getElementById('pdj-img-ph');
+  pdjImgData = null;
+  if (selId) {
+    const imgSrc = getImg(selId) || (products.find(p=>p.id===selId)||{}).imgUrl || null;
+    if (imgSrc) {
+      prev.src = imgSrc;
+      prev.style.display = 'block';
+      ph.style.display = 'none';
+      pdjImgData = imgSrc;
+      return;
+    }
   }
+  prev.style.display = 'none';
+  ph.style.display = '';
+}
 
-  function handlePdjImg(e) {
-    const f = e.target.files[0];
-    if (!f) return;
-    if (f.size > 15*1024*1024) return toast('Image trop lourde (max 15 Mo)', 'r');
-    const r = new FileReader();
-    r.onload = ev => {
-      const img = new Image();
-      img.onload = () => {
-        const c = document.createElement('canvas');
-        const [mw, mh] = [500, 380];
-        let [w, h] = [img.width, img.height];
-        if (w > mw) { h = Math.round(h*mw/w); w = mw; }
-        if (h > mh) { w = Math.round(w*mh/h); h = mh; }
-        c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
-        pdjImgData = c.toDataURL('image/jpeg', 0.8);
-        document.getElementById('pdj-img-preview').src = pdjImgData;
-        document.getElementById('pdj-img-preview').style.display = 'block';
-        document.getElementById('pdj-img-ph').style.display = 'none';
-        document.getElementById('pdj-img-overlay').style.display = 'flex';
-      };
-      img.src = ev.target.result;
+function closePdjModal() {
+  document.getElementById('pdj-modal').classList.remove('show');
+}
+
+function handlePdjImg(e) {
+  const f = e.target.files[0];
+  if (!f) return;
+  if (f.size > 15*1024*1024) return toast('Image trop lourde (max 15 Mo)', 'r');
+  const r = new FileReader();
+  r.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      const mw = 600, mh = 450;
+      let w = img.width, h = img.height;
+      if (w > mw) { h = Math.round(h*mw/w); w = mw; }
+      if (h > mh) { w = Math.round(w*mh/h); h = mh; }
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      pdjImgData = c.toDataURL('image/jpeg', 0.82);
+      const prev = document.getElementById('pdj-img-preview');
+      prev.src = pdjImgData;
+      prev.style.display = 'block';
+      document.getElementById('pdj-img-ph').style.display = 'none';
     };
-    r.readAsDataURL(f);
-  }
+    img.src = ev.target.result;
+  };
+  r.readAsDataURL(f);
+}
 
-  async function generatePdjDesc() {
-    const nom = document.getElementById('pdj-nom').value.trim();
-    if (!nom) { toast('Saisis d abord le nom du plat', 'o'); return; }
-    const btn = document.getElementById('pdj-ia-btn');
-    btn.textContent = '⏳ Génération...';
-    btn.disabled = true;
-    try {
-      const GEMINI_KEY = 'AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ';
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({contents:[{parts:[{text:`Tu es chef cuisinier. Génère une courte description appétissante (max 12 mots) pour un plat de restaurant appelé "${nom}". Réponds uniquement avec la description, sans guillemets.`}]}]})
-      });
-      const data = await res.json();
-      const desc = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (desc) {
-        document.getElementById('pdj-desc').value = desc;
-        toast('Description générée !', 'g');
-      } else {
-        toast('Erreur IA', 'r');
+async function generatePdjDesc() {
+  const nom = document.getElementById('pdj-nom').value.trim();
+  if (!nom) return toast('Saisis d\'abord le nom du plat', 'o');
+  const btn = document.getElementById('pdj-btn-desc');
+  btn.textContent = '⏳ Génération...'; btn.disabled = true;
+  try {
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY_PDJ,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({contents:[{parts:[{text:'Génère une description courte et appétissante (10-14 mots max) pour un plat de restaurant appelé "' + nom + '". Réponds uniquement avec la description, sans guillemets ni ponctuation finale.'}]}]})
       }
-    } catch(e) {
-      toast('Erreur connexion IA', 'r');
-    }
-    btn.textContent = '✨ Générer une description avec l\'IA';
-    btn.disabled = false;
-  }
+    );
+    const data = await res.json();
+    const desc = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (desc) { document.getElementById('pdj-desc').value = desc; toast('Description générée !', 'g'); }
+    else toast('Erreur IA', 'r');
+  } catch(e) { toast('Erreur connexion IA', 'r'); }
+  btn.textContent = '✨ Générer description IA'; btn.disabled = false;
+}
 
-  function savePlatDuJour() {
-    const nom = document.getElementById('pdj-nom').value.trim();
-    if (!nom) { toast('Nom du plat requis', 'r'); return; }
-    const desc = document.getElementById('pdj-desc').value.trim();
-    const selectedId = document.getElementById('pdj-prod-select').value;
-    // Sauvegarder en LS
-    LS.set('platDuJour', { nom, desc, selectedId });
-    // Mettre à jour le produit PDJ sélectionné
-    const p = products.find(x => x.id === selectedId);
-    if (p) {
-      p.sub = nom;
-      if (desc) p.desc = desc;
-      // Sauvegarder l'image si modifiée
-      if (pdjImgData) {
-        setImg(selectedId, pdjImgData);
-        setImg(p.name, pdjImgData);
+async function generatePdjImage() {
+  const nom = document.getElementById('pdj-nom').value.trim();
+  if (!nom) return toast('Saisis d\'abord le nom du plat', 'o');
+  const btn = document.getElementById('pdj-btn-img');
+  const status = document.getElementById('pdj-ia-img-status');
+  btn.textContent = '⏳ Génération image...'; btn.disabled = true;
+  status.textContent = '🎨 L\'IA génère la photo, patiente quelques secondes...';
+  try {
+    const prompt = 'A cinematic, high-end product photograph of "' + nom + '" for a French brasserie menu. Placed on a wet, dark charcoal slate stone surface with fine water droplets catching the light. Fresh, natural ingredients evoking the flavor profile artistically scattered around the base. Background is a softly blurred warm-lit bar or restaurant interior with amber and golden bokeh. Main light source: soft warm light from upper-left, creating rich golden highlights and deep shadows. Shallow depth of field. Color palette: deep dark blacks, warm amber and golden tones. Mood: sophisticated, artisanal, appetizing, French brasserie premium quality. Photorealistic, ultra-detailed.';
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=' + GEMINI_KEY_PDJ,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          contents:[{parts:[{text: prompt}]}],
+          generationConfig:{ responseModalities:['TEXT','IMAGE'] }
+        })
       }
-      saveAll();
-      renderProdList();
-      renderMenu();
+    );
+    const data = await res.json();
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const imgPart = parts.find(p => p.inlineData);
+    if (imgPart) {
+      pdjImgData = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
+      const prev = document.getElementById('pdj-img-preview');
+      prev.src = pdjImgData;
+      prev.style.display = 'block';
+      document.getElementById('pdj-img-ph').style.display = 'none';
+      status.textContent = '✅ Photo générée par IA !';
+      toast('Photo générée !', 'g');
+    } else {
+      status.textContent = '❌ Génération impossible — importe une photo manuellement';
+      toast('Génération image non disponible avec cette clé API', 'o');
     }
-    closePdjModal();
-    toast('Plat du jour mis à jour ! ' + nom, 'g');
-  }
+  } catch(e) { status.textContent = '❌ Erreur connexion'; toast('Erreur connexion IA', 'r'); }
+  btn.textContent = '🎨 Générer photo IA'; btn.disabled = false;
+}
 
-  </script>
+function savePlatDuJour() {
+  const nom = document.getElementById('pdj-nom').value.trim();
+  if (!nom) return toast('Le nom du plat est requis', 'r');
+  const desc = document.getElementById('pdj-desc').value.trim();
+  const selectedId = document.getElementById('pdj-prod-select').value;
+  LS.set('platDuJour', { nom, desc, selectedId, date: new Date().toDateString() });
+  const p = products.find(x => x.id === selectedId);
+  if (p) {
+    p.sub = nom;
+    if (pdjImgData) { setImg(selectedId, pdjImgData); setImg(p.name, pdjImgData); }
+    saveAll();
+    renderProdList();
+    renderMenu();
+  }
+  closePdjModal();
+  toast('⭐ Plat du jour mis à jour : ' + nom, 'g');
+}
+
+function checkPdjDailyPopup() {
+  const today = new Date().toDateString();
+  const lastShown = LS.get('pdjDailyShown', '');
+  if (lastShown === today) return;
+  LS.set('pdjDailyShown', today);
+  const saved = LS.get('platDuJour', null);
+  const current = document.getElementById('pdj-daily-current');
+  if (saved && saved.nom) {
+    current.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">PLAT ACTUEL</div><div style="font-size:16px">⭐ ' + saved.nom + '</div>' + (saved.desc ? '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + saved.desc + '</div>' : '');
+  } else {
+    current.innerHTML = '<div style="color:var(--muted);font-size:13px">Aucun plat du jour défini</div>';
+  }
+  setTimeout(() => document.getElementById('pdj-daily-modal').classList.add('show'), 1500);
+}
+
+function closePdjDaily() {
+  document.getElementById('pdj-daily-modal').classList.remove('show');
+}
+
+window.openPdjModal = openPdjModal;
+window.closePdjModal = closePdjModal;
+window.pdjLoadProductImg = pdjLoadProductImg;
+window.handlePdjImg = handlePdjImg;
+window.generatePdjDesc = generatePdjDesc;
+window.generatePdjImage = generatePdjImage;
+window.savePlatDuJour = savePlatDuJour;
+window.closePdjDaily = closePdjDaily;
+
+// Déclenche popup quotidienne après chargement
+setTimeout(checkPdjDailyPopup, 2000);
+
+</script>
 </body>
 </html>

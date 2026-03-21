@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setup Images — La Marmite Express</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:#262836;--accent:#f5a623;--green:#22c97a;--red:#e84040;--blue:#4a9eff;--purple:#9b6bff;--text:#f0f0f4;--muted:#656878;--radius:14px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;padding:24px 20px 60px}
+.container{max-width:900px;margin:0 auto}
+h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:var(--accent);margin-bottom:6px}
+.subtitle{font-size:13px;color:var(--muted);margin-bottom:32px}
+.section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px}
+.section-title{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1.5px;margin-bottom:4px}
+.section-sub{font-size:12px;color:var(--muted);margin-bottom:16px}
+.btn{height:44px;padding:0 20px;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer;border:none;transition:all .15s;white-space:nowrap}
+.btn-accent{background:var(--accent);color:#000}
+.btn-accent:hover{filter:brightness(1.1)}
+.btn-accent:disabled{opacity:.5;cursor:not-allowed}
+.btn-green{background:var(--green);color:#000}
+.btn-green:disabled{opacity:.5;cursor:not-allowed}
+.btn-purple{background:rgba(155,107,255,.2);color:var(--purple);border:1px solid rgba(155,107,255,.3)}
+.btn-blue{background:rgba(74,158,255,.15);color:var(--blue);border:1px solid rgba(74,158,255,.3)}
+.btn-red{background:rgba(232,64,64,.15);color:var(--red);border:1px solid rgba(232,64,64,.3)}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.progress{height:6px;background:var(--border);border-radius:3px;margin:12px 0;overflow:hidden}
+.progress-bar{height:100%;background:var(--accent);border-radius:3px;transition:width .3s;width:0}
+.log{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;max-height:200px;overflow-y:auto;font-size:11px;font-family:monospace;margin-top:12px}
+.log-line{padding:2px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.log-line.ok{color:var(--green)}
+.log-line.err{color:var(--red)}
+.log-line.inf{color:var(--blue)}
+.log-line.warn{color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:12px}
+.img-card{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;text-align:center;position:relative}
+.img-card img{width:100%;height:90px;object-fit:cover;display:block}
+.img-card .img-ph{width:100%;height:90px;display:flex;align-items:center;justify-content:center;font-size:28px;background:var(--bg)}
+.img-card .label{font-size:10px;font-weight:700;padding:6px 8px;line-height:1.3;color:var(--text)}
+.img-card .label small{color:var(--muted);font-weight:400;display:block}
+.img-card .status{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.status-ok{background:var(--green);color:#000}
+.status-miss{background:var(--red);color:#fff}
+.status-gen{background:var(--purple);color:#fff}
+.stats-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.stat{background:var(--card);border-radius:10px;padding:12px 16px;flex:1;min-width:100px;text-align:center}
+.stat-v{font-family:'Bebas Neue',sans-serif;font-size:28px}
+.stat-l{font-size:10px;color:var(--muted);font-weight:700;letter-spacing:.5px;text-transform:uppercase}
+.gemini-key-input{width:100%;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-size:13px;margin-bottom:12px}
+.gemini-key-input:focus{border-color:var(--accent);outline:none}
+.alert{padding:12px 16px;border-radius:10px;font-size:12px;font-weight:600;margin-bottom:12px}
+.alert-warn{background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.25);color:var(--accent)}
+.alert-info{background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.2);color:var(--blue)}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🖼️ SETUP IMAGES</h1>
+<div class="subtitle">La Marmite Express — Importation & génération d'images pour la carte</div>
+
+<!-- Stats -->
+<div class="stats-row">
+  <div class="stat"><div class="stat-v" id="stat-total" style="color:var(--text)">62</div><div class="stat-l">Produits</div></div>
+  <div class="stat"><div class="stat-v" id="stat-ok" style="color:var(--green)">0</div><div class="stat-l">Avec image</div></div>
+  <div class="stat"><div class="stat-v" id="stat-miss" style="color:var(--red)">0</div><div class="stat-l">Sans image</div></div>
+  <div class="stat"><div class="stat-v" id="stat-gen" style="color:var(--purple)">0</div><div class="stat-l">Générées IA</div></div>
+</div>
+
+<!-- STEP 1: Import boissons images -->
+<div class="section">
+  <div class="section-title" style="color:var(--blue)">📂 ÉTAPE 1 — Importer les images boissons</div>
+  <div class="section-sub">Sélectionne le dossier "Image menu restaurant" extrait de ton ZIP pour importer automatiquement toutes les images boissons.</div>
+  <div class="row">
+    <label class="btn btn-blue" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+      📁 Sélectionner le dossier
+      <input type="file" accept="image/*" multiple webkitdirectory style="display:none" onchange="importFolder(event)">
+    </label>
+    <span id="import-status" style="font-size:12px;color:var(--muted)">Aucun dossier sélectionné</span>
+  </div>
+  <div class="progress"><div class="progress-bar" id="import-progress"></div></div>
+  <div class="log" id="import-log" style="display:none"></div>
+</div>
+
+<!-- STEP 2: Generate food images with Gemini -->
+<div class="section">
+  <div class="section-title" style="color:var(--purple)">🤖 ÉTAPE 2 — Générer les images food avec Gemini</div>
+  <div class="section-sub">Génère automatiquement des photos de haute qualité pour tous les plats, entrées, salades et desserts manquants.</div>
+
+  <div class="alert alert-warn">
+    ⚠️ La clé API Firebase ne fonctionne pas toujours pour la génération d'images. Si l'erreur persiste, obtiens une clé Gemini sur <strong>aistudio.google.com</strong> → "Get API Key" (gratuit, 500 images/jour).
+  </div>
+
+  <label style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:6px">Clé API Gemini</label>
+  <input class="gemini-key-input" type="password" id="gemini-key" placeholder="AIzaSy..." value="AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ">
+
+  <div class="row">
+    <button class="btn btn-purple" onclick="generateAllFood()" id="btn-gen-all">🎨 Générer toutes les images manquantes</button>
+    <button class="btn btn-red" onclick="stopGeneration()" id="btn-stop" style="display:none">⏹ Arrêter</button>
+  </div>
+  <div class="progress"><div class="progress-bar" id="gen-progress"></div></div>
+  <div id="gen-status" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+  <div class="log" id="gen-log" style="display:none"></div>
+</div>
+
+<!-- STEP 3: Save to localStorage + Publish -->
+<div class="section">
+  <div class="section-title" style="color:var(--green)">💾 ÉTAPE 3 — Sauvegarder & Publier</div>
+  <div class="section-sub">Toutes les images sont stockées dans le localStorage du navigateur, prêtes à être publiées depuis la Caisse.</div>
+  <div class="row">
+    <button class="btn btn-green" onclick="saveToLS()" id="btn-save">✓ Sauvegarder dans localStorage</button>
+    <a href="marmite-express-caisse.html" class="btn btn-accent" style="text-decoration:none;display:inline-flex;align-items:center">→ Ouvrir la Caisse</a>
+  </div>
+  <div id="save-status" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
+</div>
+
+<!-- Image grid preview -->
+<div class="section">
+  <div class="section-title">👁️ APERÇU DES PRODUITS</div>
+  <div class="section-sub">Vue d'ensemble de tous les produits et l'état de leurs images.</div>
+  <div class="grid" id="img-grid"></div>
+</div>
+
+</div><!-- /container -->
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const fbConfig = {
+  apiKey:"AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",
+  authDomain:"la-marmitte-express.firebaseapp.com",
+  projectId:"la-marmitte-express",
+  storageBucket:"la-marmitte-express.firebasestorage.app",
+  messagingSenderId:"215969803476",
+  appId:"1:215969803476:web:39ee4de2cf4475f3c2df41"
+};
+const db = getFirestore(initializeApp(fbConfig));
+
+// ── LS helpers ──
+const LS = {
+  get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){return d;} },
+  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){ alert('Stockage plein'); } }
+};
+function imgKey(n){ return 'img_'+n.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,40); }
+function getImg(n){ return LS.get(imgKey(n),null); }
+function setImg(n,b64){ LS.set(imgKey(n),b64); }
+
+// ── All products ──
+const PRODUCTS = [
+  {id:'p1',cat:'boissons',name:'Coca / Soda'},{id:'p2',cat:'boissons',name:'Sirops'},
+  {id:'p3',cat:'boissons',name:'Jus de fruits'},{id:'p4',cat:'boissons',name:'Bière 0%'},
+  {id:'p5',cat:'boissons',name:'Diabolo'},{id:'p6',cat:'boissons',name:'Moktail'},
+  {id:'p7',cat:'boissons',name:'St Pellegrino 50cl'},{id:'p8',cat:'boissons',name:'Vittel 50cl'},
+  {id:'p9',cat:'boissons',name:'Ricard / Pastis'},{id:'p10',cat:'boissons',name:'Martini'},
+  {id:'p11',cat:'boissons',name:'Kir Tranquille'},{id:'p12',cat:'boissons',name:'Kir Pétillant'},
+  {id:'p13',cat:'boissons',name:'Mojito'},{id:'p14',cat:'boissons',name:'Apérol Spritz'},
+  {id:'p15',cat:'boissons',name:'Sangria'},{id:'p16',cat:'boissons',name:'Gin Tonic'},
+  {id:'p17',cat:'boissons',name:'Cuba Libre'},{id:'p18',cat:'boissons',name:'Shooter'},
+  {id:'p19',cat:'boissons',name:'1m de Shooters'},
+  {id:'p20',cat:'bieres',name:'Blonde 25cl'},{id:'p21',cat:'bieres',name:'Blonde 50cl'},
+  {id:'p22',cat:'bieres',name:'Blanche 25cl'},{id:'p23',cat:'bieres',name:'Blanche 50cl'},
+  {id:'p24',cat:'bieres',name:'Ambrée 25cl'},{id:'p25',cat:'bieres',name:'Rouge 50cl'},
+  {id:'p26',cat:'bieres',name:'Desperados'},{id:'p27',cat:'bieres',name:'Chimay Blonde'},
+  {id:'p28',cat:'bieres',name:'Duvel'},{id:'p29',cat:'bieres',name:'Panaché'},
+  {id:'p30',cat:'bieres',name:'Monaco'},
+  {id:'p31',cat:'vins',name:"L'Antocyane (verre)"},{id:'p32',cat:'vins',name:'Côte de Bœuf (verre)'},
+  {id:'p33',cat:'vins',name:'Chardonnay Moelleux'},{id:'p34',cat:'vins',name:'Chardonnay Sec'},
+  {id:'p35',cat:'vins',name:'Iles de Beauté'},{id:'p36',cat:'vins',name:'Champagne Nicolas F.'},
+  {id:'p37',cat:'entrees',name:'Salade Gésiers'},{id:'p38',cat:'entrees',name:'Ardoise Charcuterie ½'},
+  {id:'p39',cat:'entrees',name:'Ardoise Créole ½'},{id:'p40',cat:'entrees',name:'Carpaccio Tomate Burrata'},
+  {id:'p41',cat:'entrees',name:'Os à Moëlle'},{id:'p42',cat:'entrees',name:'Salade Méchouia'},
+  {id:'p43',cat:'plats',name:'Plat du Jour'},{id:'p44',cat:'plats',name:'Saumon Frais'},
+  {id:'p45',cat:'plats',name:'Poisson du Jour'},{id:'p46',cat:'plats',name:'Assiette de la Mer'},
+  {id:'p47',cat:'plats',name:'Burger Maison'},{id:'p48',cat:'plats',name:'Double Burger'},
+  {id:'p49',cat:'plats',name:"Côtes d'Agneau"},{id:'p50',cat:'plats',name:'Entrecôte 300g'},
+  {id:'p51',cat:'plats',name:'Côte de Bœuf 1kg'},{id:'p52',cat:'plats',name:'Garniture Supplémentaire'},
+  {id:'p53',cat:'salades',name:'La Chèvre / Vegan'},{id:'p54',cat:'salades',name:'La Gésiers'},
+  {id:'p55',cat:'salades',name:'La Chicken'},{id:'p56',cat:'salades',name:'La Gourmande'},
+  {id:'p57',cat:'desserts',name:'Tarte de Saison'},{id:'p58',cat:'desserts',name:'Crumble Banane Nutella'},
+  {id:'p59',cat:'desserts',name:'Crème Brûlée Maison'},{id:'p60',cat:'desserts',name:'Mousse au Chocolat'},
+  {id:'p61',cat:'desserts',name:'Tiramisu'},{id:'p62',cat:'desserts',name:'Café Gourmand'},
+];
+
+// ── Image file → product ID mapping ──
+const FILE_MAP = {
+  'soda': 'p1', 'coca': 'p1',
+  'sirop': 'p2', 'menthe': 'p2',
+  'jus de fruit': 'p3',
+  'biere ss alcool': 'p4', 'bière ss alcool': 'p4',
+  'diabolo': 'p5',
+  'mocktail': 'p6', 'moktail': 'p6',
+  '50 cl st pelligrino': 'p7', 'pellegrino': 'p7',
+  'vittel': 'p8',
+  'ricard': 'p9', 'pastis': 'p9',
+  'martini': 'p10',
+  'kir blanc': 'p11',
+  'kir petillant': 'p12', 'kir pétillant': 'p12',
+  'mojito': 'p13',
+  'aperol': 'p14', 'apérol': 'p14',
+  'sangria': 'p15',
+  'gin tonic': 'p16',
+  'cuba libre': 'p17',
+  'shoot': 'p18',
+  '1 m de shoot': 'p19', '1m de shoot': 'p19',
+  'demi blonde': 'p20',
+  'pinte blonde': 'p21',
+  'blanche 25': 'p22',
+  'blanche 50': 'p23',
+  'biere ambree 25': 'p24', 'bière ambrée 25': 'p24', 'ambrée 25': 'p24',
+  '50 cl rouge': 'p25', 'rouge 25': 'p25',
+  'desperados': 'p26',
+  'chimay': 'p27',
+  'duvel': 'p28',
+  'panache': 'p29', 'panaché': 'p29',
+  'monaco': 'p30',
+  'verre de vin rouge': 'p31',
+  'cote de boeuf (verre)': 'p32', 'côte de boeuf': 'p32',
+  'chardonnay moelleux': 'p33',
+  'chardonnay sec': 'p34',
+  'iles de beaute': 'p35', 'rosé': 'p35', 'verre vin rosé': 'p35',
+  'champagne': 'p36',
+};
+
+// ── Imported images buffer ──
+const importedImages = {};
+let stopGen = false;
+
+// ── Init: render grid and show current state ──
+function renderGrid() {
+  const grid = document.getElementById('img-grid');
+  let ok=0, miss=0, gen=0;
+  grid.innerHTML = PRODUCTS.map(p => {
+    const img = getImg(p.id) || getImg(p.name) || importedImages[p.id];
+    const isGen = importedImages[p.id] && importedImages[p.id].startsWith('data:image');
+    if (img) ok++; else miss++;
+    const catEmoji = {boissons:'🥤',bieres:'🍺',vins:'🍷',entrees:'🥗',plats:'🍽️',salades:'🥬',desserts:'🍮'}[p.cat]||'🍴';
+    return `<div class="img-card" id="card-${p.id}">
+      ${img ? '<img src="'+img+'" loading="lazy">' : '<div class="img-ph">'+catEmoji+'</div>'}
+      <div class="status ${img?'status-ok':'status-miss'}">${img?'✓':'!'}</div>
+      <div class="label">${p.name}<small>${p.cat}</small></div>
+    </div>`;
+  }).join('');
+  document.getElementById('stat-ok').textContent = ok;
+  document.getElementById('stat-miss').textContent = miss;
+  document.getElementById('stat-gen').textContent = gen;
+  document.getElementById('stat-total').textContent = PRODUCTS.length;
+}
+
+function normalize(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').trim(); }
+
+// ── Compress image ──
+async function compressImg(src, maxW=600, q=0.82) {
+  return new Promise(res => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      let w = img.width, h = img.height;
+      if (w > maxW) { h = Math.round(h*maxW/w); w = maxW; }
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      res(c.toDataURL('image/jpeg', q));
+    };
+    img.src = src;
+  });
+}
+
+// ── Import folder ──
+window.importFolder = async function(e) {
+  const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
+  if (!files.length) return;
+
+  const log = document.getElementById('import-log');
+  const prog = document.getElementById('import-progress');
+  log.style.display = 'block';
+  log.innerHTML = '';
+
+  document.getElementById('import-status').textContent = files.length + ' fichiers trouvés...';
+
+  let matched = 0, total = files.length;
+
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const nameNorm = normalize(f.name.replace(/\.[^.]+$/, ''));
+
+    // Try to match to a product
+    let prodId = null;
+    for (const [key, pid] of Object.entries(FILE_MAP)) {
+      if (nameNorm.includes(normalize(key))) { prodId = pid; break; }
+    }
+
+    if (prodId) {
+      const url = URL.createObjectURL(f);
+      const b64 = await compressImg(url, 600, 0.85);
+      URL.revokeObjectURL(url);
+      importedImages[prodId] = b64;
+      const prod = PRODUCTS.find(p => p.id === prodId);
+      addLog('import-log', '✓ ' + f.name + ' → ' + (prod?.name||prodId), 'ok');
+      matched++;
+    } else {
+      addLog('import-log', '? ' + f.name + ' — non mappé', 'warn');
+    }
+
+    prog.style.width = Math.round((i+1)/total*100)+'%';
+    if ((i+1) % 5 === 0) await new Promise(r => setTimeout(r, 10)); // yield
+  }
+
+  document.getElementById('import-status').textContent = matched + ' images importées sur ' + total + ' fichiers';
+  renderGrid();
+};
+
+// ── Generate food images ──
+const FOOD_PRODUCTS = PRODUCTS.filter(p =>
+  ['entrees','plats','salades','desserts'].includes(p.cat) && p.id !== 'p52'
+);
+
+window.generateAllFood = async function() {
+  const key = document.getElementById('gemini-key').value.trim();
+  if (!key) return alert('Saisis ta clé API Gemini');
+
+  stopGen = false;
+  document.getElementById('btn-gen-all').disabled = true;
+  document.getElementById('btn-stop').style.display = '';
+
+  const log = document.getElementById('gen-log');
+  const prog = document.getElementById('gen-progress');
+  const status = document.getElementById('gen-status');
+  log.style.display = 'block';
+  log.innerHTML = '';
+
+  const missing = FOOD_PRODUCTS.filter(p => !getImg(p.id) && !getImg(p.name) && !importedImages[p.id]);
+  addLog('gen-log', 'ℹ ' + missing.length + ' produits sans image à générer', 'inf');
+
+  let done = 0;
+  for (const prod of missing) {
+    if (stopGen) { addLog('gen-log', '⏹ Génération arrêtée', 'warn'); break; }
+
+    status.textContent = '🎨 Génération: ' + prod.name + ' (' + (done+1) + '/' + missing.length + ')';
+    addLog('gen-log', '⏳ ' + prod.name + '...', 'inf');
+
+    try {
+      const isCold = prod.cat === 'desserts';
+      const isSeafood = prod.name.toLowerCase().includes('saumon') || prod.name.toLowerCase().includes('poisson') || prod.name.toLowerCase().includes('mer');
+      const prompt = 'A cinematic, high-end product photograph of "' + prod.name + '" for a French brasserie menu. Placed on a wet, dark charcoal slate stone surface with fine water droplets catching the light.' + (isCold ? ' Condensation or slight frost on the plate.' : ' Light steam rising from the dish.') + ' Fresh, natural ingredients evoking the flavor profile artistically scattered around the base. Background: softly blurred warm-lit bar or restaurant interior with amber and golden bokeh. Main light: soft warm light from upper-left, rich golden highlights and deep shadows. Shallow depth of field. Color palette: deep dark blacks, warm amber and golden tones. Mood: sophisticated, artisanal, appetizing, French brasserie premium quality. Photorealistic, ultra-detailed, 16:9.';
+
+      const res = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=' + key,
+        { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            contents:[{parts:[{text:prompt}]}],
+            generationConfig:{ responseModalities:['TEXT','IMAGE'] }
+          })
+        }
+      );
+      const data = await res.json();
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      const imgPart = parts.find(p => p.inlineData);
+
+      if (imgPart) {
+        importedImages[prod.id] = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
+        addLog('gen-log', '✓ ' + prod.name, 'ok');
+        // Update preview card
+        const card = document.getElementById('card-' + prod.id);
+        if (card) {
+          const old = card.querySelector('.img-ph');
+          if (old) { const img = document.createElement('img'); img.src = importedImages[prod.id]; img.style.cssText = 'width:100%;height:90px;object-fit:cover;display:block'; old.replaceWith(img); }
+          const s = card.querySelector('.status'); if (s) { s.className='status status-gen'; s.textContent='✨'; }
+        }
+      } else {
+        const errMsg = data.error?.message || JSON.stringify(data).slice(0, 100);
+        addLog('gen-log', '✗ ' + prod.name + ': ' + errMsg, 'err');
+      }
+    } catch(err) {
+      addLog('gen-log', '✗ ' + prod.name + ': ' + err.message, 'err');
+    }
+
+    done++;
+    prog.style.width = Math.round(done/missing.length*100)+'%';
+    document.getElementById('stat-gen').textContent = parseInt(document.getElementById('stat-gen').textContent) + 1;
+
+    // Rate limit: wait 1.5s between requests
+    await new Promise(r => setTimeout(r, 1500));
+  }
+
+  status.textContent = done + ' images générées !';
+  document.getElementById('btn-gen-all').disabled = false;
+  document.getElementById('btn-stop').style.display = 'none';
+  renderGrid();
+};
+
+window.stopGeneration = function() { stopGen = true; };
+
+// ── Save to localStorage ──
+window.saveToLS = function() {
+  let saved = 0;
+  for (const [id, b64] of Object.entries(importedImages)) {
+    const prod = PRODUCTS.find(p => p.id === id);
+    if (prod && b64) {
+      setImg(id, b64);
+      setImg(prod.name, b64);
+      saved++;
+    }
+  }
+  document.getElementById('save-status').textContent = '✅ ' + saved + ' images sauvegardées ! Ouvrez la Caisse → Admin → Publier la carte pour les publier.';
+  document.getElementById('save-status').style.color = 'var(--green)';
+  renderGrid();
+};
+
+function addLog(logId, msg, type) {
+  const log = document.getElementById(logId);
+  const d = document.createElement('div');
+  d.className = 'log-line ' + type;
+  d.textContent = msg;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+// Init
+renderGrid();
+</script>
+</body>
+</html>
