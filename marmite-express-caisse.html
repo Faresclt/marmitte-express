@@ -1251,96 +1251,161 @@ function delImg(n){ try{localStorage.removeItem(imgKey(n));}catch(e){} }
 const DEFAULT_CATS = [
   {id:'boissons',name:'Boissons',icon:'🥤'},
   {id:'bieres',name:'Bières',icon:'🍺'},
+  {id:'cocktails',name:'Cocktails',icon:'🍹'},
   {id:'vins',name:'Vins',icon:'🍷'},
+  {id:'digestifs',name:'Digestifs',icon:'🥃'},
   {id:'entrees',name:'Entrées',icon:'🥗'},
   {id:'plats',name:'Plats',icon:'🍽️'},
   {id:'salades',name:'Salades',icon:'🥬'},
   {id:'desserts',name:'Desserts',icon:'🍮'},
 ];
 const DEFAULT_PRODUCTS = [
-  // BOISSONS
-  {id:'p1',cat:'boissons',name:'Coca / Soda',sub:'Coca, Fanta, Oasis, Ice Tea, Perrier…',price:4.00,active:true,imgUrl:'images/soda.png'},
-  {id:'p2',cat:'boissons',name:'Sirops',sub:'Grenadine, menthe, kiwi, passion…',price:3.50,active:true,imgUrl:'images/sirop-menthe-a-l_eau.png'},
-  {id:'p3',cat:'boissons',name:'Jus de fruits',sub:'Tomate, fraise, ananas, orange',price:4.00,active:true,imgUrl:'images/jus-de-fruit.png'},
-  {id:'p4',cat:'boissons',name:'Bière 0%',sub:'Loft, Desperados sans alcool',price:4.00,active:true,imgUrl:'images/biere-ss-alcool.png'},
-  {id:'p5',cat:'boissons',name:'Diabolo',sub:'Menthe / Grenadine / Citron',price:3.50,active:true,imgUrl:'images/diabolo.png'},
-  {id:'p6',cat:'boissons',name:'Moktail',sub:'Cocktail sans alcool maison',price:4.50,active:true,imgUrl:'images/mocktail.png'},
-  {id:'p7',cat:'boissons',name:'St Pellegrino 50cl',sub:'Eau gazeuse',price:3.50,active:true,imgUrl:'images/50-cl-st-pelligrino.png'},
-  {id:'p8',cat:'boissons',name:'Vittel 50cl',sub:'Eau plate',price:3.50,active:true,imgUrl:'images/vittel-50-cl.png'},
-  {id:'p9',cat:'boissons',name:'Ricard / Pastis',sub:'Apéritif anisé',price:4.00,active:true,section:'Apéritifs',imgUrl:'images/ricard.png'},
-  {id:'p10',cat:'boissons',name:'Martini',sub:'Rouge ou Blanc',price:4.00,active:true,imgUrl:'images/martini.png'},
-  {id:'p11',cat:'boissons',name:'Kir Tranquille',sub:'Vin blanc + crème de cassis',price:4.00,active:true,imgUrl:'images/kir-blanc.png'},
-  {id:'p12',cat:'boissons',name:'Kir Pétillant',sub:'Crémant + crème de cassis',price:4.50,active:true,imgUrl:'images/kir-petillant.png'},
-  {id:'p13',cat:'boissons',name:'Mojito',sub:'Rhum, citron vert, menthe',price:8.00,active:true,section:'Cocktails',imgUrl:'images/mojito.png'},
-  {id:'p14',cat:'boissons',name:'Apérol Spritz',sub:'Apérol, prosecco, orange',price:8.00,active:true,imgUrl:'images/aperol-spritz.png'},
-  {id:'p15',cat:'boissons',name:'Sangria',sub:'Vin rouge, fruits, épices',price:6.00,active:true,imgUrl:'images/sangria.png'},
-  {id:'p16',cat:'boissons',name:'Gin Tonic',sub:'Gin + Schweppes tonic',price:6.00,active:true,imgUrl:'images/gin-tonic.png'},
-  {id:'p17',cat:'boissons',name:'Cuba Libre',sub:'Rhum, Coca, citron vert',price:7.00,active:true,imgUrl:'images/cuba-libre.png'},
-  {id:'p18',cat:'boissons',name:'Shooter',sub:'',price:3.50,active:true,imgUrl:'images/shoot.png'},
-  {id:'p19',cat:'boissons',name:'1m de Shooters',sub:'Rangée festive !',price:30.00,active:true,imgUrl:'images/1-m-de-shoot.png'},
-  // BIERES
-  {id:'p20',cat:'bieres',name:'Blonde 25cl',sub:'Pression',price:4.00,active:true,section:'Pression',imgUrl:'images/demi-blonde.png'},
-  {id:'p21',cat:'bieres',name:'Blonde 50cl',sub:'Pression',price:8.00,active:true,imgUrl:'images/pinte-blonde.png'},
-  {id:'p22',cat:'bieres',name:'Blanche 25cl',sub:'Pression',price:4.50,active:true,imgUrl:'images/blanche-25.png'},
-  {id:'p23',cat:'bieres',name:'Blanche 50cl',sub:'Pression',price:9.50,active:true,imgUrl:'images/blanche-50.png'},
-  {id:'p24',cat:'bieres',name:'Ambrée 25cl',sub:'Pression',price:4.50,active:true,imgUrl:'images/biere-ambree-25cl.png'},
-  {id:'p25',cat:'bieres',name:'Rouge 50cl',sub:'Pression',price:10.00,active:true,imgUrl:'images/50-cl-rouge.png'},
-  {id:'p26',cat:'bieres',name:'Desperados',sub:'Bière tequila',price:5.00,active:true,section:'Bouteilles',imgUrl:'images/desperados.png'},
-  {id:'p27',cat:'bieres',name:'Chimay Blonde',sub:'Trappiste belge',price:5.00,active:true,imgUrl:'images/chimay.png'},
-  {id:'p28',cat:'bieres',name:'Duvel',sub:'Blonde forte belge',price:5.00,active:true,imgUrl:'images/duvel-1.png'},
-  {id:'p29',cat:'bieres',name:'Panaché',sub:'Bière + limonade',price:4.00,active:true,section:'Aromatisées',imgUrl:'images/panache.png'},
-  {id:'p30',cat:'bieres',name:'Monaco',sub:'Bière + grenadine',price:4.00,active:true,imgUrl:'images/monaco.png'},
-  // VINS
-  {id:'p31',cat:'vins',name:"L'Antocyane (verre)",sub:'AOP vin de Loir 2022',price:4.50,active:true,section:'Rouges',imgUrl:'images/verre-de-vin-rouge.png'},
-  {id:'p32',cat:'vins',name:'Côte de Bœuf (verre)',sub:'IGP Syrah Marselan',price:6.00,active:true,imgUrl:'images/verre-de-vin-rouge.png'},
-  {id:'p33',cat:'vins',name:'Chardonnay Moelleux',sub:'IGP 2022 — verre',price:5.50,active:true,section:'Blancs',imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p34',cat:'vins',name:'Chardonnay Sec',sub:'IGP Jean Giner — verre',price:5.00,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p35',cat:'vins',name:'Iles de Beauté',sub:'IGP Rosé Corse — verre',price:4.50,active:true,section:'Rosés',imgUrl:'images/verre-vin-rose.png'},
-  {id:'p36',cat:'vins',name:'Champagne Nicolas F.',sub:'Grande réserve BRUT',price:9.00,active:true,section:'Champagne',imgUrl:'images/piscine-rose.png'},
-  // ENTREES
-  {id:'p37',cat:'entrees',name:'Salade Gésiers',sub:'Salade, tomates, PDT sautées, gésiers',price:10.00,active:true,imgUrl:'images/salade-gesiers.png'},
-  {id:'p38',cat:'entrees',name:'Ardoise Charcuterie ½',sub:'Charcuterie selon arrivages',price:12.00,active:true,imgUrl:'images/ardoise-charcuterie.png'},
-  {id:'p39',cat:'entrees',name:'Ardoise Créole ½',sub:'Calamars, acras, beignet morue',price:12.00,active:true,imgUrl:'images/ardoise-creole.png'},
-  {id:'p40',cat:'entrees',name:'Carpaccio Tomate Burrata',sub:'Burrata 120g, pesto pistache',price:14.00,active:true,imgUrl:'images/carpaccio-tomate-burrata.png'},
-  {id:'p41',cat:'entrees',name:'Os à Moëlle',sub:'20 min de cuisson',price:10.00,active:true,imgUrl:'images/os-a-moelle.png'},
-  {id:'p42',cat:'entrees',name:'Salade Méchouia',sub:'Tomates, poivrons, thon, olives',price:11.00,active:true,imgUrl:'images/salade-mechouia.png'},
-  // PLATS
-  {id:'p43',cat:'plats',name:'Plat du Jour',sub:'Ex : Pâtes maison du chef',price:14.50,active:true,pdj:true,imgUrl:'images/plat-du-jour.png'},
-  {id:'p44',cat:'plats',name:'Saumon Frais',sub:'Garniture incluse',price:15.00,active:true,pdj:true,imgUrl:'images/saumon-frais.png'},
-  {id:'p45',cat:'plats',name:'Poisson du Jour',sub:'Ex : Dorade — selon arrivage',price:17.00,active:true,pdj:true,imgUrl:'images/poisson-du-jour.png'},
-  {id:'p46',cat:'plats',name:'Assiette de la Mer',sub:'Poisson, calamars, crevettes, pesto',price:25.00,active:true,imgUrl:'images/assiette-de-la-mer.png'},
-  {id:'p47',cat:'plats',name:'Burger Maison',sub:'Steak haché maison, avocat, cheddar',price:16.00,active:true,imgUrl:'images/burger-maison.png'},
-  {id:'p48',cat:'plats',name:'Double Burger',sub:'Double steak ou végétarien',price:22.00,active:true,imgUrl:'images/double-burger.png'},
-  {id:'p49',cat:'plats',name:"Côtes d'Agneau",sub:'Garniture au choix',price:18.50,active:true,imgUrl:'images/cotes-d-agneau.png'},
-  {id:'p50',cat:'plats',name:'Entrecôte 300g',sub:'Garniture au choix',price:26.00,active:true,imgUrl:'images/entrecote-300g.png'},
-  {id:'p51',cat:'plats',name:'Côte de Bœuf 1kg',sub:'PDT sautées, frites, légumes grillés',price:65.00,active:true,imgUrl:'images/cote-de-boeuf-1kg.png'},
-  {id:'p52',cat:'plats',name:'Garniture Supplémentaire',sub:'PDT, salade, pâtes ou frites',price:4.00,active:true},
-  // SALADES
-  {id:'p53',cat:'salades',name:'La Chèvre / Vegan',sub:'Salade, tomates, PDT, toast chèvre',price:16.00,active:true,imgUrl:'images/salade-chevre-chaud.png'},
-  {id:'p54',cat:'salades',name:'La Gésiers',sub:'Salade, tomates, PDT, gésiers',price:16.00,active:true,imgUrl:'images/salade-nicoise.png'},
-  {id:'p55',cat:'salades',name:'La Chicken',sub:'Salade, tomates, PDT, poulet curry',price:17.00,active:true,imgUrl:'images/salade-caesar.png'},
-  {id:'p56',cat:'salades',name:'La Gourmande',sub:'Salade, lardons, toast chèvre, gésiers',price:19.00,active:true,imgUrl:'images/salade-italienne.png'},
-  // DESSERTS
-  {id:'p57',cat:'desserts',name:'Tarte de Saison',sub:'Selon fruits du moment',price:7.00,active:true,imgUrl:'images/tarte-tatin.png'},
-  {id:'p58',cat:'desserts',name:'Crumble Banane Nutella',sub:'Flambé au rhum',price:8.00,active:true,imgUrl:'images/crumble-banane-nutella.png'},
-  {id:'p59',cat:'desserts',name:'Crème Brûlée Maison',sub:'Recette traditionnelle',price:7.00,active:true,imgUrl:'images/creme-brulee.png'},
-  {id:'p60',cat:'desserts',name:'Mousse au Chocolat',sub:'Chocolat noir, maison',price:7.00,active:true,imgUrl:'images/mousse-chocolat.png'},
-  {id:'p61',cat:'desserts',name:'Tiramisu',sub:'Recette classique italienne',price:8.50,active:true,imgUrl:'images/tiramisu.png'},
-  {id:'p62',cat:'desserts',name:'Café Gourmand',sub:'Espresso + mignardises maison',price:9.00,active:true,imgUrl:'images/cafe-gourmand.png'},
+  // ══════════════════════════════════════════════
+  // BOISSONS (TVA 10% — softs, eaux, jus)
+  // ══════════════════════════════════════════════
+  {id:'p1',cat:'boissons',name:'Coca / Soda',sub:'Coca, Fanta, Oasis, Ice Tea, Perrier…',price:4.00,tva:10,active:true,hasSirop:true,imgUrl:'images/soda.png'},
+  {id:'p2',cat:'boissons',name:'Sirops',sub:'Grenadine, menthe, kiwi, passion…',price:3.50,tva:10,active:true,imgUrl:'images/sirop-menthe-a-l_eau.png'},
+  {id:'p3',cat:'boissons',name:'Jus de fruits',sub:'Tomate, fraise, ananas, orange',price:4.00,tva:10,active:true,imgUrl:'images/jus-de-fruit.png'},
+  {id:'p4',cat:'boissons',name:'Bière 0%',sub:'Loft, Desperados sans alcool',price:4.00,tva:10,active:true,hasSirop:true,imgUrl:'images/biere-ss-alcool.png'},
+  {id:'p5',cat:'boissons',name:'Diabolo',sub:'Menthe / Grenadine / Citron',price:3.50,tva:10,active:true,imgUrl:'images/diabolo.png'},
+  {id:'p6',cat:'boissons',name:'Mocktail',sub:'Cocktail sans alcool maison',price:4.50,tva:10,active:true,imgUrl:'images/mocktail.png'},
+  {id:'p7',cat:'boissons',name:'St Pellegrino 50cl',sub:'Eau gazeuse',price:3.50,tva:10,active:true,hasSirop:true,section:'Eaux',imgUrl:'images/50-cl-st-pelligrino.png'},
+  {id:'p8',cat:'boissons',name:'St Pellegrino 1L',sub:'Eau gazeuse grand format',price:5.00,tva:10,active:true,imgUrl:'images/1l-st-pelligrino.png'},
+  {id:'p9',cat:'boissons',name:'Vittel 50cl',sub:'Eau plate',price:3.50,tva:10,active:true,hasSirop:true,imgUrl:'images/vittel-50-cl.png'},
+  // ══════════════════════════════════════════════
+  // BIERES (TVA 20% — alcools)
+  // ══════════════════════════════════════════════
+  {id:'p20',cat:'bieres',name:'Blonde 25cl',sub:'Pression',price:4.00,tva:20,active:true,hasSirop:true,section:'Pression',imgUrl:'images/demi-blonde.png'},
+  {id:'p21',cat:'bieres',name:'Blonde 50cl',sub:'Pression',price:8.00,tva:20,active:true,hasSirop:true,imgUrl:'images/pinte-blonde.png'},
+  {id:'p22',cat:'bieres',name:'Blanche 25cl',sub:'Pression',price:4.50,tva:20,active:true,hasSirop:true,imgUrl:'images/blanche-25.png'},
+  {id:'p23',cat:'bieres',name:'Blanche 50cl',sub:'Pression',price:9.50,tva:20,active:true,hasSirop:true,imgUrl:'images/blanche-50.png'},
+  {id:'p24',cat:'bieres',name:'Ambrée 25cl',sub:'Pression',price:4.50,tva:20,active:true,hasSirop:true,imgUrl:'images/biere-ambree-25cl.png'},
+  {id:'p25',cat:'bieres',name:'Ambrée 50cl',sub:'Pression',price:9.50,tva:20,active:true,hasSirop:true,imgUrl:'images/biere-ambre-50-cl.png'},
+  {id:'p25b',cat:'bieres',name:'Rouge 50cl',sub:'Pression',price:10.00,tva:20,active:true,hasSirop:true,imgUrl:'images/50-cl-rouge.png'},
+  {id:'p26',cat:'bieres',name:'Desperados',sub:'Bière tequila',price:5.00,tva:20,active:true,section:'Bouteilles',imgUrl:'images/desperados.png'},
+  {id:'p27',cat:'bieres',name:'Chimay Blonde',sub:'Trappiste belge',price:5.00,tva:20,active:true,imgUrl:'images/chimay.png'},
+  {id:'p28',cat:'bieres',name:'Duvel',sub:'Blonde forte belge',price:5.00,tva:20,active:true,imgUrl:'images/duvel-1.png'},
+  {id:'p63',cat:'bieres',name:'Mort Subite',sub:'Lambic belge',price:5.00,tva:20,active:true,imgUrl:'images/mort-subitee.png'},
+  {id:'p64',cat:'bieres',name:'Kriek Cerise',sub:'Bière fruitée belge',price:5.00,tva:20,active:true,imgUrl:'images/kriek-cerise.png'},
+  {id:'p65',cat:'bieres',name:'Black Licorne',sub:'Bière noire alsacienne',price:5.00,tva:20,active:true,imgUrl:'images/black-licorne.png'},
+  {id:'p29',cat:'bieres',name:'Panaché',sub:'Bière + limonade',price:4.00,tva:20,active:true,hasSirop:true,section:'Aromatisées',imgUrl:'images/panache.png'},
+  {id:'p30',cat:'bieres',name:'Monaco',sub:'Bière + grenadine',price:4.00,tva:20,active:true,imgUrl:'images/monaco.png'},
+  {id:'p66',cat:'bieres',name:'Picon Bière',sub:'Bière + amer Picon',price:5.00,tva:20,active:true,imgUrl:'images/picon-biere.png'},
+  // ══════════════════════════════════════════════
+  // COCKTAILS (TVA 20%)
+  // ══════════════════════════════════════════════
+  {id:'p10',cat:'cocktails',name:'Ricard / Pastis',sub:'Apéritif anisé',price:4.00,tva:20,active:true,section:'Apéritifs',imgUrl:'images/ricard.png'},
+  {id:'p11',cat:'cocktails',name:'Martini',sub:'Rouge ou Blanc',price:4.00,tva:20,active:true,imgUrl:'images/martini.png'},
+  {id:'p12',cat:'cocktails',name:'Kir Tranquille',sub:'Vin blanc + crème de cassis',price:4.00,tva:20,active:true,imgUrl:'images/kir-blanc.png'},
+  {id:'p67',cat:'cocktails',name:'Kir Pétillant',sub:'Crémant + crème de cassis',price:4.50,tva:20,active:true,imgUrl:'images/kir-petillant.png'},
+  {id:'p68',cat:'cocktails',name:'Americano',sub:'Campari, vermouth rouge, soda',price:6.00,tva:20,active:true,imgUrl:'images/americano.png'},
+  {id:'p69',cat:'cocktails',name:'Campari',sub:'Amer italien',price:5.00,tva:20,active:true,imgUrl:'images/campari.png'},
+  {id:'p13',cat:'cocktails',name:'Mojito',sub:'Rhum, citron vert, menthe',price:8.00,tva:20,active:true,section:'Cocktails',imgUrl:'images/mojito.png'},
+  {id:'p14',cat:'cocktails',name:'Apérol Spritz',sub:'Apérol, prosecco, orange',price:8.00,tva:20,active:true,imgUrl:'images/aperol-spritz.png'},
+  {id:'p15',cat:'cocktails',name:'Sangria',sub:'Vin rouge, fruits, épices',price:6.00,tva:20,active:true,imgUrl:'images/sangria.png'},
+  {id:'p16',cat:'cocktails',name:'Gin Tonic',sub:'Gin + Schweppes tonic',price:6.00,tva:20,active:true,imgUrl:'images/gin-tonic.png'},
+  {id:'p17',cat:'cocktails',name:'Cuba Libre',sub:'Rhum, Coca, citron vert',price:7.00,tva:20,active:true,imgUrl:'images/cuba-libre.png'},
+  {id:'p18',cat:'cocktails',name:'Shooter',sub:'Au choix',price:3.50,tva:20,active:true,section:'Shooters',imgUrl:'images/shoot.png'},
+  {id:'p19',cat:'cocktails',name:'1m de Shooters',sub:'Rangée festive !',price:30.00,tva:20,active:true,imgUrl:'images/1-m-de-shoot.png'},
+  // ══════════════════════════════════════════════
+  // VINS (TVA 20%) — avec double tarif Verre/Bouteille
+  // ══════════════════════════════════════════════
+  {id:'p31',cat:'vins',name:"L'Antocyane (verre)",sub:'AOP vin de Loir 2022',price:4.50,tva:20,active:true,section:'Vins Rouges',imgUrl:'images/verre-de-vin-rouge.png'},
+  {id:'p32',cat:'vins',name:'Côte de Bœuf (verre)',sub:'IGP Syrah Marselan',price:6.00,tva:20,active:true,imgUrl:'images/verre-de-vin-rouge.png'},
+  {id:'p70',cat:'vins',name:'Chinon (bouteille)',sub:'AOP Loire — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p33',cat:'vins',name:'Chardonnay Moelleux',sub:'IGP 2022 — verre',price:5.50,tva:20,active:true,section:'Vins Blancs',imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p34',cat:'vins',name:'Chardonnay Sec',sub:'IGP Jean Giner — verre',price:5.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  // Double tarif: Jasnière Vert Galant
+  {id:'p71',cat:'vins',name:'Jasnière Vert Galant (verre)',sub:'AOC Jasnière — verre',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p72',cat:'vins',name:'Jasnière Vert Galant (bout.)',sub:'AOC Jasnière — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  // Double tarif: Jasnière Cuvée du Perrés
+  {id:'p73',cat:'vins',name:'Jasnière Cuvée Perrés (verre)',sub:'AOC Jasnière — verre',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p74',cat:'vins',name:'Jasnière Cuvée Perrés (bout.)',sub:'AOC Jasnière — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  // Rosés
+  {id:'p35',cat:'vins',name:'Iles de Beauté',sub:'IGP Rosé Corse — verre',price:4.50,tva:20,active:true,section:'Vins Rosés',imgUrl:'images/verre-vin-rose.png'},
+  // Double tarif: Montagne Blanche Rosé
+  {id:'p75',cat:'vins',name:'Montagne Blanche (verre)',sub:'Rosé — verre',price:4.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
+  {id:'p76',cat:'vins',name:'Montagne Blanche (bout.)',sub:'Rosé — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  // Double tarif: Cabernet d'Anjou
+  {id:'p77',cat:'vins',name:"Cabernet d'Anjou (verre)",sub:'Rosé demi-sec — verre',price:5.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
+  {id:'p78',cat:'vins',name:"Cabernet d'Anjou (bout.)",sub:'Rosé demi-sec — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  // Double tarif: Vouvray Bulles
+  {id:'p79',cat:'vins',name:'Vouvray Bulles (verre)',sub:'AOC effervescent — verre',price:6.00,tva:20,active:true,section:'Effervescents',imgUrl:'images/kir-petillant.png'},
+  {id:'p80',cat:'vins',name:'Vouvray Bulles (bout.)',sub:'AOC effervescent — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/kir-petillant.png'},
+  // Double tarif: Champagne
+  {id:'p36',cat:'vins',name:'Champagne N. Feuillatte (coupe)',sub:'Grande réserve BRUT — coupe',price:9.00,tva:20,active:true,section:'Champagne',imgUrl:'images/piscine-rose.png'},
+  {id:'p81',cat:'vins',name:'Champagne N. Feuillatte (bout.)',sub:'Grande réserve BRUT — bouteille 75cl',price:60.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  // ══════════════════════════════════════════════
+  // DIGESTIFS (TVA 20%)
+  // ══════════════════════════════════════════════
+  {id:'p82',cat:'digestifs',name:'Get 27',sub:'Liqueur de menthe',price:6.00,tva:20,active:true,section:'Liqueurs',imgUrl:'images/get-27.png'},
+  {id:'p83',cat:'digestifs',name:"Bailey's",sub:'Crème de whisky irlandais',price:7.00,tva:20,active:true,imgUrl:'images/baileys.png'},
+  {id:'p84',cat:'digestifs',name:'Cointreau',sub:'Liqueur triple sec',price:7.00,tva:20,active:true,imgUrl:'images/cointreau.png'},
+  {id:'p85',cat:'digestifs',name:'Curaçao',sub:'Liqueur orangée',price:6.00,tva:20,active:true,imgUrl:'images/curacao.png'},
+  {id:'p86',cat:'digestifs',name:'Menthe-Pastille',sub:'Liqueur de menthe douce',price:6.00,tva:20,active:true,imgUrl:'images/menthe-pastille.png'},
+  {id:'p87',cat:'digestifs',name:'Poire Williams',sub:'Eau-de-vie de poire',price:7.00,tva:20,active:true,section:'Eaux-de-vie',imgUrl:'images/poire.png'},
+  {id:'p88',cat:'digestifs',name:'Calvados',sub:'Eau-de-vie normande',price:7.00,tva:20,active:true,imgUrl:'images/calvados.png'},
+  {id:'p89',cat:'digestifs',name:'Cognac',sub:'Fine Champagne',price:8.00,tva:20,active:true,section:'Spiritueux Premium',imgUrl:'images/cognac.png'},
+  {id:'p90',cat:'digestifs',name:'Armagnac',sub:'Bas-Armagnac traditionnel',price:8.00,tva:20,active:true,imgUrl:'images/armagnac.png'},
+  {id:'p91',cat:'digestifs',name:'Rhum Ambré',sub:'Rhum vieilli',price:7.00,tva:20,active:true,imgUrl:'images/rhum-ambre.png'},
+  {id:'p92',cat:'digestifs',name:'Rhum Arrangé',sub:'Rhum maison aux fruits',price:6.00,tva:20,active:true,imgUrl:'images/rhum-arrange.png'},
+  {id:'p93',cat:'digestifs',name:'Jack Daniel\'s',sub:'Tennessee Whiskey',price:8.00,tva:20,active:true,imgUrl:'images/jack-daniel.png'},
+  {id:'p94',cat:'digestifs',name:'Clan Campbell',sub:'Blended Scotch Whisky',price:7.00,tva:20,active:true,imgUrl:'images/clan-campbell.png'},
+  {id:'p95',cat:'digestifs',name:'Aberlour',sub:'Single Malt Speyside',price:8.00,tva:20,active:true,imgUrl:'images/aberlour.png'},
+  {id:'p96',cat:'digestifs',name:'Vodka',sub:'Premium',price:6.00,tva:20,active:true,imgUrl:'images/vodka.png'},
+  // ══════════════════════════════════════════════
+  // ENTREES (TVA 10%)
+  // ══════════════════════════════════════════════
+  {id:'p37',cat:'entrees',name:'Salade Gésiers',sub:'Salade, tomates, PDT sautées, gésiers',price:10.00,tva:10,active:true,imgUrl:'images/salade-gesiers.png'},
+  {id:'p38',cat:'entrees',name:'Ardoise Charcuterie',sub:'Charcuterie selon arrivages',price:12.00,tva:10,active:true,hasVariant:true,variants:[{label:'Petite (½)',price:12},{label:'Moyenne (2/2)',price:20},{label:'Grande (3/2)',price:30}],imgUrl:'images/ardoise-charcuterie.png'},
+  {id:'p39',cat:'entrees',name:'Ardoise Créole',sub:'Calamars, acras, beignet morue',price:12.00,tva:10,active:true,hasVariant:true,variants:[{label:'Petite (½)',price:12},{label:'Moyenne (2/2)',price:20},{label:'Grande (3/2)',price:30}],imgUrl:'images/ardoise-creole.png'},
+  {id:'p40',cat:'entrees',name:'Carpaccio Tomate Burrata',sub:'Burrata 120g, pesto pistache',price:14.00,tva:10,active:true,imgUrl:'images/carpaccio-tomate-burrata.png'},
+  {id:'p41',cat:'entrees',name:'Os à Moëlle',sub:'20 min de cuisson',price:10.00,tva:10,active:true,imgUrl:'images/os-a-moelle.png'},
+  {id:'p42',cat:'entrees',name:'Salade Méchouia',sub:'Tomates, poivrons, thon, olives',price:11.00,tva:10,active:true,imgUrl:'images/salade-mechouia.png'},
+  // ══════════════════════════════════════════════
+  // PLATS (TVA 10%)
+  // ══════════════════════════════════════════════
+  {id:'p43',cat:'plats',name:'Plat du Jour',sub:'Ex : Pâtes maison du chef',price:14.50,tva:10,active:true,pdj:true,imgUrl:'images/plat-du-jour.png'},
+  {id:'p44',cat:'plats',name:'Saumon Frais',sub:'Garniture incluse',price:15.00,tva:10,active:true,pdj:true,imgUrl:'images/saumon-frais.png'},
+  {id:'p45',cat:'plats',name:'Poisson du Jour',sub:'Ex : Dorade — selon arrivage',price:17.00,tva:10,active:true,pdj:true,imgUrl:'images/poisson-du-jour.png'},
+  {id:'p46',cat:'plats',name:'Assiette de la Mer',sub:'Poisson, calamars, crevettes, pesto',price:25.00,tva:10,active:true,imgUrl:'images/assiette-de-la-mer.png'},
+  {id:'p47',cat:'plats',name:'Burger Maison',sub:'Steak haché maison, avocat, cheddar',price:16.00,tva:10,active:true,imgUrl:'images/burger-maison.png'},
+  {id:'p48',cat:'plats',name:'Double Burger',sub:'Double steak ou végétarien',price:22.00,tva:10,active:true,imgUrl:'images/double-burger.png'},
+  {id:'p49',cat:'plats',name:"Côtes d'Agneau",sub:'Garniture au choix',price:18.50,tva:10,active:true,hasCuisson:true,hasGarniture:true,imgUrl:'images/cotes-d-agneau.png'},
+  {id:'p50',cat:'plats',name:'Entrecôte 300g',sub:'Garniture au choix',price:26.00,tva:10,active:true,hasCuisson:true,hasGarniture:true,imgUrl:'images/entrecote-300g.png'},
+  {id:'p51',cat:'plats',name:'Côte de Bœuf 1kg',sub:'PDT sautées, frites, légumes grillés',price:65.00,tva:10,active:true,hasCuisson:true,hasGarniture:true,imgUrl:'images/cote-de-boeuf-1kg.png'},
+  {id:'p52',cat:'plats',name:'Garniture Supplémentaire',sub:'PDT, salade, pâtes ou frites',price:4.00,tva:10,active:true},
+  // ══════════════════════════════════════════════
+  // SALADES (TVA 10%)
+  // ══════════════════════════════════════════════
+  {id:'p53',cat:'salades',name:'La Chèvre / Vegan',sub:'Salade, tomates, PDT, toast chèvre',price:16.00,tva:10,active:true,imgUrl:'images/salade-chevre-chaud.png'},
+  {id:'p54',cat:'salades',name:'La Gésiers',sub:'Salade, tomates, PDT, gésiers',price:16.00,tva:10,active:true,imgUrl:'images/salade-nicoise.png'},
+  {id:'p55',cat:'salades',name:'La Chicken',sub:'Salade, tomates, PDT, poulet curry',price:17.00,tva:10,active:true,imgUrl:'images/salade-caesar.png'},
+  {id:'p56',cat:'salades',name:'La Gourmande',sub:'Salade, lardons, toast chèvre, gésiers',price:19.00,tva:10,active:true,imgUrl:'images/salade-italienne.png'},
+  // ══════════════════════════════════════════════
+  // DESSERTS (TVA 10%)
+  // ══════════════════════════════════════════════
+  {id:'p57',cat:'desserts',name:'Tarte de Saison',sub:'Selon fruits du moment',price:7.00,tva:10,active:true,imgUrl:'images/tarte-tatin.png'},
+  {id:'p58',cat:'desserts',name:'Crumble Banane Nutella',sub:'Flambé au rhum',price:8.00,tva:10,active:true,imgUrl:'images/crumble-banane-nutella.png'},
+  {id:'p59',cat:'desserts',name:'Crème Brûlée Maison',sub:'Recette traditionnelle',price:7.00,tva:10,active:true,imgUrl:'images/creme-brulee.png'},
+  {id:'p60',cat:'desserts',name:'Mousse au Chocolat',sub:'Chocolat noir, maison',price:7.00,tva:10,active:true,imgUrl:'images/mousse-chocolat.png'},
+  {id:'p61',cat:'desserts',name:'Tiramisu',sub:'Recette classique italienne',price:8.50,tva:10,active:true,imgUrl:'images/tiramisu.png'},
+  {id:'p62',cat:'desserts',name:'Café Gourmand',sub:'Espresso + mignardises maison',price:9.00,tva:10,active:true,imgUrl:'images/cafe-gourmand.png'},
 ];
 
 // ── Image URL mapping (pour migration utilisateurs existants) ──
 const IMG_MAP = {
   p1:'images/soda.png',p2:'images/sirop-menthe-a-l_eau.png',p3:'images/jus-de-fruit.png',
   p4:'images/biere-ss-alcool.png',p5:'images/diabolo.png',p6:'images/mocktail.png',
-  p7:'images/50-cl-st-pelligrino.png',p8:'images/vittel-50-cl.png',p9:'images/ricard.png',
-  p10:'images/martini.png',p11:'images/kir-blanc.png',p12:'images/kir-petillant.png',
+  p7:'images/50-cl-st-pelligrino.png',p8:'images/1l-st-pelligrino.png',p9:'images/vittel-50-cl.png',
+  p10:'images/ricard.png',p11:'images/martini.png',p12:'images/kir-blanc.png',
   p13:'images/mojito.png',p14:'images/aperol-spritz.png',p15:'images/sangria.png',
   p16:'images/gin-tonic.png',p17:'images/cuba-libre.png',p18:'images/shoot.png',
   p19:'images/1-m-de-shoot.png',p20:'images/demi-blonde.png',p21:'images/pinte-blonde.png',
   p22:'images/blanche-25.png',p23:'images/blanche-50.png',p24:'images/biere-ambree-25cl.png',
-  p25:'images/50-cl-rouge.png',p26:'images/desperados.png',p27:'images/chimay.png',
-  p28:'images/duvel-1.png',p29:'images/panache.png',p30:'images/monaco.png',
+  p25:'images/biere-ambre-50-cl.png','p25b':'images/50-cl-rouge.png',
+  p26:'images/desperados.png',p27:'images/chimay.png',p28:'images/duvel-1.png',
+  p29:'images/panache.png',p30:'images/monaco.png',
   p31:'images/verre-de-vin-rouge.png',p32:'images/verre-de-vin-rouge.png',
   p33:'images/verre-vin-blanc.png',p34:'images/verre-vin-blanc.png',
   p35:'images/verre-vin-rose.png',p36:'images/piscine-rose.png',
@@ -1356,7 +1421,21 @@ const IMG_MAP = {
   p55:'images/salade-caesar.png',p56:'images/salade-italienne.png',
   p57:'images/tarte-tatin.png',p58:'images/crumble-banane-nutella.png',
   p59:'images/creme-brulee.png',p60:'images/mousse-chocolat.png',
-  p61:'images/tiramisu.png',p62:'images/cafe-gourmand.png'
+  p61:'images/tiramisu.png',p62:'images/cafe-gourmand.png',
+  p63:'images/mort-subitee.png',p64:'images/kriek-cerise.png',p65:'images/black-licorne.png',
+  p66:'images/picon-biere.png',p67:'images/kir-petillant.png',p68:'images/americano.png',
+  p69:'images/campari.png',p70:'images/bouteille-rouge-chinon.png',
+  p71:'images/verre-vin-blanc.png',p72:'images/verre-vin-blanc.png',
+  p73:'images/verre-vin-blanc.png',p74:'images/verre-vin-blanc.png',
+  p75:'images/verre-vin-rose.png',p76:'images/piscine-rose.png',
+  p77:'images/verre-vin-rose.png',p78:'images/piscine-rose.png',
+  p79:'images/kir-petillant.png',p80:'images/kir-petillant.png',
+  p81:'images/piscine-rose.png',
+  p82:'images/get-27.png',p83:'images/baileys.png',p84:'images/cointreau.png',
+  p85:'images/curacao.png',p86:'images/menthe-pastille.png',p87:'images/poire.png',
+  p88:'images/calvados.png',p89:'images/cognac.png',p90:'images/armagnac.png',
+  p91:'images/rhum-ambre.png',p92:'images/rhum-arrange.png',p93:'images/jack-daniel.png',
+  p94:'images/clan-campbell.png',p95:'images/aberlour.png',p96:'images/vodka.png'
 };
 
 // Load data
@@ -1558,21 +1637,37 @@ let pendingOptionsPid = null;
 
 function addToTicket(pid){
   const p=products.find(x=>x.id===pid); if(!p) return;
-  // Check if product has options
-  if(p.hasCuisson || p.hasGarniture){
+  // Check if product has options (cuisson, garniture, variant, sirop)
+  if(p.hasCuisson || p.hasGarniture || p.hasVariant || p.hasSirop){
     openOptionsModal(pid);
     return;
   }
-  addToTicketDirect(pid, null, null);
+  addToTicketDirect(pid, null, null, null, false);
 }
 
-function addToTicketDirect(pid, cuisson, garniture){
+function addToTicketDirect(pid, cuisson, garniture, variantLabel, addSirop){
   const p=products.find(x=>x.id===pid); if(!p) return;
   // Stock check
   if(p.stock!==undefined && p.stock>=0 && p.stock===0){ toast('❌ '+p.name+' — Épuisé','r'); return; }
-  const ex=ticket.find(r=>r.pid===pid&&r.personId===(activePerson||null)&&(r.cuisson||'')===(cuisson||'')&&(r.garniture||'')===(garniture||''));
+  // Determine price (variant overrides base price)
+  let finalPrice = p.price;
+  let displayName = p.name;
+  if(variantLabel && p.variants){
+    const v = p.variants.find(x=>x.label===variantLabel);
+    if(v){ finalPrice = v.price; displayName = p.name+' — '+v.label; }
+  }
+  // Match existing row
+  const matchKey = pid+'|'+(variantLabel||'')+'|'+(cuisson||'')+'|'+(garniture||'')+'|'+(addSirop?'sirop':'');
+  const ex=ticket.find(r=>r._matchKey===matchKey&&r.personId===(activePerson||null));
   if(ex) ex.qty++;
-  else ticket.push({rid:uid(),pid,name:p.name,price:p.price,tva:p.tva||10,qty:1,personId:activePerson||null,cuisson:cuisson||null,garniture:garniture||null});
+  else {
+    const row = {rid:uid(),pid,name:displayName,price:finalPrice,tva:p.tva||10,qty:1,personId:activePerson||null,cuisson:cuisson||null,garniture:garniture||null,_matchKey:matchKey};
+    ticket.push(row);
+    // Add sirop supplement as separate line
+    if(addSirop){
+      ticket.push({rid:uid(),pid:pid+'_sirop',name:'  + Supp. Sirop',price:0.50,tva:p.tva||10,qty:1,personId:activePerson||null,_matchKey:matchKey+'_sirop',_isSupplement:true});
+    }
+  }
   // Decrement stock
   if(p.stock!==undefined && p.stock>0){ p.stock--; saveAll(); }
   renderTicket(); renderMenu();
@@ -1586,6 +1681,15 @@ function openOptionsModal(pid){
   const cuissons = (settings.cuissons||'').split(',').map(s=>s.trim()).filter(Boolean);
   const garnitures = (settings.garnitures||'').split(',').map(s=>s.trim()).filter(Boolean);
   let html='';
+  // Variant selector (ardoises sizes)
+  if(p.hasVariant && p.variants && p.variants.length){
+    html+=`<div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">📏 Taille</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-variant-btns">
+        ${p.variants.map((v,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${esc(v.label)}" data-price="${v.price}" onclick="selectOptChip(this,'variant')">${v.label} — ${v.price.toFixed(2)}€</button>`).join('')}
+      </div>
+    </div>`;
+  }
   if(p.hasCuisson && cuissons.length){
     html+=`<div style="margin-bottom:16px">
       <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🔥 Cuisson</div>
@@ -1599,6 +1703,16 @@ function openOptionsModal(pid){
       <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🍟 Garniture</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-garniture-btns">
         ${garnitures.map((g,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${esc(g)}" onclick="selectOptChip(this,'garniture')">${g}</button>`).join('')}
+      </div>
+    </div>`;
+  }
+  // Sirop supplement toggle
+  if(p.hasSirop){
+    html+=`<div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🍯 Supplément</div>
+      <div style="display:flex;gap:6px" id="opt-sirop-btns">
+        <button class="opt-chip sel" data-val="non" onclick="selectOptChip(this,'sirop')">Sans sirop</button>
+        <button class="opt-chip" data-val="oui" onclick="selectOptChip(this,'sirop')">+ Sirop (+0,50€)</button>
       </div>
     </div>`;
   }
@@ -1616,9 +1730,13 @@ function confirmOptions(){
   if(!pendingOptionsPid) return;
   const cuissonEl = document.querySelector('#opt-cuisson-btns .opt-chip.sel');
   const garnitureEl = document.querySelector('#opt-garniture-btns .opt-chip.sel');
+  const variantEl = document.querySelector('#opt-variant-btns .opt-chip.sel');
+  const siropEl = document.querySelector('#opt-sirop-btns .opt-chip.sel');
   const cuisson = cuissonEl ? cuissonEl.dataset.val : null;
   const garniture = garnitureEl ? garnitureEl.dataset.val : null;
-  addToTicketDirect(pendingOptionsPid, cuisson, garniture);
+  const variantLabel = variantEl ? variantEl.dataset.val : null;
+  const addSirop = siropEl ? siropEl.dataset.val === 'oui' : false;
+  addToTicketDirect(pendingOptionsPid, cuisson, garniture, variantLabel, addSirop);
   closeOptionsModal();
 }
 
