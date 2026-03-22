@@ -760,6 +760,18 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
           </div>
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🤖 Clé API Gemini (IA)</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Pour la génération de descriptions et photos IA du Plat du Jour. Obtenez une clé gratuite sur <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com</a>. La clé est stockée de manière sécurisée dans Firebase, jamais dans le code source.</div>
+          <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
+              <label class="form-label">Clé API</label>
+              <input class="form-input" type="password" id="s-gemini-key" placeholder="AIzaSy..." style="letter-spacing:1px;font-family:monospace;font-size:12px">
+            </div>
+            <button class="hbtn" onclick="saveGeminiKey(document.getElementById('s-gemini-key').value.trim())" style="height:38px;padding:0 16px;background:rgba(34,201,122,.15);border:1px solid rgba(34,201,122,.3);color:#22c97a;font-weight:700">💾 Sauvegarder</button>
+          </div>
+          <div id="gemini-key-status" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
+        </div>
+        <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
           <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🔒 Code PIN de la caisse</div>
           <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Protège l'accès à la caisse — partagez uniquement avec votre équipe</div>
           <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
@@ -1295,32 +1307,37 @@ const DEFAULT_PRODUCTS = [
   {id:'p66',cat:'alcools',name:'Picon Bière',sub:'Bière + amer Picon',price:5.00,tva:20,active:true,imgUrl:'images/picon-biere.png'},
   // ── Vins Rouges (verre ballon, robe pourpre) ──
   {id:'p31',cat:'alcools',name:"L'Antocyane (verre)",sub:'AOP vin de Loir 2022',price:4.50,tva:20,active:true,section:'Vins Rouges',imgUrl:'images/verre-de-vin-rouge.png'},
-  {id:'p32',cat:'alcools',name:'Côte de Bœuf (verre)',sub:'IGP Syrah Marselan',price:6.00,tva:20,active:true,imgUrl:'images/verre-de-vin-rouge.png'},
-  {id:'p70',cat:'alcools',name:'Chinon (bouteille)',sub:'AOP Loire — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
-  {id:'p97',cat:'alcools',name:'Saumur Champigny (bout.)',sub:'AOP Loire — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
-  {id:'p98',cat:'alcools',name:'Côte du Rhône (bout.)',sub:'AOP Rhône — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
-  {id:'p99',cat:'alcools',name:'Graves de Vayres (bout.)',sub:'AOP Bordeaux — bouteille 75cl',price:26.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
-  {id:'p100',cat:'alcools',name:'Lussac St-Émilion (bout.)',sub:'AOP Bordeaux — bouteille 75cl',price:32.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
-  {id:'p101',cat:'alcools',name:'St Nicolas de Bourgueil (bout.)',sub:'AOP Loire — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
-  {id:'p102',cat:'alcools',name:'Pauillac (bout.)',sub:'AOP Médoc — bouteille 75cl',price:45.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p105',cat:'alcools',name:"L'Antocyane (bout.)",sub:'AOP vin de Loir 2022 — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p32',cat:'alcools',name:'Côte de Bœuf (verre)',sub:'IGP Syrah Marselan 2022',price:6.00,tva:20,active:true,imgUrl:'images/verre-de-vin-rouge.png'},
+  {id:'p106',cat:'alcools',name:'Côte de Bœuf (bout.)',sub:'IGP Syrah Marselan 2022 — bouteille 75cl',price:26.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p70',cat:'alcools',name:'Chinon (bouteille)',sub:'ACC domaine du Noyer 2022 — bouteille 75cl',price:27.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p97',cat:'alcools',name:'Saumur Champigny (bout.)',sub:'AOP Charles de Villeneuve 2021 — bouteille 75cl',price:26.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p98',cat:'alcools',name:'Côte du Rhône (bout.)',sub:'AOC Vieille Vigne — bouteille 75cl',price:26.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p99',cat:'alcools',name:'Graves de Vayres (bout.)',sub:'AOC Château Bel-Air 2022 — bouteille 75cl',price:32.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p100',cat:'alcools',name:'Lussac St-Émilion (bout.)',sub:'ASEC Château Vieux Moulin 2023 — bouteille 75cl',price:32.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p101',cat:'alcools',name:'St Nicolas de Bourgueil (bout.)',sub:'IGP Val de Loire 2020 — bouteille 75cl',price:29.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
+  {id:'p102',cat:'alcools',name:'Pauillac (bout.)',sub:'APC Pauillac de Batailley 2018 — bouteille 75cl',price:78.00,tva:20,active:true,imgUrl:'images/bouteille-rouge-chinon.png'},
   // ── Vins Blancs (verre tulipe, robe or pâle) ──
-  {id:'p33',cat:'alcools',name:'Chardonnay Moelleux (verre)',sub:'IGP 2022',price:5.50,tva:20,active:true,section:'Vins Blancs',imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p34',cat:'alcools',name:'Chardonnay Sec (verre)',sub:'IGP Jean Giner',price:5.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p71',cat:'alcools',name:'Jasnière Vert Galant (verre)',sub:'AOC Jasnière',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p72',cat:'alcools',name:'Jasnière Vert Galant (bout.)',sub:'AOC Jasnière — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p73',cat:'alcools',name:'Jasnière Cuvée Perrés (verre)',sub:'AOC Jasnière',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p74',cat:'alcools',name:'Jasnière Cuvée Perrés (bout.)',sub:'AOC Jasnière — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
-  {id:'p103',cat:'alcools',name:'Chablis (bout.)',sub:'AOP Bourgogne — bouteille 75cl',price:30.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p33',cat:'alcools',name:'Chardonnay Moelleux (verre)',sub:'IGP Domaine du four à chaux 2022',price:5.50,tva:20,active:true,section:'Vins Blancs',imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p107',cat:'alcools',name:'Chardonnay Moelleux (bout.)',sub:'IGP Domaine du four à chaux 2022 — bouteille 75cl',price:23.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p34',cat:'alcools',name:'Chardonnay Sec (verre)',sub:'IGP Jean Giner 2022',price:5.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p108',cat:'alcools',name:'Chardonnay Sec (bout.)',sub:'IGP Jean Giner 2022 — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p71',cat:'alcools',name:'Jasnière Vert Galant (verre)',sub:'AOP domaine Martellière 2022',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p72',cat:'alcools',name:'Jasnière Vert Galant (bout.)',sub:'AOP domaine Martellière 2022 — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p73',cat:'alcools',name:'Jasnière Cuvée Perrés (verre)',sub:'AOP domaine Martellière 2022',price:6.50,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p74',cat:'alcools',name:'Jasnière Cuvée Perrés (bout.)',sub:'AOP domaine Martellière 2022 — bouteille 75cl',price:28.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p103',cat:'alcools',name:'Chablis (bout.)',sub:'ACC 2022 — bouteille 75cl',price:32.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
   // ── Vins Rosés (robe pétale de rose/saumon) ──
   {id:'p35',cat:'alcools',name:'Iles de Beauté (verre)',sub:'IGP Rosé Corse',price:4.50,tva:20,active:true,section:'Vins Rosés',imgUrl:'images/verre-vin-rose.png'},
-  {id:'p75',cat:'alcools',name:'Montagne Blanche (verre)',sub:'Rosé',price:4.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
-  {id:'p76',cat:'alcools',name:'Montagne Blanche (bout.)',sub:'Rosé — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
-  {id:'p77',cat:'alcools',name:"Cabernet d'Anjou (verre)",sub:'Rosé demi-sec',price:5.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
-  {id:'p78',cat:'alcools',name:"Cabernet d'Anjou (bout.)",sub:'Rosé demi-sec — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
-  {id:'p104',cat:'alcools',name:'Côte de Provence (bout.)',sub:'AOP Provence — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  {id:'p109',cat:'alcools',name:'Iles de Beauté (bout.)',sub:'IGP Rosé Corse — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  {id:'p75',cat:'alcools',name:'Montagne Blanche (verre)',sub:'ACVC Coteaux du Vendômois 2023',price:4.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
+  {id:'p76',cat:'alcools',name:'Montagne Blanche (bout.)',sub:'ACVC Coteaux du Vendômois 2023 — bouteille 75cl',price:22.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  {id:'p77',cat:'alcools',name:"Cabernet d'Anjou (verre)",sub:'AOP Val de Loire 2023 — demi-sec',price:5.50,tva:20,active:true,imgUrl:'images/verre-vin-rose.png'},
+  {id:'p78',cat:'alcools',name:"Cabernet d'Anjou (bout.)",sub:'AOP Val de Loire 2023 — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  {id:'p104',cat:'alcools',name:'Côte de Provence (bout.)',sub:'AOP Les trois Cyprès 2021 — bouteille 75cl',price:27.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
   // ── Effervescents (flûte/coupe, robe or clair, bulles fines — PAS de rosé) ──
-  {id:'p79',cat:'alcools',name:'Vouvray Bulles (verre)',sub:'AOC effervescent blanc',price:6.00,tva:20,active:true,section:'Effervescents',imgUrl:'images/kir-petillant.png'},
-  {id:'p80',cat:'alcools',name:'Vouvray Bulles (bout.)',sub:'AOC effervescent blanc — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/kir-petillant.png'},
+  {id:'p79',cat:'alcools',name:'Vouvray Bulles (verre)',sub:'BRUT Charles de Villeneuve — verre',price:6.00,tva:20,active:true,section:'Effervescents',imgUrl:'images/kir-petillant.png'},
+  {id:'p80',cat:'alcools',name:'Vouvray Bulles (bout.)',sub:'BRUT Charles de Villeneuve — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/kir-petillant.png'},
   {id:'p36',cat:'alcools',name:'Champagne N. Feuillatte (coupe)',sub:'Grande réserve BRUT — coupe',price:9.00,tva:20,active:true,section:'Champagne',imgUrl:'images/piscine-rose.png'},
   {id:'p81',cat:'alcools',name:'Champagne N. Feuillatte (bout.)',sub:'Grande réserve BRUT — bouteille 75cl',price:60.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
   // ── Apéritifs ──
@@ -2582,6 +2599,15 @@ function applySettingsForm(){
   document.getElementById('s-cuissons').value=settings.cuissons||'Bleu,Saignant,À point,Bien cuit';
   document.getElementById('s-garnitures').value=settings.garnitures||'Frites maison,Salade,Pommes de terre sautées,Pâtes';
   document.getElementById('s-serveur-pin').value=LS.get('serveur_pin','0000');
+  // Gemini key status
+  const gk=GEMINI_KEY_PDJ;
+  const gkStatus=document.getElementById('gemini-key-status');
+  if(gk&&gk.length>10){
+    document.getElementById('s-gemini-key').value=gk;
+    gkStatus.innerHTML='<span style="color:#22c97a">&#10003; Clé configurée ('+gk.slice(0,8)+'...'+gk.slice(-4)+')</span>';
+  } else {
+    gkStatus.innerHTML='<span style="color:#e84040">&#10007; Aucune clé configurée — les fonctions IA sont désactivées</span>';
+  }
 }
 function saveSettings(){
   settings.showImg=document.getElementById('s-showimg').checked;
@@ -3795,7 +3821,36 @@ document.addEventListener('DOMContentLoaded',()=>{
 // ════════════════════════════════════════════════
 // ⭐ PLAT DU JOUR — Modal Admin + Popup quotidienne
 // ════════════════════════════════════════════════
-const GEMINI_KEY_PDJ = 'AIzaSyAsbJwWYO5Mta-_9V6bRFRRIJPNWSDFsqc';
+// Clé Gemini sécurisée: stockée dans Firebase (config/apikeys) ou localStorage admin
+// JAMAIS en dur dans le code source pour éviter l'exposition sur GitHub
+let GEMINI_KEY_PDJ = LS.get('gemini_api_key', '');
+
+// Charge la clé depuis Firebase si disponible
+(function loadGeminiKey(){
+  if(window.FB){
+    window.FB.listen('config','apikeys', data => {
+      if(data && data.geminiKey){
+        GEMINI_KEY_PDJ = data.geminiKey;
+        LS.set('gemini_api_key', data.geminiKey);
+      }
+    });
+  }
+})();
+
+// Sauvegarde la clé dans Firebase + localStorage
+function saveGeminiKey(key){
+  if(!key || key.length < 10) return toast('Clé API invalide','r');
+  GEMINI_KEY_PDJ = key;
+  LS.set('gemini_api_key', key);
+  if(window.FB){
+    window.FB.set('config','apikeys',{geminiKey:key, updatedAt: window.FB.ts()})
+      .then(()=>toast('✓ Clé API Gemini sauvegardée (Firebase + local)','g'))
+      .catch(()=>toast('Clé sauvée localement, erreur Firebase','o'));
+  } else {
+    toast('✓ Clé API Gemini sauvegardée localement','g');
+  }
+}
+
 let pdjImgData = null;
 
 function openPdjModal() {
@@ -3870,6 +3925,7 @@ function handlePdjImg(e) {
 }
 
 async function generatePdjDesc() {
+  if (!GEMINI_KEY_PDJ) return toast('Configure ta clé API Gemini dans les Paramètres → Clé API Gemini (IA)', 'r');
   const nom = document.getElementById('pdj-nom').value.trim();
   if (!nom) return toast('Saisis d\'abord le nom du plat', 'o');
   const btn = document.getElementById('pdj-btn-desc');
@@ -3890,6 +3946,7 @@ async function generatePdjDesc() {
 }
 
 async function generatePdjImage() {
+  if (!GEMINI_KEY_PDJ) return toast('Configure ta clé API Gemini dans les Paramètres → Clé API Gemini (IA)', 'r');
   const nom = document.getElementById('pdj-nom').value.trim();
   if (!nom) return toast('Saisis d\'abord le nom du plat', 'o');
   const btn = document.getElementById('pdj-btn-img');
