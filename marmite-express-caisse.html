@@ -1336,10 +1336,10 @@ const DEFAULT_PRODUCTS = [
   {id:'p78',cat:'alcools',name:"Cabernet d'Anjou (bout.)",sub:'AOP Val de Loire 2023 — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
   {id:'p104',cat:'alcools',name:'Côte de Provence (bout.)',sub:'AOP Les trois Cyprès 2021 — bouteille 75cl',price:27.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
   // ── Effervescents (flûte/coupe, robe or clair, bulles fines — PAS de rosé) ──
-  {id:'p79',cat:'alcools',name:'Vouvray Bulles (verre)',sub:'BRUT Charles de Villeneuve — verre',price:6.00,tva:20,active:true,section:'Effervescents',imgUrl:'images/kir-petillant.png'},
-  {id:'p80',cat:'alcools',name:'Vouvray Bulles (bout.)',sub:'BRUT Charles de Villeneuve — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/kir-petillant.png'},
-  {id:'p36',cat:'alcools',name:'Champagne N. Feuillatte (coupe)',sub:'Grande réserve BRUT — coupe',price:9.00,tva:20,active:true,section:'Champagne',imgUrl:'images/piscine-rose.png'},
-  {id:'p81',cat:'alcools',name:'Champagne N. Feuillatte (bout.)',sub:'Grande réserve BRUT — bouteille 75cl',price:60.00,tva:20,active:true,imgUrl:'images/piscine-rose.png'},
+  {id:'p79',cat:'alcools',name:'Vouvray Bulles (verre)',sub:'BRUT Charles de Villeneuve — verre',price:6.00,tva:20,active:true,section:'Effervescents',imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p80',cat:'alcools',name:'Vouvray Bulles (bout.)',sub:'BRUT Charles de Villeneuve — bouteille 75cl',price:24.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p36',cat:'alcools',name:'Champagne N. Feuillatte (coupe)',sub:'Grande réserve BRUT — coupe',price:9.00,tva:20,active:true,section:'Champagne',imgUrl:'images/verre-vin-blanc.png'},
+  {id:'p81',cat:'alcools',name:'Champagne N. Feuillatte (bout.)',sub:'Grande réserve BRUT — bouteille 75cl',price:60.00,tva:20,active:true,imgUrl:'images/verre-vin-blanc.png'},
   // ── Apéritifs ──
   {id:'p10',cat:'alcools',name:'Ricard / Pastis',sub:'Apéritif anisé',price:4.00,tva:20,active:true,section:'Apéritifs',imgUrl:'images/ricard.png'},
   {id:'p11',cat:'alcools',name:'Martini',sub:'Rouge ou Blanc',price:4.00,tva:20,active:true,imgUrl:'images/martini.png'},
@@ -1462,12 +1462,39 @@ const IMG_MAP = {
 let cats = LS.get('cats', DEFAULT_CATS);
 let products = LS.get('products', DEFAULT_PRODUCTS);
 
-// Migration: ajoute imgUrl aux produits existants qui n'en ont pas
-(function migrateImages(){
+// Migration: fusionne nouveaux produits + met à jour imgUrl/prix/sub
+(function migrateProducts(){
+  const DATA_VERSION = 7;
+  const currentVer = LS.get('data_version', 0);
   let changed = false;
+  // Ajoute produits manquants du DEFAULT
+  const existingIds = new Set(products.map(p => p.id));
+  DEFAULT_PRODUCTS.forEach(dp => {
+    if (!existingIds.has(dp.id)) {
+      products.push({...dp});
+      changed = true;
+    }
+  });
+  // Met à jour imgUrl manquantes
   products.forEach(p => {
     if (!p.imgUrl && IMG_MAP[p.id]) { p.imgUrl = IMG_MAP[p.id]; changed = true; }
   });
+  // Force mise à jour prix/sub/section si version a changé
+  if (currentVer < DATA_VERSION) {
+    const defaultMap = {};
+    DEFAULT_PRODUCTS.forEach(dp => { defaultMap[dp.id] = dp; });
+    products.forEach(p => {
+      const dp = defaultMap[p.id];
+      if (dp) {
+        if (p.price !== dp.price) { p.price = dp.price; changed = true; }
+        if (dp.sub && p.sub !== dp.sub) { p.sub = dp.sub; changed = true; }
+        if (dp.section && p.section !== dp.section) { p.section = dp.section; changed = true; }
+        if (dp.imgUrl && p.imgUrl !== dp.imgUrl) { p.imgUrl = dp.imgUrl; changed = true; }
+      }
+    });
+    LS.set('data_version', DATA_VERSION);
+    changed = true;
+  }
   if (changed) LS.set('products', products);
 })();
 let branding = LS.get('branding', {name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'});
