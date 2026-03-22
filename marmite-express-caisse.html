@@ -1464,7 +1464,7 @@ let products = LS.get('products', DEFAULT_PRODUCTS);
 
 // Migration: fusionne nouveaux produits + met à jour imgUrl/prix/sub
 (function migrateProducts(){
-  const DATA_VERSION = 8;
+  const DATA_VERSION = 9;
   const currentVer = LS.get('data_version', 0);
   let changed = false;
   // Ajoute produits manquants du DEFAULT
@@ -1479,19 +1479,24 @@ let products = LS.get('products', DEFAULT_PRODUCTS);
   products.forEach(p => {
     if (!p.imgUrl && IMG_MAP[p.id]) { p.imgUrl = IMG_MAP[p.id]; changed = true; }
   });
-  // Force mise à jour prix/sub/section si version a changé
+  // Force mise à jour complète si version a changé
   if (currentVer < DATA_VERSION) {
     const defaultMap = {};
     DEFAULT_PRODUCTS.forEach(dp => { defaultMap[dp.id] = dp; });
     products.forEach(p => {
       const dp = defaultMap[p.id];
       if (dp) {
-        if (p.price !== dp.price) { p.price = dp.price; changed = true; }
-        if (dp.sub && p.sub !== dp.sub) { p.sub = dp.sub; changed = true; }
-        if (dp.section && p.section !== dp.section) { p.section = dp.section; changed = true; }
-        if (dp.imgUrl && p.imgUrl !== dp.imgUrl) { p.imgUrl = dp.imgUrl; changed = true; }
+        ['price','sub','section','imgUrl','cat','tva','name','active','hasVariant','hasSirop','hasCuisson','hasGarniture','noCuisine'].forEach(k => {
+          if (dp[k] !== undefined && p[k] !== dp[k]) { p[k] = dp[k]; changed = true; }
+        });
+        if (dp.variants && JSON.stringify(p.variants) !== JSON.stringify(dp.variants)) { p.variants = dp.variants; changed = true; }
       }
     });
+    // Supprime les produits obsolètes qui ne sont plus dans DEFAULT
+    const defaultIds = new Set(DEFAULT_PRODUCTS.map(dp => dp.id));
+    const before = products.length;
+    products = products.filter(p => defaultIds.has(p.id));
+    if (products.length !== before) changed = true;
     LS.set('data_version', DATA_VERSION);
     changed = true;
   }
