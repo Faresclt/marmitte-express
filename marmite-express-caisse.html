@@ -1462,45 +1462,30 @@ const IMG_MAP = {
 let cats = LS.get('cats', DEFAULT_CATS);
 let products = LS.get('products', DEFAULT_PRODUCTS);
 
-// Migration: fusionne nouveaux produits + met à jour imgUrl/prix/sub
+// Migration: reset complet si version obsolète
 (function migrateProducts(){
-  const DATA_VERSION = 9;
+  const DATA_VERSION = 10;
   const currentVer = LS.get('data_version', 0);
-  let changed = false;
-  // Ajoute produits manquants du DEFAULT
-  const existingIds = new Set(products.map(p => p.id));
-  DEFAULT_PRODUCTS.forEach(dp => {
-    if (!existingIds.has(dp.id)) {
-      products.push({...dp});
-      changed = true;
-    }
-  });
-  // Met à jour imgUrl manquantes
-  products.forEach(p => {
-    if (!p.imgUrl && IMG_MAP[p.id]) { p.imgUrl = IMG_MAP[p.id]; changed = true; }
-  });
-  // Force mise à jour complète si version a changé
+  // Si version obsolète → reset complet produits + catégories
   if (currentVer < DATA_VERSION) {
-    const defaultMap = {};
-    DEFAULT_PRODUCTS.forEach(dp => { defaultMap[dp.id] = dp; });
-    products.forEach(p => {
-      const dp = defaultMap[p.id];
-      if (dp) {
-        ['price','sub','section','imgUrl','cat','tva','name','active','hasVariant','hasSirop','hasCuisson','hasGarniture','noCuisine'].forEach(k => {
-          if (dp[k] !== undefined && p[k] !== dp[k]) { p[k] = dp[k]; changed = true; }
-        });
-        if (dp.variants && JSON.stringify(p.variants) !== JSON.stringify(dp.variants)) { p.variants = dp.variants; changed = true; }
+    products = JSON.parse(JSON.stringify(DEFAULT_PRODUCTS));
+    cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
+    LS.set('products', products);
+    LS.set('cats', cats);
+    LS.set('data_version', DATA_VERSION);
+    console.log('[Migration] Reset complet v'+DATA_VERSION+': '+products.length+' produits, '+cats.length+' catégories');
+  } else {
+    // Ajoute produits manquants du DEFAULT (pour ajouts futurs)
+    let changed = false;
+    const existingIds = new Set(products.map(p => p.id));
+    DEFAULT_PRODUCTS.forEach(dp => {
+      if (!existingIds.has(dp.id)) {
+        products.push({...dp});
+        changed = true;
       }
     });
-    // Supprime les produits obsolètes qui ne sont plus dans DEFAULT
-    const defaultIds = new Set(DEFAULT_PRODUCTS.map(dp => dp.id));
-    const before = products.length;
-    products = products.filter(p => defaultIds.has(p.id));
-    if (products.length !== before) changed = true;
-    LS.set('data_version', DATA_VERSION);
-    changed = true;
+    if (changed) LS.set('products', products);
   }
-  if (changed) LS.set('products', products);
 })();
 let branding = LS.get('branding', {name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'});
 let settings = LS.get('settings', {showImg:true,tableMode:false,showSub:true,currency:'€',tva:5.5,cuissons:'Bleu,Saignant,À point,Bien cuit',garnitures:'Frites maison,Salade,Pommes de terre sautées,Pâtes'});
