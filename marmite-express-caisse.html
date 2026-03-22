@@ -4009,7 +4009,7 @@ function savePlatDuJour() {
   const p = products.find(x => x.id === selectedId);
   if (p) {
     p.sub = nom;
-    if (pdjImgData) { setImg(selectedId, pdjImgData); setImg(p.name, pdjImgData); }
+    if (pdjImgData) { setImg(selectedId, pdjImgData); setImg(p.name, pdjImgData); p.imgUrl = pdjImgData; }
     saveAll();
     renderProdList();
     renderMenu();
