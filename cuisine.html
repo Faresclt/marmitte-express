@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Cuisine — La Marmitte Express</title>
@@ -128,6 +129,7 @@ body{font-family:'DM Sans',sans-serif;background:#0a0b0e;color:#f0f0f4;height:10
 </div>
 
 <script type="module">
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, collection, onSnapshot, updateDoc, deleteDoc, doc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -284,7 +286,7 @@ function makeTicket(o, type) {
       <div><div class="tkt-time">${time}</div>${mins>0?`<div class="tkt-ago${late?' late-txt':''}">${mins} min</div>`:''}</div>
     </div>
     <div class="tkt-body">${itemsHTML}</div>
-    ${o.note?`<div class="tkt-note">⚠️ ${o.note}</div>`:''}
+    ${o.note?`<div class="tkt-note">⚠️ ${esc(o.note)}</div>`:''}
     <div class="tkt-act">${btns}</div>
   </div>`;
 }

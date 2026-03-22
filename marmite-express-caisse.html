@@ -2,6 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>CaisseApp — POS</title>
 <meta name="theme-color" content="#f5a623">
@@ -1548,7 +1549,7 @@ function applyBranding(){
   const nm = document.getElementById('hdr-name');
   const parts = (branding.name||'').trim().split(' ');
   if(parts.length>1){
-    nm.innerHTML = parts.slice(0,-1).join(' ')+' <span id="hdr-name-span">'+parts[parts.length-1]+'</span>';
+    nm.innerHTML = esc(parts.slice(0,-1).join(' '))+' <span id="hdr-name-span">'+esc(parts[parts.length-1])+'</span>';
   } else {
     nm.textContent = branding.name;
   }
@@ -2396,7 +2397,7 @@ function previewBrand(){
   const nm=document.getElementById('b-name').value||'Mon Restaurant';
   const tag=document.getElementById('b-tagline').value||'';
   const parts=nm.trim().split(' ');
-  document.getElementById('bp-name').innerHTML=parts.length>1?parts.slice(0,-1).join(' ')+' <span style="color:var(--accent)">'+parts[parts.length-1]+'</span>':nm;
+  document.getElementById('bp-name').innerHTML=parts.length>1?esc(parts.slice(0,-1).join(' '))+' <span style="color:var(--accent)">'+esc(parts[parts.length-1])+'</span>':esc(nm);
   document.getElementById('bp-tag').textContent=tag;
   // Show logo or emoji in preview
   const bpe=document.getElementById('bp-emoji');
@@ -2535,7 +2536,7 @@ function refreshSectionSuggestions(){
   const catId=document.getElementById('pm-cat').value;
   const chips=document.getElementById('section-chips');
   const secs=getSectionsForCat(catId);
-  chips.innerHTML=secs.map(s=>`<span onclick="document.getElementById('pm-section').value='${s.replace(/'/g,"\\'")}'" style="cursor:pointer;background:var(--card2);border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--text2);transition:border-color .15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">${esc(s)}</span>`).join('');
+  chips.innerHTML=secs.map(s=>`<span onclick="document.getElementById('pm-section').value='${esc(s.replace(/'/g,"\\'"))}'" style="cursor:pointer;background:var(--card2);border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--text2);transition:border-color .15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">${esc(s)}</span>`).join('');
 }
 function showSectionSuggest(val){
   const catId=document.getElementById('pm-cat').value;
@@ -2543,7 +2544,7 @@ function showSectionSuggest(val){
   const box=document.getElementById('section-suggest');
   if(!val||!secs.length){box.style.display='none';return;}
   box.style.display='block';
-  box.innerHTML=secs.map(s=>`<div onclick="document.getElementById('pm-section').value='${s.replace(/'/g,"\\'")}';hideSectionSuggest()" style="padding:9px 12px;cursor:pointer;font-size:13px;font-weight:600;transition:background .1s" onmouseover="this.style.background='var(--card)'" onmouseout="this.style.background=''">${esc(s)}</div>`).join('');
+  box.innerHTML=secs.map(s=>`<div onclick="document.getElementById('pm-section').value='${esc(s.replace(/'/g,"\\'"))}';hideSectionSuggest()" style="padding:9px 12px;cursor:pointer;font-size:13px;font-weight:600;transition:background .1s" onmouseover="this.style.background='var(--card)'" onmouseout="this.style.background=''">${esc(s)}</div>`).join('');
 }
 function hideSectionSuggest(){ document.getElementById('section-suggest').style.display='none'; }
 
@@ -2724,7 +2725,7 @@ async function backupToFirebase(){
     toast('☁️ Backup cloud effectué !','g');
   }catch(e){
     console.error('Backup error:', e);
-    statusEl.textContent='❌ Erreur : '+e.message;
+    statusEl.textContent='❌ Erreur lors du backup cloud';
     statusEl.style.color='var(--red)';
     toast('Erreur de backup','r');
   }
@@ -2774,7 +2775,7 @@ async function restoreFromFirebase(){
     toast('☁️ Données restaurées depuis Firebase !','g');
   }catch(e){
     console.error('Restore error:', e);
-    statusEl.textContent='❌ Erreur : '+e.message;
+    statusEl.textContent='❌ Erreur lors de la restauration';
     statusEl.style.color='var(--red)';
     toast('Erreur de restauration','r');
   }
@@ -3420,10 +3421,14 @@ window.resetTable = function(){
 // ═══════════════════════════════════════════════════════════════
 let pinEntry = '';
 const DEFAULT_PIN = '1234';
+let pinFailedAttempts = 0;
+let pinLockUntil = 0;
+let pinLockTimer = null;
 
 function getPin(){ return LS.get('caisse_pin', DEFAULT_PIN); }
 
 function pinPress(v){
+  if(Date.now() < pinLockUntil) return;
   if(v==='del'){ pinEntry=pinEntry.slice(0,-1); }
   else if(v==='ok'){ checkPin(); return; }
   else if(pinEntry.length<4){ pinEntry+=v; }
@@ -3440,17 +3445,36 @@ function updatePinDots(){
 }
 
 function checkPin(){
+  if(Date.now() < pinLockUntil){ pinEntry=''; updatePinDots(); return; }
   if(pinEntry===getPin()){
+    pinFailedAttempts = 0;
     const screen=document.getElementById('pin-screen');
     screen.style.transition='opacity .3s';
     screen.style.opacity='0';
     setTimeout(()=>screen.style.display='none', 300);
   } else {
+    pinFailedAttempts++;
     const dots=document.getElementById('pin-dots');
     dots.classList.add('shake');
     const err=document.getElementById('pin-error');
-    err.style.opacity='1';
-    setTimeout(()=>{ dots.classList.remove('shake'); err.style.opacity='0'; pinEntry=''; updatePinDots(); },900);
+    if(pinFailedAttempts >= 3){
+      pinLockUntil = Date.now() + 5 * 60 * 1000;
+      pinEntry=''; updatePinDots();
+      err.textContent='Trop de tentatives. Réessayez dans 5:00';
+      err.style.opacity='1';
+      dots.classList.remove('shake');
+      if(pinLockTimer) clearInterval(pinLockTimer);
+      pinLockTimer = setInterval(()=>{
+        const rem = Math.max(0, pinLockUntil - Date.now());
+        if(rem <= 0){ clearInterval(pinLockTimer); pinLockTimer=null; pinFailedAttempts=0; err.textContent='Code incorrect'; err.style.opacity='0'; return; }
+        const m=Math.floor(rem/60000), s=Math.floor((rem%60000)/1000);
+        err.textContent='Trop de tentatives. Réessayez dans '+m+':'+String(s).padStart(2,'0');
+      }, 1000);
+    } else {
+      err.textContent='Code incorrect';
+      err.style.opacity='1';
+      setTimeout(()=>{ dots.classList.remove('shake'); err.style.opacity='0'; pinEntry=''; updatePinDots(); },900);
+    }
   }
 }
 
@@ -3856,7 +3880,7 @@ let GEMINI_KEY_PDJ = LS.get('gemini_api_key', '');
 
 // Sauvegarde la clé dans Firebase + localStorage
 function saveGeminiKey(key){
-  if(!key || key.length < 10) return toast('Clé API invalide','r');
+  if(!key || !/^AIzaSy[A-Za-z0-9_-]{28,40}$/.test(key)) return toast('Format de clé API invalide','r');
   GEMINI_KEY_PDJ = key;
   LS.set('gemini_api_key', key);
   if(window.FB){

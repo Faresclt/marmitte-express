@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Config (menu, branding, settings, API keys)
+    match /config/{docId} {
+      // Tout le monde peut lire le menu et les settings
+      allow read: if docId != 'apikeys';
+      // Seuls les utilisateurs authentifiés peuvent écrire
+      allow write: if request.auth != null;
+      // API keys: lecture uniquement si authentifié
+      allow read: if docId == 'apikeys' && request.auth != null;
+    }
+
+    // Tables (état des tables)
+    match /tables/{tableId} {
+      allow read: if true;
+      allow write: if true; // Les serveurs et la caisse doivent pouvoir écrire
+    }
+
+    // Commandes (orders)
+    match /orders/{orderId} {
+      allow read: if true; // La cuisine doit pouvoir lire
+      allow create: if true; // Les clients et serveurs doivent pouvoir créer
+      allow update: if true; // La cuisine doit pouvoir mettre à jour le statut
+      allow delete: if request.auth != null; // Suppression uniquement si authentifié
+    }
+
+    // Historique des paiements
+    match /payments/{paymentId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Bloquer tout le reste
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

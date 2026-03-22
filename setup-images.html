@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Setup Images — La Marmite Express</title>
@@ -93,7 +94,7 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
   </div>
 
   <label style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:6px">Clé API Gemini</label>
-  <input class="gemini-key-input" type="password" id="gemini-key" placeholder="AIzaSy..." value="AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ">
+  <input class="gemini-key-input" type="password" id="gemini-key" placeholder="AIzaSy..." value="">
 
   <div class="row">
     <button class="btn btn-purple" onclick="generateAllFood()" id="btn-gen-all">🎨 Générer toutes les images manquantes</button>
@@ -368,11 +369,10 @@ window.generateAllFood = async function() {
           const s = card.querySelector('.status'); if (s) { s.className='status status-gen'; s.textContent='✨'; }
         }
       } else {
-        const errMsg = data.error?.message || JSON.stringify(data).slice(0, 100);
-        addLog('gen-log', '✗ ' + prod.name + ': ' + errMsg, 'err');
+        addLog('gen-log', '✗ ' + prod.name + ': Erreur lors de la génération. Vérifiez votre clé API.', 'err');
       }
     } catch(err) {
-      addLog('gen-log', '✗ ' + prod.name + ': ' + err.message, 'err');
+      addLog('gen-log', '✗ ' + prod.name + ': Erreur réseau ou serveur indisponible.', 'err');
     }
 
     done++;

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Commander — La Marmitte Express</title>
@@ -255,7 +256,8 @@ async function sendOrder(){
   const btn = document.getElementById('cp-send');
   btn.disabled=true; btn.textContent='Envoi en cours...';
   try{
-    const note = document.getElementById('cp-note')?.value||'';
+    let note = document.getElementById('cp-note')?.value||'';
+    note = note.slice(0, 500).replace(/[<>]/g, '');
     await addDoc(collection(db,'orders'),{
       tableId,
       tableNum: tableNum,
@@ -409,7 +411,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);dis
     </div>
     <div id="cp-items"></div>
     <div class="cp-footer">
-      <textarea id="cp-note" placeholder="Note pour la cuisine (allergies, cuisson…)"></textarea>
+      <textarea id="cp-note" placeholder="Note pour la cuisine (allergies, cuisson…)" maxlength="500"></textarea>
       <div class="cp-total-row">
         <div class="cp-total-lbl">Total</div>
         <div id="cp-total">0,00€</div>
