@@ -15,171 +15,299 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--accent:#f5a623;--green:#22c97a;--blue:#4a9eff;--red:#e84040;--purple:#9b6bff;--text:#f0f0f4;--muted:#656878;--radius:20px}
+:root{--bg:#0a0b0e;--surface:#111318;--card:#161820;--card-hover:#1c1e28;--border:rgba(255,255,255,.06);--accent:#f5a623;--accent-glow:rgba(245,166,35,.15);--green:#22c97a;--blue:#4a9eff;--red:#e84040;--purple:#9b6bff;--cyan:#06d6a0;--text:#f0f0f4;--muted:#8b8fa3;--radius:18px}
 html,body{min-height:100vh;min-height:100dvh;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
 
-/* Background effect */
-body::before{content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(ellipse at 30% 20%,rgba(245,166,35,.06) 0%,transparent 50%),radial-gradient(ellipse at 70% 80%,rgba(34,201,122,.04) 0%,transparent 50%);pointer-events:none;z-index:0}
+/* Animated gradient background */
+body::before{content:'';position:fixed;inset:0;background:
+  radial-gradient(ellipse 80% 50% at 20% 10%,rgba(245,166,35,.05) 0%,transparent 60%),
+  radial-gradient(ellipse 60% 40% at 80% 90%,rgba(34,201,122,.04) 0%,transparent 60%),
+  radial-gradient(ellipse 50% 50% at 50% 50%,rgba(74,158,255,.02) 0%,transparent 70%);
+pointer-events:none;z-index:0}
 
-.container{max-width:900px;margin:0 auto;padding:24px 20px 60px;position:relative;z-index:1}
+/* Noise texture overlay */
+body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");pointer-events:none;z-index:0}
+
+.container{max-width:920px;margin:0 auto;padding:32px 20px 60px;position:relative;z-index:1}
 
 /* Header */
-.header{text-align:center;padding:40px 0 20px}
-.logo-emoji{font-size:56px;display:block;margin-bottom:8px;animation:bounce 2s ease infinite}
-@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
-.logo-text{font-family:'Bebas Neue',sans-serif;font-size:42px;letter-spacing:3px;line-height:1}
-.logo-text span{color:var(--accent)}
-.tagline{font-size:13px;color:var(--muted);font-weight:600;letter-spacing:2px;text-transform:uppercase;margin-top:6px}
-.header-line{width:60px;height:3px;background:var(--accent);border-radius:2px;margin:20px auto 0}
+.header{text-align:center;padding:48px 0 24px}
+.logo-icon{width:72px;height:72px;margin:0 auto 12px;position:relative}
+.logo-icon svg{width:100%;height:100%;filter:drop-shadow(0 0 20px rgba(245,166,35,.3))}
+.logo-icon::after{content:'';position:absolute;inset:-8px;border-radius:50%;background:radial-gradient(circle,rgba(245,166,35,.12) 0%,transparent 70%);animation:logoPulse 3s ease-in-out infinite}
+@keyframes logoPulse{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
+
+.logo-text{font-family:'Bebas Neue',sans-serif;font-size:46px;letter-spacing:4px;line-height:1}
+.logo-text span{color:var(--accent);text-shadow:0 0 30px rgba(245,166,35,.2)}
+.tagline{font-size:12px;color:var(--muted);font-weight:700;letter-spacing:3px;text-transform:uppercase;margin-top:8px}
+.header-line{width:48px;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);margin:20px auto 0}
+
+/* Version badge */
+.version{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:4px 12px;margin-top:14px;letter-spacing:.5px}
+.version-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px rgba(34,201,122,.4)}
 
 /* Grid */
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:36px}
-@media(max-width:600px){.grid{grid-template-columns:1fr;gap:12px}}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:32px}
+@media(max-width:640px){.grid{grid-template-columns:1fr;gap:10px}}
 
-/* Cards */
-.app-card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);padding:28px 24px;cursor:pointer;transition:all .2s ease;position:relative;overflow:hidden;text-decoration:none;color:var(--text);display:flex;flex-direction:column;gap:12px}
-.app-card:hover{transform:translateY(-4px);border-color:rgba(245,166,35,.3);box-shadow:0 12px 40px rgba(0,0,0,.5)}
-.app-card:active{transform:scale(.97)}
-.app-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:2px 2px 0 0;opacity:.8}
+/* Cards — glassmorphism style */
+.app-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px 22px;cursor:pointer;transition:all .25s cubic-bezier(.4,0,.2,1);position:relative;overflow:hidden;text-decoration:none;color:var(--text);display:flex;flex-direction:column;gap:10px}
+.app-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;opacity:.8;transition:opacity .25s}
+.app-card::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,var(--card-glow,transparent) 0%,transparent 70%);opacity:0;transition:opacity .3s}
+.app-card:hover{transform:translateY(-3px);background:var(--card-hover);border-color:var(--card-border-hover,rgba(255,255,255,.1));box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px var(--card-border-hover,rgba(255,255,255,.06))}
+.app-card:hover::after{opacity:1}
+.app-card:active{transform:translateY(-1px) scale(.98)}
 
-.app-card.caisse::before{background:var(--accent)}
-.app-card.serveur::before{background:var(--blue)}
-.app-card.client::before{background:var(--green)}
-.app-card.qrcode::before{background:var(--purple)}
+/* Card icon containers */
+.card-icon-wrap{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative;z-index:1}
+.card-icon-wrap svg{width:22px;height:22px}
 
-.card-icon{font-size:36px;line-height:1}
-.card-title{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:1.5px;line-height:1}
-.card-desc{font-size:13px;color:var(--muted);line-height:1.5}
-.card-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:4px 10px;border-radius:20px;width:fit-content}
+.card-title{font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px;line-height:1;position:relative;z-index:1}
+.card-desc{font-size:12.5px;color:var(--muted);line-height:1.55;position:relative;z-index:1}
+.card-badge{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;padding:4px 10px;border-radius:20px;width:fit-content;position:relative;z-index:1}
 
+/* Caisse */
+.caisse::before{background:linear-gradient(90deg,var(--accent),rgba(245,166,35,.3))}
+.caisse{--card-glow:rgba(245,166,35,.06);--card-border-hover:rgba(245,166,35,.25)}
+.caisse .card-icon-wrap{background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.15)}
+.caisse .card-icon-wrap svg{color:var(--accent)}
 .caisse .card-title{color:var(--accent)}
-.caisse .card-badge{background:rgba(245,166,35,.1);color:var(--accent);border:1px solid rgba(245,166,35,.2)}
+.caisse .card-badge{background:rgba(245,166,35,.08);color:var(--accent);border:1px solid rgba(245,166,35,.15)}
 
+/* Serveur */
+.serveur::before{background:linear-gradient(90deg,var(--blue),rgba(74,158,255,.3))}
+.serveur{--card-glow:rgba(74,158,255,.06);--card-border-hover:rgba(74,158,255,.25)}
+.serveur .card-icon-wrap{background:rgba(74,158,255,.1);border:1px solid rgba(74,158,255,.15)}
+.serveur .card-icon-wrap svg{color:var(--blue)}
 .serveur .card-title{color:var(--blue)}
-.serveur .card-badge{background:rgba(74,158,255,.1);color:var(--blue);border:1px solid rgba(74,158,255,.2)}
+.serveur .card-badge{background:rgba(74,158,255,.08);color:var(--blue);border:1px solid rgba(74,158,255,.15)}
 
+/* Client */
+.client::before{background:linear-gradient(90deg,var(--green),rgba(34,201,122,.3))}
+.client{--card-glow:rgba(34,201,122,.06);--card-border-hover:rgba(34,201,122,.25)}
+.client .card-icon-wrap{background:rgba(34,201,122,.1);border:1px solid rgba(34,201,122,.15)}
+.client .card-icon-wrap svg{color:var(--green)}
 .client .card-title{color:var(--green)}
-.client .card-badge{background:rgba(34,201,122,.1);color:var(--green);border:1px solid rgba(34,201,122,.2)}
+.client .card-badge{background:rgba(34,201,122,.08);color:var(--green);border:1px solid rgba(34,201,122,.15)}
 
+/* QR Codes */
+.qrcode::before{background:linear-gradient(90deg,var(--purple),rgba(155,107,255,.3))}
+.qrcode{--card-glow:rgba(155,107,255,.06);--card-border-hover:rgba(155,107,255,.25)}
+.qrcode .card-icon-wrap{background:rgba(155,107,255,.1);border:1px solid rgba(155,107,255,.15)}
+.qrcode .card-icon-wrap svg{color:var(--purple)}
 .qrcode .card-title{color:var(--purple)}
-.qrcode .card-badge{background:rgba(155,107,255,.1);color:var(--purple);border:1px solid rgba(155,107,255,.2)}
+.qrcode .card-badge{background:rgba(155,107,255,.08);color:var(--purple);border:1px solid rgba(155,107,255,.15)}
 
+/* Cuisine */
+.cuisine::before{background:linear-gradient(90deg,var(--red),rgba(232,64,64,.3))}
+.cuisine{--card-glow:rgba(232,64,64,.06);--card-border-hover:rgba(232,64,64,.25)}
+.cuisine .card-icon-wrap{background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.15)}
+.cuisine .card-icon-wrap svg{color:var(--red)}
 .cuisine .card-title{color:var(--red)}
-.cuisine .card-badge{background:rgba(232,64,64,.1);color:var(--red);border:1px solid rgba(232,64,64,.2)}
-.cuisine::before{background:var(--red)}
+.cuisine .card-badge{background:rgba(232,64,64,.08);color:var(--red);border:1px solid rgba(232,64,64,.15)}
 
-/* Status bar */
-.status-section{margin-top:36px;padding:20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
-.status-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1.5px;color:var(--muted);margin-bottom:12px}
-.status-row{display:flex;align-items:center;gap:10px;padding:8px 0}
-.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+/* Setup */
+.setup::before{background:linear-gradient(90deg,var(--cyan),rgba(6,214,160,.3))}
+.setup{--card-glow:rgba(6,214,160,.06);--card-border-hover:rgba(6,214,160,.25)}
+.setup .card-icon-wrap{background:rgba(6,214,160,.1);border:1px solid rgba(6,214,160,.15)}
+.setup .card-icon-wrap svg{color:var(--cyan)}
+.setup .card-title{color:var(--cyan)}
+.setup .card-badge{background:rgba(6,214,160,.08);color:var(--cyan);border:1px solid rgba(6,214,160,.15)}
+
+/* Status section */
+.status-section{margin-top:32px;padding:18px 20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:blur(8px)}
+.status-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.status-title{font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:2px;color:var(--muted)}
+.status-live{display:flex;align-items:center;gap:6px;font-size:9px;font-weight:800;color:var(--green);letter-spacing:1px;text-transform:uppercase}
+.status-live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:statusBlink 2s ease-in-out infinite}
+@keyframes statusBlink{0%,100%{opacity:1;box-shadow:0 0 4px rgba(34,201,122,.4)}50%{opacity:.4;box-shadow:none}}
+.status-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+@media(max-width:500px){.status-grid{grid-template-columns:1fr}}
+.status-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,.02);border-radius:12px;border:1px solid var(--border)}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:all .3s}
 .status-dot.on{background:var(--green);box-shadow:0 0 8px rgba(34,201,122,.4)}
-.status-dot.off{background:var(--red)}
-.status-label{font-size:13px;font-weight:600;flex:1}
-.status-val{font-size:12px;color:var(--muted)}
+.status-dot.off{background:var(--red);box-shadow:0 0 6px rgba(232,64,64,.3)}
+.status-info{flex:1;min-width:0}
+.status-label{font-size:11px;font-weight:700;letter-spacing:.3px}
+.status-val{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* Footer */
-.footer{text-align:center;margin-top:40px;padding-top:20px;border-top:1px solid var(--border)}
-.footer-text{font-size:11px;color:var(--muted);line-height:1.8}
-.footer-text a{color:var(--accent);text-decoration:none}
+.footer{text-align:center;margin-top:36px;padding-top:18px;border-top:1px solid var(--border)}
+.footer-text{font-size:10px;color:var(--muted);line-height:2;letter-spacing:.3px}
+.footer-text a{color:var(--accent);text-decoration:none;transition:color .2s}
+.footer-text a:hover{color:#ffc560}
 
 /* Install banner */
-#install-banner{display:none;margin-top:24px;background:linear-gradient(135deg,rgba(245,166,35,.1),rgba(34,201,122,.08));border:1px solid rgba(245,166,35,.2);border-radius:var(--radius);padding:16px 20px;text-align:center}
+#install-banner{display:none;margin-top:20px;background:linear-gradient(135deg,rgba(245,166,35,.08),rgba(34,201,122,.05));border:1px solid rgba(245,166,35,.15);border-radius:var(--radius);padding:18px 20px;text-align:center}
 #install-banner.show{display:block}
 .install-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:6px}
-.install-desc{font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5}
-.install-btn{height:44px;padding:0 24px;border-radius:12px;background:var(--accent);color:#000;font-weight:800;font-size:14px;border:none;cursor:pointer;transition:transform .1s}
+.install-desc{font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5}
+.install-btn{height:42px;padding:0 28px;border-radius:12px;background:var(--accent);color:#000;font-weight:800;font-size:13px;border:none;cursor:pointer;transition:all .15s;letter-spacing:.5px}
+.install-btn:hover{box-shadow:0 4px 20px rgba(245,166,35,.3);transform:translateY(-1px)}
 .install-btn:active{transform:scale(.96)}
 
 /* Animations */
-.app-card{opacity:0;transform:translateY(20px);animation:fadeUp .4s ease forwards}
-.app-card:nth-child(1){animation-delay:.1s}
-.app-card:nth-child(2){animation-delay:.2s}
-.app-card:nth-child(3){animation-delay:.3s}
-.app-card:nth-child(4){animation-delay:.4s}
-.app-card:nth-child(5){animation-delay:.5s}
+.app-card{opacity:0;transform:translateY(16px);animation:fadeUp .5s cubic-bezier(.4,0,.2,1) forwards}
+.app-card:nth-child(1){animation-delay:.05s}
+.app-card:nth-child(2){animation-delay:.1s}
+.app-card:nth-child(3){animation-delay:.15s}
+.app-card:nth-child(4){animation-delay:.2s}
+.app-card:nth-child(5){animation-delay:.25s}
+.app-card:nth-child(6){animation-delay:.3s}
 @keyframes fadeUp{to{opacity:1;transform:translateY(0)}}
-.status-section{opacity:0;animation:fadeUp .4s ease .5s forwards}
+.status-section{opacity:0;animation:fadeUp .5s cubic-bezier(.4,0,.2,1) .35s forwards}
 </style>
 </head>
 <body>
 
 <div class="container">
   <div class="header">
-    <span class="logo-emoji">🍲</span>
+    <div class="logo-icon">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="36" r="20" fill="rgba(245,166,35,.12)" stroke="#f5a623" stroke-width="2"/>
+        <ellipse cx="32" cy="24" rx="16" ry="4" fill="rgba(245,166,35,.2)" stroke="#f5a623" stroke-width="1.5"/>
+        <path d="M20 24c0 0 2-8 12-8s12 8 12 8" stroke="#f5a623" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M26 18c0 0 1-4 6-4s6 4 6 4" stroke="rgba(245,166,35,.6)" stroke-width="1" stroke-linecap="round"/>
+        <circle cx="28" cy="34" r="2" fill="#f5a623" opacity=".5"/>
+        <circle cx="36" cy="32" r="1.5" fill="#f5a623" opacity=".4"/>
+        <circle cx="32" cy="38" r="1.8" fill="#f5a623" opacity=".3"/>
+        <path d="M24 44c2 4 6 6 8 6s6-2 8-6" stroke="rgba(245,166,35,.3)" stroke-width="1" stroke-linecap="round"/>
+      </svg>
+    </div>
     <div class="logo-text">La <span>Marmite</span> Express</div>
-    <div class="tagline">Système de gestion restaurant</div>
+    <div class="tagline">Gestion restaurant intelligente</div>
     <div class="header-line"></div>
+    <div class="version"><span class="version-dot"></span> v2.0 — Marmite Express POS</div>
   </div>
 
   <div class="grid">
     <a href="marmite-express-caisse.html" class="app-card caisse">
-      <div class="card-icon">💰</div>
+      <div class="card-icon-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 14h.01"/>
+        </svg>
+      </div>
       <div class="card-title">Caisse</div>
-      <div class="card-desc">Gestion des ventes, plan de salle, encaissements, administration du menu et historique TVA</div>
-      <div class="card-badge">🔒 Accès protégé</div>
+      <div class="card-desc">Encaissements, plan de salle, gestion du menu, historique TVA et administration</div>
+      <div class="card-badge">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Acces protege
+      </div>
     </a>
 
     <a href="serveur.html" class="app-card serveur">
-      <div class="card-icon">🍽️</div>
+      <div class="card-icon-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>
+        </svg>
+      </div>
       <div class="card-title">Serveur</div>
-      <div class="card-desc">Prise de commande depuis la salle avec choix cuisson, garniture et envoi en cuisine</div>
-      <div class="card-badge">📱 Optimisé mobile</div>
+      <div class="card-desc">Prise de commande en salle, cuisson, garnitures et envoi direct en cuisine</div>
+      <div class="card-badge">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        Optimise mobile
+      </div>
     </a>
 
     <a href="client.html" class="app-card client">
-      <div class="card-icon">📋</div>
+      <div class="card-icon-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      </div>
       <div class="card-title">Client</div>
-      <div class="card-desc">Interface de commande en ligne pour les clients — accessible via QR code sur chaque table</div>
-      <div class="card-badge">🔗 Via QR code</div>
+      <div class="card-desc">Commande en ligne depuis la table via QR code — menu interactif avec panier</div>
+      <div class="card-badge">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        Via QR code
+      </div>
     </a>
 
     <a href="qrcodes.html" class="app-card qrcode">
-      <div class="card-icon">🔲</div>
+      <div class="card-icon-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><line x1="21" y1="14" x2="21" y2="14.01"/><line x1="21" y1="21" x2="21" y2="21.01"/><line x1="17" y1="21" x2="17" y2="21.01"/>
+        </svg>
+      </div>
       <div class="card-title">QR Codes</div>
-      <div class="card-desc">Génération et impression des QR codes à poser sur chaque table du restaurant</div>
-      <div class="card-badge">🖨️ Imprimable</div>
+      <div class="card-desc">Generez et imprimez les QR codes pour chaque table du restaurant</div>
+      <div class="card-badge">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Imprimable
+      </div>
     </a>
 
     <a href="cuisine.html" class="app-card cuisine">
-      <div class="card-icon">🔥</div>
+      <div class="card-icon-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 12c-2-2.67-4-4-6-4a4 4 0 1 0 6 7"/><path d="M12 12c2-2.67 4-4 6-4a4 4 0 1 1-6 7"/><path d="M12 19v3"/><path d="M12 2v3"/>
+        </svg>
+      </div>
       <div class="card-title">Cuisine</div>
-      <div class="card-desc">Écran temps réel pour la cuisine — nouvelles commandes, en préparation, prêtes à servir</div>
-      <div class="card-badge">📺 Écran cuisine</div>
+      <div class="card-desc">Ecran temps reel — nouvelles commandes, en preparation, pretes a servir</div>
+      <div class="card-badge">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        Ecran cuisine
+      </div>
+    </a>
+
+    <a href="setup-images.html" class="app-card setup">
+      <div class="card-icon-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+        </svg>
+      </div>
+      <div class="card-title">Images IA</div>
+      <div class="card-desc">Generez des visuels pour vos plats avec l'intelligence artificielle Gemini</div>
+      <div class="card-badge">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Intelligence artificielle
+      </div>
     </a>
   </div>
 
   <!-- Install PWA banner -->
   <div id="install-banner">
-    <div class="install-title">📲 Installer l'application</div>
-    <div class="install-desc">Ajoutez La Marmite Express à votre écran d'accueil pour un accès rapide, comme une vraie app !</div>
+    <div class="install-title">Installer l'application</div>
+    <div class="install-desc">Ajoutez La Marmite Express sur votre ecran d'accueil pour un acces instantane</div>
     <button class="install-btn" id="install-btn" onclick="installPWA()">Installer</button>
   </div>
 
   <!-- Firebase status -->
   <div class="status-section">
-    <div class="status-title">État du système</div>
-    <div class="status-row">
-      <div class="status-dot" id="dot-firebase"></div>
-      <div class="status-label">Firebase</div>
-      <div class="status-val" id="val-firebase">Vérification…</div>
+    <div class="status-header">
+      <div class="status-title">Etat du systeme</div>
+      <div class="status-live" id="live-indicator" style="display:none"><span class="status-live-dot"></span> En ligne</div>
     </div>
-    <div class="status-row">
-      <div class="status-dot" id="dot-menu"></div>
-      <div class="status-label">Menu publié</div>
-      <div class="status-val" id="val-menu">—</div>
-    </div>
-    <div class="status-row">
-      <div class="status-dot" id="dot-pwa"></div>
-      <div class="status-label">PWA installée</div>
-      <div class="status-val" id="val-pwa">—</div>
+    <div class="status-grid">
+      <div class="status-item">
+        <div class="status-dot" id="dot-firebase"></div>
+        <div class="status-info">
+          <div class="status-label">Firebase</div>
+          <div class="status-val" id="val-firebase">Verification...</div>
+        </div>
+      </div>
+      <div class="status-item">
+        <div class="status-dot" id="dot-menu"></div>
+        <div class="status-info">
+          <div class="status-label">Menu</div>
+          <div class="status-val" id="val-menu">—</div>
+        </div>
+      </div>
+      <div class="status-item">
+        <div class="status-dot" id="dot-pwa"></div>
+        <div class="status-info">
+          <div class="status-label">PWA</div>
+          <div class="status-val" id="val-pwa">—</div>
+        </div>
+      </div>
     </div>
   </div>
 
   <div class="footer">
     <div class="footer-text">
-      La Marmite Express — Système de caisse · Est. 2024<br>
-      Hébergé sur <a href="https://github.com" target="_blank">GitHub Pages</a>
+      La Marmite Express — Systeme POS · 2024–2026<br>
+      Heberge sur <a href="https://github.com/Faresclt/marmitte-express" target="_blank">GitHub Pages</a>
     </div>
   </div>
 </div>
@@ -200,9 +328,10 @@ const firebaseConfig = {
 try {
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  
+
   document.getElementById('dot-firebase').classList.add('on');
-  document.getElementById('val-firebase').textContent = 'Connecté ✓';
+  document.getElementById('val-firebase').textContent = 'Connecte';
+  document.getElementById('live-indicator').style.display = 'flex';
 
   // Check menu
   onSnapshot(doc(db, 'config', 'menu'), snap => {
@@ -211,21 +340,21 @@ try {
       const count = (data.products||[]).length;
       const cats = (data.cats||[]).length;
       document.getElementById('dot-menu').classList.add('on');
-      document.getElementById('val-menu').textContent = count+' produits · '+cats+' catégories';
+      document.getElementById('val-menu').textContent = count+' produits · '+cats+' cat.';
     } else {
       document.getElementById('dot-menu').classList.add('off');
-      document.getElementById('val-menu').textContent = 'Non publié — ouvrez la Caisse → Publier';
+      document.getElementById('val-menu').textContent = 'Non publie';
     }
   });
 } catch(e){
   document.getElementById('dot-firebase').classList.add('off');
-  document.getElementById('val-firebase').textContent = 'Erreur de connexion';
+  document.getElementById('val-firebase').textContent = 'Erreur connexion';
 }
 
 // PWA status
 const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
 document.getElementById('dot-pwa').classList.add(isStandalone ? 'on' : 'off');
-document.getElementById('val-pwa').textContent = isStandalone ? 'Oui ✓' : 'Non — ajoutez à l\'écran d\'accueil';
+document.getElementById('val-pwa').textContent = isStandalone ? 'Installee' : 'Non installee';
 </script>
 
 <script>
@@ -252,7 +381,7 @@ window.addEventListener('appinstalled', () => {
   document.getElementById('install-banner').classList.remove('show');
   document.getElementById('dot-pwa').classList.remove('off');
   document.getElementById('dot-pwa').classList.add('on');
-  document.getElementById('val-pwa').textContent = 'Oui ✓';
+  document.getElementById('val-pwa').textContent = 'Installee';
 });
 
 // Register service worker
