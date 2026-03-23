@@ -53,6 +53,12 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
 .alert{padding:12px 16px;border-radius:10px;font-size:12px;font-weight:600;margin-bottom:12px}
 .alert-warn{background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.25);color:var(--accent)}
 .alert-info{background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.2);color:var(--blue)}
+.style-opt{background:var(--card);border:2px solid var(--border);border-radius:12px;padding:14px;cursor:pointer;transition:all .2s;text-align:center}
+.style-opt:hover{border-color:rgba(155,107,255,.3);background:rgba(155,107,255,.04)}
+.style-opt.selected{border-color:var(--purple);background:rgba(155,107,255,.1);box-shadow:0 0 12px rgba(155,107,255,.15)}
+.style-icon{font-size:28px;margin-bottom:6px}
+.style-name{font-size:13px;font-weight:800;margin-bottom:4px}
+.style-desc{font-size:10px;color:var(--muted);line-height:1.4}
 </style>
 </head>
 <body>
@@ -95,6 +101,36 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
 
   <label style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:6px">Clé API Gemini</label>
   <input class="gemini-key-input" type="password" id="gemini-key" placeholder="AIzaSy..." value="">
+
+  <label style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin:12px 0 8px">Style des images</label>
+  <div id="style-picker" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:16px">
+    <div class="style-opt selected" data-style="brasserie" onclick="pickStyle(this)">
+      <div class="style-icon">🍷</div>
+      <div class="style-name">Brasserie Premium</div>
+      <div class="style-desc">Fond ardoise sombre, vapeur dorée, bokeh ambré</div>
+    </div>
+    <div class="style-opt" data-style="minimal" onclick="pickStyle(this)">
+      <div class="style-icon">✨</div>
+      <div class="style-name">Clean & Minimal</div>
+      <div class="style-desc">Fond blanc pur, lumière naturelle, aérien</div>
+    </div>
+    <div class="style-opt" data-style="rustique" onclick="pickStyle(this)">
+      <div class="style-icon">🌿</div>
+      <div class="style-name">Rustique Terroir</div>
+      <div class="style-desc">Fond bois ancien, herbes fraîches, campagne</div>
+    </div>
+    <div class="style-opt" data-style="streetfood" onclick="pickStyle(this)">
+      <div class="style-icon">🔥</div>
+      <div class="style-name">Street Food</div>
+      <div class="style-desc">Couleurs vives, ambiance urbaine, dynamique</div>
+    </div>
+  </div>
+
+  <label style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:8px">Quoi générer ?</label>
+  <div class="row" style="margin-bottom:12px">
+    <label style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="gen-food" checked> 🍽️ Plats / Entrées / Salades / Desserts</label>
+    <label style="font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="gen-drinks"> 🥤 Boissons / Alcools / Bières / Vins</label>
+  </div>
 
   <div class="row">
     <button class="btn btn-purple" onclick="generateAllFood()" id="btn-gen-all">🎨 Générer toutes les images manquantes</button>
@@ -311,14 +347,50 @@ window.importFolder = async function(e) {
   renderGrid();
 };
 
-// ── Generate food images ──
-const FOOD_PRODUCTS = PRODUCTS.filter(p =>
-  ['entrees','plats','salades','desserts'].includes(p.cat) && p.id !== 'p52'
-);
+// ── Style prompts ──
+const STYLE_PROMPTS = {
+  brasserie: {
+    food: (name, isCold) => 'A cinematic, high-end product photograph of "' + name + '" for a French brasserie menu. Placed on a wet, dark charcoal slate stone surface with fine water droplets catching the light.' + (isCold ? ' Condensation or slight frost on the plate.' : ' Light steam rising from the dish.') + ' Fresh, natural ingredients evoking the flavor profile artistically scattered around the base. Background: softly blurred warm-lit bar or restaurant interior with amber and golden bokeh. Main light: soft warm light from upper-left, rich golden highlights and deep shadows. Shallow depth of field. Color palette: deep dark blacks, warm amber and golden tones. Mood: sophisticated, artisanal, appetizing, French brasserie premium quality. Photorealistic, ultra-detailed, 16:9.',
+    drink: (name) => 'A cinematic, high-end product photograph of "' + name + '" drink for a French brasserie. Crystal clear glass on a polished dark bar counter with subtle water condensation. Warm amber backlighting creating a golden glow through the liquid. Background: softly blurred dark bar interior with warm bokeh lights. Shallow depth of field. Color palette: deep blacks, amber gold tones. Mood: sophisticated, premium. Photorealistic, ultra-detailed, 16:9.'
+  },
+  minimal: {
+    food: (name, isCold) => 'A clean, minimalist food photograph of "' + name + '". Pure white marble surface, natural daylight from a large window, soft shadows. Simple white ceramic plate. Very clean composition with negative space. Small garnish of fresh herbs.' + (isCold ? ' Slight frost visible.' : ' Gentle steam.') + ' Background: pure white or very light gray. Style: modern Scandinavian restaurant. Color palette: whites, natural food colors. Mood: fresh, airy, elegant simplicity. Photorealistic, high-key lighting, 16:9.',
+    drink: (name) => 'A clean, minimalist photograph of "' + name + '" drink. Pure white background, natural soft daylight. Simple elegant glassware on white marble surface. Minimal garnish. Clean lines, lots of negative space. Style: modern Nordic bar. Color palette: whites, glass transparency, natural drink color. Mood: fresh, crisp, pure. Photorealistic, 16:9.'
+  },
+  rustique: {
+    food: (name, isCold) => 'A rustic, artisanal food photograph of "' + name + '" for a French countryside bistro. Served on a handmade ceramic plate placed on a weathered dark oak wooden table. Fresh herbs (thyme, rosemary) and coarse sea salt scattered around.' + (isCold ? ' Slight condensation.' : ' Warm steam rising.') + ' Natural warm sunlight streaming through a farmhouse window. Linen napkin and vintage cutlery. Background: stone wall, dried herbs hanging. Color palette: warm earth tones, olive greens, rustic browns. Mood: homemade, authentic, convivial, terroir. Photorealistic, 16:9.',
+    drink: (name) => 'A rustic photograph of "' + name + '" drink in a French countryside setting. Vintage glass on a weathered wooden table. Natural warm sunlight, fresh herbs nearby. Background: stone wall, vineyard through window. Color palette: warm earth tones, amber. Mood: authentic, artisanal, terroir. Photorealistic, 16:9.'
+  },
+  streetfood: {
+    food: (name, isCold) => 'A vibrant, dynamic street food photograph of "' + name + '". Bold presentation on a dark textured tray or kraft paper. Bright colorful ingredients, sauces dripping, cheese melting.' + (isCold ? '' : ' Steam and sizzle visible.') + ' Dramatic neon-like colored lighting (warm orange and cool blue). Urban graffiti wall slightly visible in background. Shot from slightly above at 45 degrees. Color palette: vivid saturated colors, neon highlights. Mood: energetic, bold, appetizing, urban. Photorealistic, high contrast, 16:9.',
+    drink: (name) => 'A vibrant street food style photograph of "' + name + '" drink. Bold colorful presentation, dramatic neon-style lighting (orange and blue). Urban setting, dark background with colorful bokeh. Condensation on glass catching colored light. Color palette: vivid neons, dark background. Mood: energetic, bold, urban nightlife. Photorealistic, 16:9.'
+  }
+};
+
+let selectedStyle = 'brasserie';
+window.pickStyle = function(el) {
+  document.querySelectorAll('.style-opt').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedStyle = el.dataset.style;
+};
+
+// ── Generate images ──
+const FOOD_CATS = ['entrees','plats','salades','desserts'];
+const DRINK_CATS = ['boissons','bieres','vins'];
 
 window.generateAllFood = async function() {
   const key = document.getElementById('gemini-key').value.trim();
   if (!key) return alert('Saisis ta clé API Gemini');
+
+  const genFood = document.getElementById('gen-food').checked;
+  const genDrinks = document.getElementById('gen-drinks').checked;
+  if (!genFood && !genDrinks) return alert('Sélectionne au moins une catégorie à générer');
+
+  const allowedCats = [];
+  if (genFood) allowedCats.push(...FOOD_CATS);
+  if (genDrinks) allowedCats.push(...DRINK_CATS);
+
+  const genProducts = PRODUCTS.filter(p => allowedCats.includes(p.cat) && p.id !== 'p52');
 
   stopGen = false;
   document.getElementById('btn-gen-all').disabled = true;
@@ -330,8 +402,8 @@ window.generateAllFood = async function() {
   log.style.display = 'block';
   log.innerHTML = '';
 
-  const missing = FOOD_PRODUCTS.filter(p => !getImg(p.id) && !getImg(p.name) && !importedImages[p.id]);
-  addLog('gen-log', 'ℹ ' + missing.length + ' produits sans image à générer', 'inf');
+  const missing = genProducts.filter(p => !getImg(p.id) && !getImg(p.name) && !importedImages[p.id]);
+  addLog('gen-log', 'ℹ ' + missing.length + ' produits sans image à générer (style: ' + selectedStyle + ')', 'inf');
 
   let done = 0;
   for (const prod of missing) {
@@ -342,8 +414,9 @@ window.generateAllFood = async function() {
 
     try {
       const isCold = prod.cat === 'desserts';
-      const isSeafood = prod.name.toLowerCase().includes('saumon') || prod.name.toLowerCase().includes('poisson') || prod.name.toLowerCase().includes('mer');
-      const prompt = 'A cinematic, high-end product photograph of "' + prod.name + '" for a French brasserie menu. Placed on a wet, dark charcoal slate stone surface with fine water droplets catching the light.' + (isCold ? ' Condensation or slight frost on the plate.' : ' Light steam rising from the dish.') + ' Fresh, natural ingredients evoking the flavor profile artistically scattered around the base. Background: softly blurred warm-lit bar or restaurant interior with amber and golden bokeh. Main light: soft warm light from upper-left, rich golden highlights and deep shadows. Shallow depth of field. Color palette: deep dark blacks, warm amber and golden tones. Mood: sophisticated, artisanal, appetizing, French brasserie premium quality. Photorealistic, ultra-detailed, 16:9.';
+      const isDrink = DRINK_CATS.includes(prod.cat);
+      const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
+      const prompt = isDrink ? stylePrompts.drink(prod.name) : stylePrompts.food(prod.name, isCold);
 
       const res = await fetch(
         'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=' + key,

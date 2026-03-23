@@ -89,6 +89,19 @@ window.initFirebaseListeners = function(){
   // Listen to menu published by caisse (for waiter app)
   window.FB.listen('config', 'menu', (data) => {
     if(data && data.cats) window.publishedMenu = data;
+    // Restore salle layout from Firebase if localStorage was reset
+    if(data && data.salleLayout && data.salleLayout.length > 0){
+      const localSalle = LS.get('salleLayout', null);
+      if(!localSalle || localSalle.length <= 8){
+        // Local salle is default or empty — restore from Firebase
+        if(typeof salleElements !== 'undefined'){
+          salleElements = data.salleLayout;
+          LS.set('salleLayout', salleElements);
+          console.log('[Salle] Restored '+salleElements.length+' elements from Firebase');
+          if(typeof renderSalle === 'function') renderSalle();
+        }
+      }
+    }
   });
 };
 

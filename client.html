@@ -134,11 +134,11 @@ function renderMenu(){
   content.innerHTML = html||'<div style="padding:30px;text-align:center;color:#888">Aucun article</div>';
 }
 
-function changeQty(pid, price, delta, name, cuisson, garniture, tva){
+function changeQty(pid, price, delta, name, cuisson, garniture, tva, cat){
   // For products with options, find by pid+cuisson+garniture
   const ex = cart.find(r=>r.pid===pid && (r.cuisson||'')===(cuisson||'') && (r.garniture||'')===(garniture||''));
   if(ex){ ex.qty+=delta; if(ex.qty<=0) cart=cart.filter(r=>r!==ex); }
-  else if(delta>0) cart.push({pid,name,price:parseFloat(price),qty:1,tva:parseFloat(tva)||10,cuisson:cuisson||null,garniture:garniture||null});
+  else if(delta>0) cart.push({pid,name,price:parseFloat(price),qty:1,tva:parseFloat(tva)||10,cuisson:cuisson||null,garniture:garniture||null,cat:cat||null});
   updateCartBar();
   renderMenu();
 }
@@ -153,7 +153,8 @@ function addProduct(pid, price, name){
     return;
   }
   const tva = p ? (p.tva||10) : 10;
-  changeQty(pid, price, 1, name, null, null, tva);
+  const cat = p ? (p.cat||null) : null;
+  changeQty(pid, price, 1, name, null, null, tva, cat);
 }
 
 function openOptionsModal(p){
@@ -198,7 +199,7 @@ function confirmOpt(){
   const garnitureEl = document.querySelector('#opt-garniture-btns .opt-chip.sel');
   const cuisson = cuissonEl ? cuissonEl.dataset.val : null;
   const garniture = garnitureEl ? garnitureEl.dataset.val : null;
-  changeQty(p.id, p.price, 1, p.name, cuisson, garniture, p.tva||10);
+  changeQty(p.id, p.price, 1, p.name, cuisson, garniture, p.tva||10, p.cat||null);
   closeOptModal();
 }
 
@@ -261,7 +262,7 @@ async function sendOrder(){
     await addDoc(collection(db,'orders'),{
       tableId,
       tableNum: tableNum,
-      items: cart.map(r=>({pid:r.pid,name:r.name,price:r.price,qty:r.qty,tva:r.tva||10,cuisson:r.cuisson||null,garniture:r.garniture||null})),
+      items: cart.map(r=>({pid:r.pid,name:r.name,price:r.price,qty:r.qty,tva:r.tva||10,cuisson:r.cuisson||null,garniture:r.garniture||null,cat:r.cat||null})),
       note,
       status: 'pending',
       source: 'client',
