@@ -5,9 +5,10 @@
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0c0d10",
+  "background_color": "#0a0b0e",
   "theme_color": "#f5a623",
   "orientation": "any",
+  "categories": ["business", "food"],
   "icons": [
     {
       "src": "icon-192.png",
@@ -20,6 +21,32 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Caisse",
+      "short_name": "Caisse",
+      "url": "./marmite-express-caisse.html",
+      "description": "Ouvrir la caisse"
+    },
+    {
+      "name": "Serveur",
+      "short_name": "Serveur",
+      "url": "./serveur.html",
+      "description": "Mode serveur"
+    },
+    {
+      "name": "Cuisine",
+      "short_name": "Cuisine",
+      "url": "./cuisine.html",
+      "description": "Écran cuisine"
+    },
+    {
+      "name": "Images IA",
+      "short_name": "Images",
+      "url": "./setup-images.html",
+      "description": "Générer des images IA"
     }
   ]
 }

@@ -14,6 +14,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <script type="module">
+function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -63,7 +64,7 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
     menu = snap.data();
     // Apply branding
     const b = menu.branding||{};
-    if(b.name) document.getElementById('resto-name').innerHTML = b.name.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>');
+    if(b.name) { const safe = escHtml(b.name); document.getElementById('resto-name').innerHTML = safe.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>'); }
     if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
     renderMenu();
     document.getElementById('loading').style.display='none';

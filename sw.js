@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v2';
+const CACHE_NAME = 'marmite-v3';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',
@@ -6,6 +6,10 @@ const ASSETS = [
   './serveur.html',
   './cuisine.html',
   './qrcodes.html',
+  './setup-images.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
   'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap'
 ];
 
@@ -29,10 +33,11 @@ self.addEventListener('activate', event => {
 
 // Fetch — network first, fallback to cache
 self.addEventListener('fetch', event => {
-  // Skip Firebase and external API requests
-  if(event.request.url.includes('firestore') || 
+  // Skip Firebase, Gemini AI, and external API requests
+  if(event.request.url.includes('firestore') ||
      event.request.url.includes('firebase') ||
-     event.request.url.includes('gstatic.com/firebasejs')) {
+     event.request.url.includes('gstatic.com/firebasejs') ||
+     event.request.url.includes('generativelanguage.googleapis.com')) {
     return;
   }
   

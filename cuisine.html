@@ -158,6 +158,7 @@ const db = getFirestore(initializeApp({
 let orders = {};
 let prevCount = 0;
 let noCuisineCategories = [];
+let noCuisineProductNames = new Set(); // Fallback: product names from noCuisine categories
 
 // ── États persistants (localStorage) ──
 let soundOn = localStorage.getItem('cuisineSoundOn') !== 'false';
@@ -173,18 +174,30 @@ function updateButtons() {
 }
 updateButtons();
 
-// ── Chargement menu (catégories noCuisine) ──
+// ── Chargement menu (catégories noCuisine + noms produits boissons) ──
 onSnapshot(doc(db, 'config', 'menu'), snap => {
   const data = snap.data();
+  let allCats = [];
   if (data && data.categories) {
-    noCuisineCategories = data.categories
-      .filter(c => c.noCuisine === true)
-      .map(c => c.id || c.name);
+    allCats = data.categories;
   } else if (data && data.cats) {
-    noCuisineCategories = (data.cats || [])
-      .filter(c => c.noCuisine === true)
-      .map(c => c.id || c.name);
+    allCats = data.cats || [];
   }
+  noCuisineCategories = allCats
+    .filter(c => c.noCuisine === true)
+    .map(c => c.id || c.name);
+  // Build product name set for fallback matching (old orders without cat field)
+  noCuisineProductNames.clear();
+  if (data && data.products && noCuisineCategories.length) {
+    data.products.forEach(p => {
+      if (noCuisineCategories.includes(p.cat)) {
+        noCuisineProductNames.add((p.name||'').toLowerCase().trim());
+      }
+    });
+  }
+  console.log('[Cuisine] noCuisine cats:', noCuisineCategories, 'products:', [...noCuisineProductNames]);
+  // Re-render with updated filter
+  if (Object.keys(orders).length > 0) renderAll();
 });
 
 // ── Écoute commandes ──
@@ -229,8 +242,15 @@ function minsAgo(o) {
 function filterCuisineItems(items) {
   if (!noCuisineCategories.length) return items;
   return items.filter(i => {
+    // Primary: match by category ID
     const cat = i.catId || i.cat || i.category || '';
-    return !noCuisineCategories.includes(cat);
+    if (cat && noCuisineCategories.includes(cat)) return false;
+    // Fallback: match by product name (for old orders without cat field)
+    if (!cat && noCuisineProductNames.size > 0) {
+      const name = (i.name||'').toLowerCase().trim();
+      if (noCuisineProductNames.has(name)) return false;
+    }
+    return true;
   });
 }
 
