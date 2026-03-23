@@ -1,0 +1,11 @@
+{
+  "project_name": "La Marmite Express",
+  "milestone_version": "1.0",
+  "milestone_name": "Multi-Restaurant SaaS MVP",
+  "created": "2026-03-24",
+  "preferences": {
+    "commit_docs": true,
+    "auto_verify": true,
+    "language": "fr"
+  }
+}
