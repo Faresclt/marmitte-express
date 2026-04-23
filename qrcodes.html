@@ -12,11 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-const firebaseConfig={apiKey:"AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",authDomain:"la-marmitte-express.firebaseapp.com",projectId:"la-marmitte-express",storageBucket:"la-marmitte-express.firebasestorage.app",messagingSenderId:"215969803476",appId:"1:215969803476:web:39ee4de2cf4475f3c2df41"};
-const app=initializeApp(firebaseConfig);
-const db=getFirestore(app);
+import { db, doc, onSnapshot } from './assets/js/firebase-sync.js';
 
 onSnapshot(doc(db,'config','menu'), snap => {
   if(!snap.exists()){

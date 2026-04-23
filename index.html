@@ -313,22 +313,9 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
 </div>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",
-  authDomain: "la-marmitte-express.firebaseapp.com",
-  projectId: "la-marmitte-express",
-  storageBucket: "la-marmitte-express.firebasestorage.app",
-  messagingSenderId: "215969803476",
-  appId: "1:215969803476:web:39ee4de2cf4475f3c2df41"
-};
+import { db, doc, onSnapshot } from './assets/js/firebase-sync.js';
 
 try {
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-
   document.getElementById('dot-firebase').classList.add('on');
   document.getElementById('val-firebase').textContent = 'Connecte';
   document.getElementById('live-indicator').style.display = 'flex';

@@ -165,18 +165,7 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
 </div><!-- /container -->
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-const fbConfig = {
-  apiKey:"AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",
-  authDomain:"la-marmitte-express.firebaseapp.com",
-  projectId:"la-marmitte-express",
-  storageBucket:"la-marmitte-express.firebasestorage.app",
-  messagingSenderId:"215969803476",
-  appId:"1:215969803476:web:39ee4de2cf4475f3c2df41"
-};
-const db = getFirestore(initializeApp(fbConfig));
+import { db, doc, onSnapshot } from './assets/js/firebase-sync.js';
 
 // ── LS helpers ──
 const LS = {
