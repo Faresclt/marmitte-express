@@ -4,29 +4,41 @@
 **Phase:** 2 (1er dans l'ordre d'exécution)
 **Effort estimé:** 3-5 jours de travail concentré
 
+## Progression
+
+**Commits phase 2** (au 2026-04-24) :
+- [x] `2bda090` — 2.A.1 + 2.A.2 : structure `assets/` + module `firebase-sync.js`
+- [x] `6497ab6` — 2.A.3 (6/7 pages) : migration index, serveur, client, cuisine, qrcodes, setup-images
+- [ ] 2.A.3 (caisse) + 2.A.4 + 2.A.5 : refactor marmite-express-caisse.html — **à faire avec tests manuels chez les parents**
+- [ ] 2.A.6 + 2.B + 2.C + 2.D : reste du plan
+
+**Avant de continuer le refactor caisse** : Fares doit vérifier chez les parents que les 6 pages migrées fonctionnent toujours (menu client QR, prise commande serveur, dashboard cuisine, génération QR, setup images). Les pages ne chargent plus leur propre config Firebase — elles passent par `assets/js/firebase-sync.js`. Si GitHub Pages déploie bien les sous-dossiers, tout doit fonctionner identique à avant.
+
 ## Découpage en 4 blocs + 18 tâches atomiques
 
 ### Bloc 2.A — Refactor architecture (6 tâches)
 
-#### 2.A.1 Préparer la structure de dossiers
+#### 2.A.1 Préparer la structure de dossiers ✅ FAIT (commit 2bda090)
 - Créer `assets/css/` et `assets/js/`
 - Créer les fichiers vides : `design-system.css`, `caisse.css`, `firebase-sync.js`, `pos.js`, `admin.js`
 - Ajouter `.gitkeep` si nécessaire
 - **Deliverable** : commit "chore(02A): structure assets/css et assets/js"
 - **Test** : `ls assets/css/` et `ls assets/js/` retournent les fichiers
 
-#### 2.A.2 Extraire Firebase init dans `firebase-sync.js`
+#### 2.A.2 Extraire Firebase init dans `firebase-sync.js` ✅ FAIT (commit 2bda090)
 - Copier la config Firebase + `initializeApp` + `getFirestore` depuis les 5 pages
 - Exposer : `export const db`, `export const auth`, `export function getCollection(name)`
 - **Deliverable** : commit "feat(02A): module firebase-sync centralise l'init Firebase"
 - **Test** : ouvrir `setup-images.html` (le plus simple), remplacer son init par l'import du module, vérifier que la page se charge et que Firestore lit les produits
 
-#### 2.A.3 Migrer les 4 autres pages vers `firebase-sync.js`
-- `serveur.html` → import depuis `firebase-sync.js`, suppression de l'init local
-- `client.html` → idem
-- `cuisine.html` → idem
-- `qrcodes.html` → idem
-- **Deliverable** : commit "refactor(02A): toutes les pages utilisent firebase-sync"
+#### 2.A.3 Migrer les autres pages vers `firebase-sync.js` ⚠️ PARTIEL (commit 6497ab6)
+- [x] `index.html` → migré
+- [x] `serveur.html` → migré
+- [x] `client.html` → migré
+- [x] `cuisine.html` → migré
+- [x] `qrcodes.html` → migré
+- [x] `setup-images.html` → migré
+- [ ] `marmite-express-caisse.html` → **reporté à 2.A.5** (traité avec extraction JS/CSS)
 - **Test** : ouvrir chaque page, passer une commande complète (serveur → cuisine → caisse), vérifier la sync
 
 #### 2.A.4 Extraire le CSS de la caisse

@@ -1,11 +1,10 @@
-// firebase-sync.js — module centralisé Firebase
-// Remplace l'init dupliqué dans chaque page HTML.
-// Phase 2.A.2 du plan .planning/phases/02-stabilite-fondations/02-PLAN.md
+// firebase-sync.js — module centralisé Firebase + sync queue avec retry
+// Phase 2.A.2 + 2.B.2 + 2.B.3 + 2.B.4 du plan .planning/phases/02-stabilite-fondations/02-PLAN.md
 //
 // Usage depuis n'importe quelle page :
 //   <script type="module">
-//   import { db, app } from './assets/js/firebase-sync.js';
-//   // puis utiliser db avec les APIs Firestore normales
+//   import { db, queueOp, attachSyncBanner } from './assets/js/firebase-sync.js';
+//   attachSyncBanner(); // affiche banner état connexion/queue
 //   </script>
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -44,7 +43,6 @@ export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 
 // Re-export des helpers Firestore utilisés partout
-// → les pages peuvent importer tout ce dont elles ont besoin depuis ce seul module.
 export {
   doc,
   collection,
@@ -83,7 +81,227 @@ export function escHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-// État de connexion — utilisable pour banner offline (sera complété en bloc 2.B)
+// ═══════════════════════════════════════════════════════════
+// SYNC QUEUE — Phase 2.B.2 + 2.B.3
+// ═══════════════════════════════════════════════════════════
+//
+// Queue write-through : toute écriture Firestore peut être mise en file si offline.
+// Au retour en ligne, le processeur retry avec exponential backoff.
+// Persistance localStorage pour survie au reload.
+
+const QUEUE_KEY = "sync_queue_v1";
+const FAILED_KEY = "sync_queue_failed_v1";
+const MAX_RETRIES = 5;
+const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000]; // capped à 16s
+
+let queueProcessing = false;
+const listeners = new Set();
+
+function readQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function writeQueue(q) {
+  try {
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
+  } catch (e) {
+    console.warn("[sync-queue] localStorage plein, opération perdue:", e);
+  }
+  notifyListeners();
+}
+
+function readFailed() {
+  try {
+    return JSON.parse(localStorage.getItem(FAILED_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function writeFailed(f) {
+  try {
+    localStorage.setItem(FAILED_KEY, JSON.stringify(f));
+  } catch (e) {
+    console.warn("[sync-queue] impossible de persister failed:", e);
+  }
+}
+
+/**
+ * Ajoute une opération Firestore à la queue.
+ * Si on est en ligne, le processeur est déclenché immédiatement.
+ *
+ * @param {Object} op { type: 'set'|'update'|'delete', collection, docId, data? }
+ * @returns {string} queueId de l'op (pour suivi)
+ */
+export function queueOp(op) {
+  const id = "q_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+  const entry = {
+    id,
+    ...op,
+    timestamp: Date.now(),
+    retries: 0
+  };
+  const q = readQueue();
+  q.push(entry);
+  writeQueue(q);
+  processQueue();
+  return id;
+}
+
+async function executeOp(op) {
+  const ref = doc(db, op.collection, op.docId);
+  if (op.type === "set") {
+    await setDoc(ref, op.data);
+  } else if (op.type === "update") {
+    await updateDoc(ref, op.data);
+  } else if (op.type === "delete") {
+    await deleteDoc(ref);
+  } else {
+    throw new Error("Type d'opération inconnu: " + op.type);
+  }
+}
+
+async function processQueue() {
+  if (queueProcessing) return;
+  if (!navigator.onLine) return;
+
+  queueProcessing = true;
+  try {
+    let q = readQueue();
+    while (q.length > 0 && navigator.onLine) {
+      const op = q[0];
+      try {
+        await executeOp(op);
+        // Succès : retirer de la queue
+        q = q.slice(1);
+        writeQueue(q);
+      } catch (err) {
+        op.retries = (op.retries || 0) + 1;
+        console.warn(
+          "[sync-queue] Retry " + op.retries + "/" + MAX_RETRIES + " pour " + op.id + ":",
+          err?.message || err
+        );
+        if (op.retries >= MAX_RETRIES) {
+          // Trop d'échecs : déplacer en failed
+          const failed = readFailed();
+          failed.push({ ...op, failedAt: Date.now(), error: err?.message || String(err) });
+          writeFailed(failed);
+          q = q.slice(1);
+          writeQueue(q);
+          console.error("[sync-queue] OP ABANDONNÉE après " + MAX_RETRIES + " retries:", op);
+        } else {
+          // Persist retry count et attendre backoff
+          q[0] = op;
+          writeQueue(q);
+          const wait = BACKOFF_MS[Math.min(op.retries - 1, BACKOFF_MS.length - 1)];
+          await new Promise((r) => setTimeout(r, wait));
+        }
+      }
+    }
+  } finally {
+    queueProcessing = false;
+    notifyListeners();
+  }
+}
+
+/**
+ * Retourne l'état courant de la sync (utile pour UI).
+ */
+export function getSyncState() {
+  return {
+    online: navigator.onLine,
+    pending: readQueue().length,
+    failed: readFailed().length,
+    processing: queueProcessing
+  };
+}
+
+/**
+ * S'abonne aux changements d'état de sync.
+ * Appelle `callback(state)` à chaque changement.
+ */
+export function onSyncChange(callback) {
+  listeners.add(callback);
+  callback(getSyncState()); // initial
+  return () => listeners.delete(callback);
+}
+
+function notifyListeners() {
+  const state = getSyncState();
+  listeners.forEach((cb) => {
+    try {
+      cb(state);
+    } catch (e) {
+      console.error("[sync-queue] listener error:", e);
+    }
+  });
+}
+
+// Déclenche le processeur au retour en ligne
+window.addEventListener("online", () => {
+  notifyListeners();
+  processQueue();
+});
+window.addEventListener("offline", () => notifyListeners());
+
+// Déclenche au load (traite les ops pendantes d'une session précédente)
+if (navigator.onLine && readQueue().length > 0) {
+  processQueue();
+}
+
+// ═══════════════════════════════════════════════════════════
+// UI BANNER — Phase 2.B.4
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Attache un banner sticky en bas de page pour afficher l'état sync.
+ * Les classes CSS sont dans assets/css/design-system.css (.sync-banner).
+ *
+ * @param {Object} opts { autoHideOk: true } — si true, masque le banner quand online et queue vide
+ */
+export function attachSyncBanner(opts = { autoHideOk: true }) {
+  // S'assurer que design-system.css est chargé (sinon injecter un style fallback minimal)
+  if (!document.querySelector('link[href*="design-system.css"]')) {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "./assets/css/design-system.css";
+    document.head.appendChild(link);
+  }
+
+  const banner = document.createElement("div");
+  banner.className = "sync-banner";
+  banner.setAttribute("role", "status");
+  banner.setAttribute("aria-live", "polite");
+  document.body.appendChild(banner);
+
+  const render = (state) => {
+    banner.classList.remove("offline", "pending", "online", "visible");
+    if (!state.online) {
+      banner.textContent = "Hors ligne — les modifications seront synchronisées au retour";
+      banner.classList.add("offline", "visible");
+    } else if (state.pending > 0 || state.processing) {
+      banner.textContent =
+        "Synchronisation… " + state.pending + " opération" + (state.pending > 1 ? "s" : "") + " en attente";
+      banner.classList.add("pending", "visible");
+    } else if (state.failed > 0) {
+      banner.textContent = state.failed + " opération(s) ont échoué — voir la console";
+      banner.classList.add("offline", "visible");
+    } else {
+      banner.textContent = "Synchronisé";
+      banner.classList.add("online");
+      if (!opts.autoHideOk) banner.classList.add("visible");
+    }
+  };
+
+  onSyncChange(render);
+  return banner;
+}
+
+// État de connexion — utilisable pour banner offline
 export function onConnectionChange(callback) {
   window.addEventListener("online", () => callback(true));
   window.addEventListener("offline", () => callback(false));
