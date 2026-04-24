@@ -10,6 +10,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import {
   getFirestore,
+  enableIndexedDbPersistence,
   doc,
   collection,
   onSnapshot,
@@ -26,6 +27,11 @@ import {
   serverTimestamp,
   Timestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import {
+  getAuth,
+  signInAnonymously,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 // Config Firebase — projet "la-marmitte-express"
 // Note: apiKey côté client est publique par design (sécurité = Firestore rules).
@@ -41,6 +47,54 @@ const firebaseConfig = {
 // Init app + Firestore (singletons)
 export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
+export const auth = getAuth(app);
+
+// ═══════════════════════════════════════════════════════════
+// IndexedDB persistence — Phase 2.D.1
+// ═══════════════════════════════════════════════════════════
+// Active le cache IndexedDB pour Firestore → offline reads + writes queued.
+// Peut échouer si plusieurs onglets ouverts OU navigateur incompatible → try/catch gracieux.
+try {
+  await enableIndexedDbPersistence(db);
+  console.log("[firebase-sync] IndexedDB persistence activée (offline OK)");
+} catch (err) {
+  if (err?.code === "failed-precondition") {
+    console.warn("[firebase-sync] IndexedDB persistence: plusieurs onglets ouverts, désactivée sur celui-ci");
+  } else if (err?.code === "unimplemented") {
+    console.warn("[firebase-sync] IndexedDB persistence: navigateur non compatible");
+  } else {
+    console.warn("[firebase-sync] IndexedDB persistence erreur:", err);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// Firebase Auth anonyme — Phase 2.C.1
+// ═══════════════════════════════════════════════════════════
+// Connecte l'utilisateur de façon anonyme (UID Firebase sans compte explicite).
+// Préparation pour les Firestore rules strictes qui exigent request.auth != null.
+// Si Firebase Auth anonyme n'est pas encore activé côté Console Firebase, on log un warning
+// mais l'app continue de fonctionner avec les règles permissives actuelles.
+export const authReady = (async () => {
+  try {
+    await signInAnonymously(auth);
+    console.log("[firebase-sync] Auth anonyme OK, UID:", auth.currentUser?.uid);
+    return auth.currentUser;
+  } catch (err) {
+    console.warn(
+      "[firebase-sync] Auth anonyme échouée — activer dans Firebase Console > Authentication > Sign-in method > Anonymous. Erreur:",
+      err?.code || err?.message
+    );
+    return null;
+  }
+})();
+
+export function onAuthChange(callback) {
+  return onAuthStateChanged(auth, callback);
+}
+
+export function currentUid() {
+  return auth.currentUser?.uid || null;
+}
 
 // Re-export des helpers Firestore utilisés partout
 export {
