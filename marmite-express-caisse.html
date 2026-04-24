@@ -12,24 +12,15 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
-<!-- Firebase SDK -->
+<!-- Firebase SDK (via module centralisé) -->
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { getStorage, ref, uploadString, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+import {
+  db, storage, doc, setDoc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, getDocs, serverTimestamp,
+  storageRef, uploadString, getDownloadURL, deleteObject
+} from './assets/js/firebase-sync.js';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyChl-uEyzbbdJfhXwOUH_rpzSIsEAbexhQ",
-  authDomain: "la-marmitte-express.firebaseapp.com",
-  projectId: "la-marmitte-express",
-  storageBucket: "la-marmitte-express.firebasestorage.app",
-  messagingSenderId: "215969803476",
-  appId: "1:215969803476:web:39ee4de2cf4475f3c2df41"
-};
-
-const fbApp = initializeApp(firebaseConfig);
-const db = getFirestore(fbApp);
-const storage = getStorage(fbApp);
+// Alias ref pour compat avec le code existant de la caisse
+const ref = storageRef;
 
 // ── Expose Firebase functions to global scope ──
 window.FB = {

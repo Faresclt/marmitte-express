@@ -32,6 +32,14 @@ import {
   signInAnonymously,
   onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadString,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
 // Config Firebase — projet "la-marmitte-express"
 // Note: apiKey côté client est publique par design (sécurité = Firestore rules).
@@ -44,10 +52,14 @@ const firebaseConfig = {
   appId: "1:215969803476:web:39ee4de2cf4475f3c2df41"
 };
 
-// Init app + Firestore (singletons)
+// Init app + Firestore + Storage (singletons)
 export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
+
+// Re-export helpers Storage utilisés par la caisse
+export { storageRef, uploadString, uploadBytes, getDownloadURL, deleteObject };
 
 // ═══════════════════════════════════════════════════════════
 // IndexedDB persistence — Phase 2.D.1
