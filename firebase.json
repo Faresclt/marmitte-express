@@ -1,0 +1,22 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "firestore.rules.v2",
+      ".planning/**",
+      "docs/**",
+      "**/.*",
+      "**/node_modules/**",
+      "_diag*",
+      "_*.ps1",
+      "_*.bat"
+    ]
+  }
+}
