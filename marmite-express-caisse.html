@@ -80,6 +80,18 @@ window.initFirebaseListeners = function(){
   // Listen to menu published by caisse (for waiter app)
   window.FB.listen('config', 'menu', (data) => {
     if(data && data.cats) window.publishedMenu = data;
+    // Sync branding cross-device (logo, name, accent, emoji)
+    if(data && data.branding){
+      const b = data.branding;
+      if(typeof branding !== 'undefined'){
+        if(b.name) branding.name = b.name;
+        if(b.tagline) branding.tagline = b.tagline;
+        if(b.emoji) branding.emoji = b.emoji;
+        if(b.accent) branding.accent = b.accent;
+        if(b.logoUrl){ branding.logoUrl = b.logoUrl; LS.set('brand_logoUrl', b.logoUrl); }
+        if(typeof applyBranding === 'function') applyBranding();
+      }
+    }
     // Sync salle layout : Firebase = source de vérité.
     // Restore si Firebase a un layout et qu'il diffère du local
     // (avant : refusait restore si local >8 éléments → bloquait sync entre serveur et caisse)

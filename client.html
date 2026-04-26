@@ -52,6 +52,11 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
     const b = menu.branding||{};
     if(b.name) { const safe = escHtml(b.name); document.getElementById('resto-name').innerHTML = safe.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>'); }
     if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+    const logoImg = document.getElementById('resto-logo');
+    if(logoImg){
+      if(b.logoUrl){ logoImg.src = b.logoUrl; logoImg.style.display = 'block'; }
+      else { logoImg.style.display = 'none'; }
+    }
     renderMenu();
     document.getElementById('loading').style.display='none';
     document.getElementById('app').style.display='flex';
@@ -364,9 +369,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);dis
 
 <div id="app-header">
   <div class="table-pill">TABLE <span id="table-display">?</span></div>
-  <div>
-    <div id="resto-name">La <span style="color:var(--accent)">Marmitte</span> Express</div>
-    <div class="tagline">COMMANDER EN LIGNE</div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <img id="resto-logo" alt="" style="display:none;width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0">
+    <div>
+      <div id="resto-name">La <span style="color:var(--accent)">Marmitte</span> Express</div>
+      <div class="tagline">COMMANDER EN LIGNE</div>
+    </div>
   </div>
 </div>
 
