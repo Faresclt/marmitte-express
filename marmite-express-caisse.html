@@ -80,15 +80,18 @@ window.initFirebaseListeners = function(){
   // Listen to menu published by caisse (for waiter app)
   window.FB.listen('config', 'menu', (data) => {
     if(data && data.cats) window.publishedMenu = data;
-    // Restore salle layout from Firebase if localStorage was reset
+    // Sync salle layout : Firebase = source de vérité.
+    // Restore si Firebase a un layout et qu'il diffère du local
+    // (avant : refusait restore si local >8 éléments → bloquait sync entre serveur et caisse)
     if(data && data.salleLayout && data.salleLayout.length > 0){
       const localSalle = LS.get('salleLayout', null);
-      if(!localSalle || localSalle.length <= 8){
-        // Local salle is default or empty — restore from Firebase
+      const localJson = JSON.stringify(localSalle || []);
+      const remoteJson = JSON.stringify(data.salleLayout);
+      if(localJson !== remoteJson){
         if(typeof salleElements !== 'undefined'){
           salleElements = data.salleLayout;
           LS.set('salleLayout', salleElements);
-          console.log('[Salle] Restored '+salleElements.length+' elements from Firebase');
+          console.log('[Salle] Synced '+salleElements.length+' elements from Firebase (diff detected)');
           if(typeof renderSalle === 'function') renderSalle();
         }
       }

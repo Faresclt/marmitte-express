@@ -79,13 +79,32 @@ function showTablePicker(){
         <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px">🍽️ Choisir une <span style="color:var(--accent)">table</span></div>
         <div style="font-size:12px;color:var(--muted);margin-top:4px">Touchez une table pour prendre la commande</div>
       </div>
-      <div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;position:relative;min-height:0">
-        <div style="position:relative;width:${maxX+60}px;height:${maxY+60}px;min-width:100%;min-height:100%">
-          ${elHtml}
+      <div id="plan-scroll" style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;position:relative;min-height:0">
+        <div id="plan-wrapper" style="position:relative;width:100%;overflow:hidden">
+          <div id="plan-inner" style="position:relative;width:${maxX+60}px;height:${maxY+60}px;transform-origin:top left">
+            ${elHtml}
+          </div>
         </div>
       </div>
     </div>`;
   picker.style.display='flex';
+  // Apply responsive scaling
+  const planW = maxX + 60;
+  const planH = maxY + 60;
+  const applyScale = ()=>{
+    const wrapper = document.getElementById('plan-wrapper');
+    const inner = document.getElementById('plan-inner');
+    if(!wrapper || !inner) return;
+    const availW = wrapper.clientWidth;
+    const scale = Math.min(1, availW / planW);
+    inner.style.transform = `scale(${scale})`;
+    wrapper.style.height = (planH * scale) + 'px';
+  };
+  applyScale();
+  // Re-scale on resize/orientation change
+  if(window._planResizeHandler) window.removeEventListener('resize', window._planResizeHandler);
+  window._planResizeHandler = applyScale;
+  window.addEventListener('resize', applyScale);
 }
 
 function pickTable(id, num){
