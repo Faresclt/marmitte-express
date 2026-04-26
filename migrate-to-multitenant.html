@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://firestore.googleapis.com data: blob:">
+<title>Migration Multi-Tenant — La Marmite Express</title>
+<link rel="stylesheet" href="./assets/css/design-system.css">
+<style>
+  body { padding: 24px; max-width: 920px; margin: 0 auto; font-family: 'DM Sans', sans-serif; }
+  h1 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; color: var(--accent); margin-bottom: 4px; }
+  .sub { font-size: 12px; color: var(--muted); margin-bottom: 24px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  input { background: var(--card); border: 1.5px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 14px; }
+  button { height: 44px; padding: 0 20px; border-radius: 10px; border: none; font-weight: 700; font-size: 14px; cursor: pointer; transition: opacity .15s; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-danger { background: var(--red); color: #fff; }
+  .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat { background: var(--card); border-radius: 10px; padding: 12px; text-align: center; }
+  .stat-v { font-family: 'Bebas Neue', sans-serif; font-size: 28px; line-height: 1; }
+  .stat-l { font-size: 10px; color: var(--muted); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+  .log { background: #000; color: #0f0; font-family: 'Courier New', monospace; font-size: 11px; padding: 12px; border-radius: 8px; max-height: 320px; overflow-y: auto; white-space: pre-wrap; }
+  .log .err { color: #f55; }
+  .log .ok { color: #5f5; }
+  .log .info { color: #5cf; }
+  .log .warn { color: #fa0; }
+  .alert-warn { background: rgba(245,166,35,.1); border: 1px solid rgba(245,166,35,.3); border-radius: 8px; padding: 12px; color: var(--accent); font-size: 13px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<h1>🔀 MIGRATION MULTI-TENANT</h1>
+<div class="sub">Copie les collections root vers <code>restaurants/{slug}/...</code> — Phase 3</div>
+
+<div class="alert-warn">
+  ⚠️ <strong>Avant de migrer</strong> : exporter Firestore via <code>gcloud firestore export gs://BUCKET</code>.
+  La migration ne supprime PAS les collections root (rollback safe pendant 7 jours).
+  Idempotente : peut être relancée sans doublons.
+</div>
+
+<div class="panel">
+  <div class="row">
+    <label>Slug du restaurant</label>
+    <input type="text" id="slug" value="marmitte-express" placeholder="marmitte-express">
+  </div>
+  <div class="row">
+    <label>UID Admin (Firebase Auth)</label>
+    <input type="text" id="adminUid" placeholder="auto-rempli après login" style="flex:1; min-width:280px" readonly>
+    <button class="btn-secondary" onclick="signIn()">🔑 Sign In</button>
+  </div>
+  <div class="row">
+    <button class="btn-primary" id="btn-migrate" onclick="runMigration()" disabled>▶ Lancer la migration</button>
+    <button class="btn-secondary" onclick="dryRun()" id="btn-dry">🔍 Dry Run (lire counts seulement)</button>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="stat-grid">
+    <div class="stat"><div class="stat-v" id="stat-config" style="color:var(--blue)">—</div><div class="stat-l">config docs</div></div>
+    <div class="stat"><div class="stat-v" id="stat-tables" style="color:var(--green)">—</div><div class="stat-l">tables</div></div>
+    <div class="stat"><div class="stat-v" id="stat-orders" style="color:var(--accent)">—</div><div class="stat-l">orders</div></div>
+    <div class="stat"><div class="stat-v" id="stat-payments" style="color:var(--purple)">—</div><div class="stat-l">payments</div></div>
+    <div class="stat"><div class="stat-v" id="stat-copied" style="color:var(--green)">0</div><div class="stat-l">copiés</div></div>
+    <div class="stat"><div class="stat-v" id="stat-skipped" style="color:var(--muted)">0</div><div class="stat-l">skipped</div></div>
+    <div class="stat"><div class="stat-v" id="stat-errors" style="color:var(--red)">0</div><div class="stat-l">erreurs</div></div>
+  </div>
+  <div class="log" id="log">En attente de l'authentification...\n</div>
+</div>
+
+<script type="module">
+import {
+  db, auth, doc, collection, getDoc, getDocs, setDoc, serverTimestamp
+} from './assets/js/firebase-sync.js';
+import {
+  signInWithEmailAndPassword,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+const COLLECTIONS = ['config', 'tables', 'orders', 'payments'];
+let stats = { copied: 0, skipped: 0, errors: 0 };
+
+function log(msg, type = 'info') {
+  const el = document.getElementById('log');
+  const ts = new Date().toISOString().slice(11, 19);
+  el.innerHTML += `<span class="${type}">[${ts}] ${msg}</span>\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateStat(id, val) {
+  document.getElementById(id).textContent = val;
+}
+
+window.signIn = async function() {
+  const email = prompt('Email admin Firebase :');
+  if (!email) return;
+  const pwd = prompt('Mot de passe :');
+  if (!pwd) return;
+  try {
+    await signInWithEmailAndPassword(auth, email, pwd);
+    log('Auth OK', 'ok');
+  } catch (e) {
+    log('Auth ECHEC : ' + e.code, 'err');
+  }
+};
+
+onAuthStateChanged(auth, (user) => {
+  if (user && !user.isAnonymous) {
+    document.getElementById('adminUid').value = user.uid;
+    document.getElementById('btn-migrate').disabled = false;
+    log('Connecté admin: ' + user.email + ' (UID: ' + user.uid + ')', 'ok');
+  } else {
+    document.getElementById('adminUid').value = user ? '(anonyme - login admin requis)' : '';
+    document.getElementById('btn-migrate').disabled = true;
+  }
+});
+
+async function countCollection(name) {
+  const snap = await getDocs(collection(db, name));
+  return snap.size;
+}
+
+window.dryRun = async function() {
+  log('=== DRY RUN ===', 'info');
+  for (const name of COLLECTIONS) {
+    try {
+      const count = await countCollection(name);
+      updateStat('stat-' + name, count);
+      log(`${name}/ : ${count} documents`, 'ok');
+    } catch (e) {
+      log(`${name}/ : ERREUR ${e.code}`, 'err');
+    }
+  }
+};
+
+async function migrateCollection(name, slug) {
+  log(`--- Migration ${name}/ ---`, 'info');
+  const srcSnap = await getDocs(collection(db, name));
+  let coll_copied = 0, coll_skipped = 0, coll_errors = 0;
+
+  for (const srcDoc of srcSnap.docs) {
+    const id = srcDoc.id;
+    const srcData = srcDoc.data();
+    const destPath = `restaurants/${slug}/${name}/${id}`;
+    try {
+      const destRef = doc(db, 'restaurants', slug, name, id);
+      const existing = await getDoc(destRef);
+      if (existing.exists()) {
+        coll_skipped++;
+        stats.skipped++;
+        continue;
+      }
+      await setDoc(destRef, { ...srcData, _migrated_at: serverTimestamp(), _migrated_from: name });
+      coll_copied++;
+      stats.copied++;
+    } catch (e) {
+      coll_errors++;
+      stats.errors++;
+      log(`  ${id}: ERR ${e.code}`, 'err');
+    }
+    updateStat('stat-copied', stats.copied);
+    updateStat('stat-skipped', stats.skipped);
+    updateStat('stat-errors', stats.errors);
+  }
+  log(`${name}/ : ${coll_copied} copiés, ${coll_skipped} skipped, ${coll_errors} erreurs`, coll_errors > 0 ? 'warn' : 'ok');
+}
+
+async function seedAdminUser(slug, uid) {
+  const ref = doc(db, 'restaurants', slug, 'users', uid);
+  const existing = await getDoc(ref);
+  if (existing.exists()) {
+    log(`users/${uid} déjà présent (skip seed)`, 'info');
+    return;
+  }
+  await setDoc(ref, { role: 'admin', addedAt: serverTimestamp(), email: auth.currentUser.email || null });
+  log(`Seed admin user ${uid} → restaurants/${slug}/users/`, 'ok');
+}
+
+window.runMigration = async function() {
+  if (!auth.currentUser || auth.currentUser.isAnonymous) {
+    log('Non authentifié admin — abort.', 'err');
+    return;
+  }
+  if (!confirm('Lancer la migration ? Les collections root NE SERONT PAS supprimées (rollback safe).')) return;
+  document.getElementById('btn-migrate').disabled = true;
+
+  const slug = document.getElementById('slug').value.trim();
+  if (!slug) { log('Slug vide — abort.', 'err'); return; }
+
+  const t0 = Date.now();
+  log(`=== MIGRATION → restaurants/${slug}/ ===`, 'info');
+
+  // 1. Seed admin user FIRST (sinon rules.v3 bloquera tout)
+  await seedAdminUser(slug, auth.currentUser.uid);
+
+  // 2. Migrer toutes les collections
+  for (const name of COLLECTIONS) {
+    try {
+      await migrateCollection(name, slug);
+    } catch (e) {
+      log(`COLLECTION ${name}/ : EXCEPTION ${e.code} ${e.message}`, 'err');
+    }
+  }
+
+  // 3. Écrire le rapport meta
+  const dur = Math.round((Date.now() - t0) / 1000);
+  await setDoc(doc(db, 'restaurants', slug, 'meta', 'migration'), {
+    completedAt: serverTimestamp(),
+    durationSec: dur,
+    stats: { ...stats },
+    runner: auth.currentUser.uid
+  });
+
+  log(`=== TERMINÉ en ${dur}s ===`, 'ok');
+  log(`Stats: ${stats.copied} copiés, ${stats.skipped} skipped, ${stats.errors} erreurs`, 'ok');
+  log('Prochaine étape : déployer firestore.rules.v3 (backward compat ON pendant 7j)', 'info');
+
+  document.getElementById('btn-migrate').disabled = false;
+};
+</script>
+</body>
+</html>
