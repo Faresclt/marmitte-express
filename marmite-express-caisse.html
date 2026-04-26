@@ -1129,7 +1129,7 @@ function handleLogoUpload(e){
   const f=e.target.files[0]; if(!f) return;
   if(f.size>15*1024*1024){ toast('Image trop lourde (max 15 Mo)','r'); return; }
   const r=new FileReader(); r.onload=ev=>{
-    const img=new Image(); img.onload=()=>{
+    const img=new Image(); img.onload=async ()=>{
       const c=document.createElement('canvas');
       const sz=200; c.width=sz; c.height=sz;
       // crop to square center
@@ -1140,7 +1140,23 @@ function handleLogoUpload(e){
       LS.set('brand_logo',b64);
       applyLogoPreview(b64);
       applyBranding();
-      toast('✓ Logo importé');
+      // Upload Firebase Storage + propagation cross-device via config/menu.branding.logoUrl
+      if(window.FB && window.FB.uploadImage){
+        try{
+          toast('📤 Upload logo…','o');
+          const url = await window.FB.uploadImage('branding/logo.png', b64);
+          // Merge dans config/menu.branding sans écraser le reste (setDoc merge)
+          const { doc: docFn, setDoc: setDocFn } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+          await setDocFn(docFn(window.FB.db, 'config', 'menu'), { branding: { logoUrl: url } }, { merge: true });
+          branding.logoUrl = url;
+          toast('✓ Logo synchronisé');
+        }catch(err){
+          console.warn('[logo] upload Firebase échoué:', err);
+          toast('⚠ Logo local OK, sync échouée','o');
+        }
+      } else {
+        toast('✓ Logo importé (local)');
+      }
     }; img.src=ev.target.result;
   }; r.readAsDataURL(f);
 }
@@ -2453,6 +2469,49 @@ function renderSalle(){
   const canvas = document.getElementById('salle-elements');
   canvas.innerHTML = '';
   salleElements.forEach(el => canvas.appendChild(makeElDOM(el)));
+  applySalleScale();
+}
+
+function applySalleScale(){
+  const canvas = document.getElementById('salle-elements');
+  const wrap = document.getElementById('salle-canvas');
+  if(!canvas || !wrap || !salleElements || !salleElements.length) return;
+  // Calcul bounds plan
+  let maxX=0, maxY=0;
+  salleElements.forEach(el=>{
+    const w = el.type==='table-rect' ? (el.size||110)*1.4 : (el.size||90);
+    const h = el.type==='table-rect' ? (el.size||110) : (el.size||90);
+    maxX = Math.max(maxX, (el.x||0) + w);
+    maxY = Math.max(maxY, (el.y||0) + h);
+  });
+  const padding = 60;
+  const planW = maxX + padding;
+  const planH = maxY + padding;
+  // Mode édition : pas de scale (besoin coordonnées exactes pour drag)
+  if(salleMode==='edit'){
+    canvas.style.transform = '';
+    canvas.style.transformOrigin = '';
+    canvas.style.width = '';
+    canvas.style.height = '';
+    return;
+  }
+  // Mode service : scale pour fit viewport
+  const availW = wrap.clientWidth;
+  const availH = wrap.clientHeight;
+  if(availW < 50 || availH < 50) return;
+  const scale = Math.min(1, availW/planW, availH/planH);
+  canvas.style.transformOrigin = 'top left';
+  canvas.style.transform = `scale(${scale})`;
+  canvas.style.width = planW + 'px';
+  canvas.style.height = planH + 'px';
+}
+
+// Re-scale on resize
+if(!window._salleResizeAttached){
+  window._salleResizeAttached = true;
+  window.addEventListener('resize', () => {
+    if(typeof applySalleScale === 'function') applySalleScale();
+  });
 }
 
 function tableStatus(tid){
