@@ -1854,7 +1854,19 @@ function printReceipt(){
   
   const w = window.open('','_blank','width=320,height=600');
   w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-  </head><body>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Courier New',monospace;font-size:12px;padding:20px;max-width:300px;margin:0 auto;color:#000;background:#fff}
+    .center{text-align:center}
+    .bold{font-weight:700}
+    .line{border-top:1px dashed #000;margin:8px 0}
+    .dline{border-top:2px solid #000;margin:8px 0}
+    .row{display:flex;justify-content:space-between;padding:2px 0}
+    .items .row{padding:3px 0}
+    .big{font-size:16px;font-weight:700}
+    h1{font-size:16px;font-weight:700;margin-bottom:2px}
+    h2{font-size:11px;color:#666;margin-bottom:8px}
+  </style></head><body>
   <div class="center">
     <h1>${branding.emoji||'🍲'} ${branding.name||'La Marmite Express'}</h1>
     <h2>TICKET DE CAISSE</h2>
