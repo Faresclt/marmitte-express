@@ -109,26 +109,20 @@ export function currentUid() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Multi-tenant scoping — Phase 3 cutover
+// Multi-tenant scoping — Phase 3 cutover (DESACTIVE temporairement)
 // ═══════════════════════════════════════════════════════════
-// Détecte slug resto depuis URL ?resto=... ou localStorage marmitte_resto_slug.
-// Si slug présent → toutes les références doc()/collection() sont préfixées
-// par restaurants/{slug}/ automatiquement, sans modifier les pages appelantes.
-// Si pas de slug → mode legacy (collections root) — backward compat.
+// Cause : rules.v3 exige isResto/isAdmin pour ecrire dans restaurants/{slug}/ .
+// Sans seed users + admin auth proper, ecritures bloquees par rules.
+// Revert : tout passe par root collections (backward compat).
+// Re-activation prevue : Phase 5 quand auth admin par-resto en place.
 function _detectSlug() {
-  try {
-    const params = new URLSearchParams(location.search);
-    const fromUrl = params.get('resto');
-    if (fromUrl) {
-      const clean = String(fromUrl).trim().toLowerCase();
-      if (clean) { localStorage.setItem('marmitte_resto_slug', clean); return clean; }
-    }
-    return localStorage.getItem('marmitte_resto_slug') || null;
-  } catch (e) { return null; }
+  // Forcer null = mode legacy root (sécurise prod parents).
+  // Nettoie localStorage cache si trainant d'un test précédent.
+  try { localStorage.removeItem('marmitte_resto_slug'); } catch (_) {}
+  return null;
 }
 export const RESTO_SLUG = _detectSlug();
-const _MT_PREFIX = RESTO_SLUG ? ['restaurants', RESTO_SLUG] : null;
-if (_MT_PREFIX) console.log('[firebase-sync] multi-tenant ON: restaurants/' + RESTO_SLUG + '/');
+const _MT_PREFIX = null; // forcé null jusqu'a re-activation phase 5
 
 // Wrappers : si slug actif, préfixe restaurants/{slug}/ devant le path.
 // Si pas de slug : passe-plat vers les fonctions natives (mode legacy).
