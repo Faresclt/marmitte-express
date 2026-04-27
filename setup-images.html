@@ -167,6 +167,14 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
 <script type="module">
 import { db, doc, onSnapshot } from './assets/js/firebase-sync.js';
 
+// ── Branding cross-device ──
+onSnapshot(doc(db, 'config', 'menu'), snap => {
+  if(!snap.exists()) return;
+  const b = snap.data().branding || {};
+  if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+  if(b.name) document.title = b.name + ' — Setup images';
+});
+
 // ── LS helpers ──
 const LS = {
   get(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){return d;} },

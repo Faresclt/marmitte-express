@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Créer mon restaurant — La Marmitte Express</title>
+<meta name="theme-color" content="#f5a623">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--text:#f0f0f0;--muted:#6b7280;--green:#22c97a;--accent:#f5a623;--red:#e84040;--radius:16px}
+  body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px}
+  .wrap{width:100%;max-width:480px}
+  header{text-align:center;margin-bottom:32px}
+  .logo{display:inline-flex;align-items:center;gap:10px;margin-bottom:12px}
+  .logo img{width:56px;height:56px;border-radius:12px;object-fit:cover}
+  h1{font-family:'Bebas Neue',sans-serif;font-size:42px;letter-spacing:1px;line-height:1}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:14px;margin-top:8px}
+  form{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;display:flex;flex-direction:column;gap:16px}
+  .field{display:flex;flex-direction:column;gap:6px}
+  label{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  input{background:var(--card);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:15px;padding:12px 14px;border-radius:10px;outline:none;transition:border-color .15s}
+  input:focus{border-color:var(--accent)}
+  input[readonly]{color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
+  .hint{font-size:12px;color:var(--muted)}
+  .btn{background:var(--accent);color:#1a1100;border:none;font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1.5px;padding:14px;border-radius:12px;cursor:pointer;transition:transform .1s,opacity .15s;margin-top:8px}
+  .btn:hover{transform:translateY(-1px)}
+  .btn:disabled{opacity:.6;cursor:not-allowed;transform:none}
+  .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:1000;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
+  .toast.show{opacity:1}
+  .toast.ok{background:var(--green);color:#082014}
+  .spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(0,0,0,.25);border-top-color:#1a1100;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:8px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .foot{text-align:center;margin-top:20px;font-size:13px;color:var(--muted)}
+  .foot a{color:var(--accent);text-decoration:none;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <img src="icon-192.png" alt="Logo" onerror="this.style.display='none'">
+    </div>
+    <h1>La Marmitte <span>Express</span></h1>
+    <div class="sub">Créez votre restaurant en 30 secondes</div>
+  </header>
+
+  <form id="signup-form" autocomplete="on">
+    <div class="field">
+      <label for="restoName">Nom du restaurant</label>
+      <input id="restoName" type="text" required placeholder="Le Petit Bistrot" maxlength="60">
+    </div>
+    <div class="field">
+      <label for="slug">Identifiant URL</label>
+      <input id="slug" type="text" readonly placeholder="le-petit-bistrot">
+      <div class="hint">Généré automatiquement. Sera utilisé dans l'URL de votre caisse.</div>
+    </div>
+    <div class="field">
+      <label for="email">Email administrateur</label>
+      <input id="email" type="email" required placeholder="contact@monresto.fr" autocomplete="email">
+    </div>
+    <div class="field">
+      <label for="pwd">Mot de passe</label>
+      <input id="pwd" type="password" required minlength="8" placeholder="8 caractères minimum" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label for="pwd2">Confirmer le mot de passe</label>
+      <input id="pwd2" type="password" required minlength="8" autocomplete="new-password">
+    </div>
+    <button id="submit-btn" class="btn" type="submit">Créer mon restaurant</button>
+  </form>
+
+  <div class="foot">
+    Vous avez déjà un compte ? <a href="marmite-express-caisse.html">Accéder à la caisse</a>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script type="module">
+import { auth, db } from './assets/js/firebase-sync.js';
+import { createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { doc, setDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const $ = id => document.getElementById(id);
+const nameEl = $('restoName');
+const slugEl = $('slug');
+const emailEl = $('email');
+const pwdEl = $('pwd');
+const pwd2El = $('pwd2');
+const btn = $('submit-btn');
+const toastEl = $('toast');
+
+function slugify(str){
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // retire accents
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+}
+
+nameEl.addEventListener('input', () => {
+  slugEl.value = slugify(nameEl.value);
+});
+
+let toastTimer = null;
+function toast(msg, ok=false){
+  toastEl.textContent = msg;
+  toastEl.classList.toggle('ok', ok);
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 4000);
+}
+
+function friendlyError(code){
+  const map = {
+    'auth/email-already-in-use': 'Cet email est déjà utilisé. Essayez de vous connecter.',
+    'auth/invalid-email': 'Email invalide.',
+    'auth/weak-password': 'Mot de passe trop faible (min 8 caractères).',
+    'auth/network-request-failed': 'Problème réseau. Vérifiez votre connexion.',
+    'auth/operation-not-allowed': 'Inscription désactivée. Contactez le support.'
+  };
+  return map[code] || 'Erreur lors de la création du compte. Réessayez.';
+}
+
+$('signup-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const name = nameEl.value.trim();
+  const slug = slugify(name);
+  const email = emailEl.value.trim();
+  const pwd = pwdEl.value;
+  const pwd2 = pwd2El.value;
+
+  if(!name || name.length < 2){ toast('Nom du restaurant trop court'); return; }
+  if(!slug || slug.length < 2){ toast('Nom invalide (utilisez des lettres)'); return; }
+  if(pwd.length < 8){ toast('Mot de passe : 8 caractères minimum'); return; }
+  if(pwd !== pwd2){ toast('Les mots de passe ne correspondent pas'); return; }
+
+  btn.disabled = true;
+  const original = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner"></span>Création en cours...';
+
+  try {
+    // Vérifier que le slug est libre
+    const existing = await getDoc(doc(db, 'restaurants', slug, 'meta', 'info'));
+    if(existing.exists()){
+      toast('Ce nom de restaurant est déjà pris');
+      btn.disabled = false;
+      btn.innerHTML = original;
+      return;
+    }
+
+    // Création compte Firebase Auth
+    const cred = await createUserWithEmailAndPassword(auth, email, pwd);
+    const uid = cred.user.uid;
+
+    // Document meta du restaurant
+    await setDoc(doc(db, 'restaurants', slug, 'meta', 'info'), {
+      name,
+      slug,
+      plan: 'free',
+      createdAt: serverTimestamp(),
+      ownerUid: uid
+    });
+
+    // Document user admin
+    await setDoc(doc(db, 'restaurants', slug, 'users', uid), {
+      role: 'admin',
+      email,
+      addedAt: serverTimestamp()
+    });
+
+    localStorage.setItem('marmitte_resto_slug', slug);
+
+    toast('Restaurant créé. Redirection...', true);
+    setTimeout(() => {
+      window.location.href = `marmite-express-caisse.html?resto=${encodeURIComponent(slug)}`;
+    }, 800);
+
+  } catch(err){
+    console.error('Signup error:', err);
+    toast(friendlyError(err.code));
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+});
+</script>
+</body>
+</html>

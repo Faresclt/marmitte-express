@@ -20,6 +20,10 @@ onSnapshot(doc(db,'config','menu'), snap => {
     return;
   }
   const data=snap.data();
+  // Branding cross-device
+  const b = data.branding || {};
+  if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+  if(b.name) document.title = b.name + ' — QR Codes';
   const layout=data.salleLayout||[];
   const tables=layout.filter(e=>e.type==='table-round'||e.type==='table-rect');
   if(!tables.length){

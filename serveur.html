@@ -152,8 +152,13 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
       unlockApp();
     }
     const b = menu.branding||{};
-    if(b.name) { const safe = escHtml(b.name); document.getElementById('resto-name').innerHTML = safe.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>'); }
+    if(b.name) { const safe = escHtml(b.name); document.getElementById('resto-name').innerHTML = safe.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>'); document.title = b.name + ' — Serveur'; }
     if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+    const logoEl = document.getElementById('resto-logo');
+    if(logoEl){
+      if(b.logoUrl){ logoEl.src = b.logoUrl; logoEl.style.display = 'block'; }
+      else { logoEl.style.display = 'none'; }
+    }
     renderMenu();
     if(menu.imageBatches && menu.imageBatches > 0){
       loadImages(menu.imageBatches);
@@ -597,6 +602,7 @@ body{height:100%;height:100dvh;font-family:'DM Sans',sans-serif;background:var(-
     <div class="table-pill" style="background:var(--blue)">🍽️ SERVEUR</div>
   </a>
   <div class="table-pill" id="table-pill-num" onclick="changeTable()" style="cursor:pointer" title="Changer de table">TABLE <span id="table-display">?</span> ✎</div>
+  <img id="resto-logo" alt="" style="display:none;width:32px;height:32px;border-radius:7px;object-fit:cover;flex-shrink:0">
   <div style="flex:1">
     <div id="resto-name">La <span style="color:var(--accent)">Marmitte</span> Express</div>
     <div class="tagline">PRISE DE COMMANDE</div>
