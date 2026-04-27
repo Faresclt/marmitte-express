@@ -98,12 +98,22 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
   <div class="section-title" style="color:var(--purple)">🤖 ÉTAPE 2 — Générer les images food avec Gemini</div>
   <div class="section-sub">Génère automatiquement des photos de haute qualité pour tous les plats, entrées, salades et desserts manquants.</div>
 
-  <div class="alert alert-warn">
-    ⚠️ La clé API Firebase ne fonctionne pas toujours pour la génération d'images. Si l'erreur persiste, obtiens une clé Gemini sur <strong>aistudio.google.com</strong> → "Get API Key" (gratuit, 500 images/jour).
+  <div class="alert" style="background:rgba(34,201,122,.08);border:1px solid rgba(34,201,122,.25);color:#22c97a;padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.5;margin-bottom:14px">
+    ✅ <strong>Aucune clé requise par défaut</strong> — Pollinations.ai gratuit illimité (modèle Flux). Pour qualité supérieure, ajoute une clé Recraft ou Gemini ci-dessous (optionnel).
   </div>
 
-  <label style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:6px">Clé API Gemini</label>
-  <input class="gemini-key-input" type="password" id="gemini-key" placeholder="AIzaSy..." value="">
+  <label style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:6px">Provider IA</label>
+  <select id="ia-provider" style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:10px" onchange="toggleProviderKey()">
+    <option value="pollinations">🆓 Pollinations.ai — Gratuit illimité, sans clé (recommandé débutant)</option>
+    <option value="recraft">🎨 Recraft API — Premium qualité menu, clé Bearer requise</option>
+    <option value="gemini">🔮 Gemini Flash Image — Gratuit 500/jour, clé Google AI Studio</option>
+  </select>
+
+  <div id="key-input-wrap" style="display:none">
+    <label id="key-label" style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:6px">Clé API</label>
+    <input class="gemini-key-input" type="password" id="gemini-key" placeholder="Colle ta clé ici..." value="">
+    <div id="key-hint" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+  </div>
 
   <label style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin:12px 0 8px">Style des images</label>
   <div id="style-picker" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:16px">
@@ -378,9 +388,73 @@ window.pickStyle = function(el) {
 const FOOD_CATS = ['entrees','plats','salades','desserts'];
 const DRINK_CATS = ['boissons','bieres','vins'];
 
+// Toggle key input visibility based on provider selection
+window.toggleProviderKey = function() {
+  const provider = document.getElementById('ia-provider').value;
+  const wrap = document.getElementById('key-input-wrap');
+  const label = document.getElementById('key-label');
+  const hint = document.getElementById('key-hint');
+  const input = document.getElementById('gemini-key');
+  if (provider === 'pollinations') {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+  if (provider === 'recraft') {
+    label.textContent = 'Clé API Recraft (Bearer token)';
+    input.placeholder = 'recraft_...';
+    hint.innerHTML = 'Obtiens ta clé sur <a href="https://www.recraft.ai/docs" target="_blank" style="color:var(--accent)">recraft.ai/docs</a> — 50 crédits gratuits/mois.';
+  } else if (provider === 'gemini') {
+    label.textContent = 'Clé API Gemini';
+    input.placeholder = 'AIzaSy...';
+    hint.innerHTML = 'Obtiens ta clé sur <a href="https://aistudio.google.com" target="_blank" style="color:var(--accent)">aistudio.google.com</a> → Get API Key (gratuit, 500/jour).';
+  }
+};
+
+// Génération via Pollinations.ai (gratuit, sans clé)
+async function genViaPollinations(prompt) {
+  const seed = Math.floor(Math.random() * 1e9);
+  const url = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt) +
+              '?width=1024&height=1024&nologo=true&model=flux&seed=' + seed;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Pollinations HTTP ' + res.status);
+  const blob = await res.blob();
+  return await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+// Génération via Recraft API
+async function genViaRecraft(prompt, apiKey) {
+  const res = await fetch('https://external.api.recraft.ai/v1/images/generations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+    body: JSON.stringify({ prompt, style: 'realistic_image', size: '1024x1024', model: 'recraftv3' })
+  });
+  if (!res.ok) throw new Error('Recraft HTTP ' + res.status + ' ' + await res.text());
+  const data = await res.json();
+  const imgUrl = data.data?.[0]?.url;
+  if (!imgUrl) throw new Error('Pas d image dans la réponse Recraft');
+  // Convert URL to data URL
+  const r2 = await fetch(imgUrl);
+  const blob = await r2.blob();
+  return await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(blob);
+  });
+}
+
 window.generateAllFood = async function() {
+  const provider = document.getElementById('ia-provider').value;
   const key = document.getElementById('gemini-key').value.trim();
-  if (!key) return alert('Saisis ta clé API Gemini');
+  if ((provider === 'recraft' || provider === 'gemini') && !key) {
+    return alert('Saisis ta clé API ' + provider + ' ou choisis Pollinations (sans clé).');
+  }
 
   const genFood = document.getElementById('gen-food').checked;
   const genDrinks = document.getElementById('gen-drinks').checked;
@@ -418,22 +492,30 @@ window.generateAllFood = async function() {
       const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
       const prompt = isDrink ? stylePrompts.drink(prod.name) : stylePrompts.food(prod.name, isCold);
 
-      const res = await fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=' + key,
-        { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            contents:[{parts:[{text:prompt}]}],
-            generationConfig:{ responseModalities:['TEXT','IMAGE'] }
-          })
-        }
-      );
-      const data = await res.json();
-      const parts = data.candidates?.[0]?.content?.parts || [];
-      const imgPart = parts.find(p => p.inlineData);
+      let imgDataUrl = null;
+      if (provider === 'pollinations') {
+        imgDataUrl = await genViaPollinations(prompt);
+      } else if (provider === 'recraft') {
+        imgDataUrl = await genViaRecraft(prompt, key);
+      } else {
+        const res = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=' + key,
+          { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              contents:[{parts:[{text:prompt}]}],
+              generationConfig:{ responseModalities:['TEXT','IMAGE'] }
+            })
+          }
+        );
+        const data = await res.json();
+        const parts = data.candidates?.[0]?.content?.parts || [];
+        const imgPart = parts.find(p => p.inlineData);
+        if (imgPart) imgDataUrl = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
+      }
 
-      if (imgPart) {
-        importedImages[prod.id] = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
-        addLog('gen-log', '✓ ' + prod.name, 'ok');
+      if (imgDataUrl) {
+        importedImages[prod.id] = imgDataUrl;
+        addLog('gen-log', '✓ ' + prod.name + ' (' + provider + ')', 'ok');
         // Update preview card
         const card = document.getElementById('card-' + prod.id);
         if (card) {
