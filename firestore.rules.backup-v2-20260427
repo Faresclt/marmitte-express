@@ -1,0 +1,54 @@
+// firestore.rules.v2 — règles strictes Phase 2.C.3
+//
+// À déployer APRÈS avoir activé Firebase Auth anonyme côté Console :
+//   https://console.firebase.google.com/project/la-marmitte-express/authentication/providers
+//   → Anonymous → Enable
+//
+// Puis :
+//   cp firestore.rules.v2 firestore.rules
+//   firebase deploy --only firestore:rules
+//
+// Différence avec firestore.rules actuel :
+// - tables/ passe de write PUBLIC → write auth only
+// - orders/ passe de create/update PUBLIC → auth only (MAIS lecture reste publique
+//   pour que le client QR puisse voir l'état de sa commande)
+// - config/menu reste lisible sans auth (nécessaire pour le menu client)
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Config : menu + branding publics en lecture (client QR sans auth), écriture auth
+    match /config/{docId} {
+      // Lecture : publique sauf apikeys
+      allow read: if docId != 'apikeys';
+      // apikeys : auth uniquement
+      allow read: if docId == 'apikeys' && request.auth != null;
+      // Écriture : auth toujours requise
+      allow write: if request.auth != null;
+    }
+
+    // Tables : lecture publique (client voit la salle), écriture auth uniquement
+    match /tables/{tableId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Commandes : lecture publique (client voit état commande), création/maj auth
+    match /orders/{orderId} {
+      allow read: if true;
+      allow create, update: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
+
+    // Paiements : entièrement privés
+    match /payments/{paymentId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Bloquer tout le reste
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
