@@ -3757,41 +3757,78 @@ async function generatePdjDesc() {
   btn.textContent = '✨ Générer description IA'; btn.disabled = false;
 }
 
+// Fallback Pollinations.ai : 0 key, 0 quota, gratuit illimité.
+async function generateImagePollinations(prompt, opts = {}) {
+  const seed = opts.seed || Math.floor(Math.random() * 1e9);
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Pollinations HTTP ' + res.status);
+  const blob = await res.blob();
+  return await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
 async function generatePdjImage() {
-  if (!GEMINI_KEY_PDJ) return toast('Configure ta clé API Gemini dans les Paramètres → Clé API Gemini (IA)', 'r');
   const nom = document.getElementById('pdj-nom').value.trim();
   if (!nom) return toast('Saisis d\'abord le nom du plat', 'o');
   const btn = document.getElementById('pdj-btn-img');
   const status = document.getElementById('pdj-ia-img-status');
   btn.textContent = '⏳ Génération image...'; btn.disabled = true;
-  status.textContent = '🎨 L\'IA génère la photo, patiente quelques secondes...';
-  try {
-    const prompt = 'A cinematic, high-end product photograph of "' + nom + '" for a French brasserie menu. Placed on a wet, dark charcoal slate stone surface with fine water droplets catching the light. Fresh, natural ingredients evoking the flavor profile artistically scattered around the base. Background is a softly blurred warm-lit bar or restaurant interior with amber and golden bokeh. Main light source: soft warm light from upper-left, creating rich golden highlights and deep shadows. Shallow depth of field. Color palette: deep dark blacks, warm amber and golden tones. Mood: sophisticated, artisanal, appetizing, French brasserie premium quality. Photorealistic, ultra-detailed.';
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=' + GEMINI_KEY_PDJ,
-      { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          contents:[{parts:[{text: prompt}]}],
-          generationConfig:{ responseModalities:['TEXT','IMAGE'] }
-        })
+  const prompt = 'A cinematic, high-end product photograph of "' + nom + '" for a French brasserie menu. Placed on a wet, dark charcoal slate stone surface with fine water droplets catching the light. Fresh, natural ingredients evoking the flavor profile artistically scattered around the base. Background is a softly blurred warm-lit bar or restaurant interior with amber and golden bokeh. Main light source: soft warm light from upper-left, creating rich golden highlights and deep shadows. Shallow depth of field. Color palette: deep dark blacks, warm amber and golden tones. Mood: sophisticated, artisanal, appetizing, French brasserie premium quality. Photorealistic, ultra-detailed.';
+
+  // Try Gemini first if key present
+  if (GEMINI_KEY_PDJ) {
+    status.textContent = '🎨 Gemini génère la photo...';
+    try {
+      const res = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=' + GEMINI_KEY_PDJ,
+        { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            contents:[{parts:[{text: prompt}]}],
+            generationConfig:{ responseModalities:['TEXT','IMAGE'] }
+          })
+        }
+      );
+      const data = await res.json();
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      const imgPart = parts.find(p => p.inlineData);
+      if (imgPart) {
+        pdjImgData = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
+        const prev = document.getElementById('pdj-img-preview');
+        prev.src = pdjImgData;
+        prev.style.display = 'block';
+        document.getElementById('pdj-img-ph').style.display = 'none';
+        status.textContent = '✅ Photo générée (Gemini) !';
+        toast('Photo générée !', 'g');
+        btn.textContent = '🎨 Générer photo IA'; btn.disabled = false;
+        return;
       }
-    );
-    const data = await res.json();
-    const parts = data.candidates?.[0]?.content?.parts || [];
-    const imgPart = parts.find(p => p.inlineData);
-    if (imgPart) {
-      pdjImgData = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
-      const prev = document.getElementById('pdj-img-preview');
-      prev.src = pdjImgData;
-      prev.style.display = 'block';
-      document.getElementById('pdj-img-ph').style.display = 'none';
-      status.textContent = '✅ Photo générée par IA !';
-      toast('Photo générée !', 'g');
-    } else {
-      status.textContent = '❌ Génération impossible — importe une photo manuellement';
-      toast('Génération image non disponible avec cette clé API', 'o');
+      status.textContent = '⚠️ Gemini sans image — fallback Pollinations...';
+    } catch (e) {
+      status.textContent = '⚠️ Gemini erreur — fallback Pollinations...';
     }
-  } catch(e) { status.textContent = '❌ Erreur connexion'; toast('Erreur connexion IA', 'r'); }
+  } else {
+    status.textContent = '🎨 Pas de clé Gemini — utilisation Pollinations (gratuit)...';
+  }
+
+  // Fallback Pollinations
+  try {
+    pdjImgData = await generateImagePollinations(prompt);
+    const prev = document.getElementById('pdj-img-preview');
+    prev.src = pdjImgData;
+    prev.style.display = 'block';
+    document.getElementById('pdj-img-ph').style.display = 'none';
+    status.textContent = '✅ Photo générée (Pollinations) !';
+    toast('Photo générée !', 'g');
+  } catch (e) {
+    console.error('[IA] Pollinations fail:', e);
+    status.textContent = '❌ Génération impossible — importe une photo manuellement';
+    toast('Génération IA indisponible', 'r');
+  }
   btn.textContent = '🎨 Générer photo IA'; btn.disabled = false;
 }
 
