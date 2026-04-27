@@ -111,6 +111,8 @@ function showTablePicker(){
   const minS=0.3, maxS=4;
   const pos = (e)=>{ const r=wrap.getBoundingClientRect(); return {x:e.clientX-r.left, y:e.clientY-r.top}; };
   wrap.addEventListener('pointerdown',(e)=>{
+    // Skip mouse : clics natifs vers tables.
+    if(e.pointerType === 'mouse') return;
     pointers.set(e.pointerId, pos(e)); wrap.setPointerCapture(e.pointerId);
     if(pointers.size===2){
       const p=Array.from(pointers.values()); const dx=p[1].x-p[0].x,dy=p[1].y-p[0].y;
