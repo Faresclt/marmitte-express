@@ -106,7 +106,6 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
   <select id="ia-provider" style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:8px;font-size:13px;margin-bottom:10px" onchange="toggleProviderKey()">
     <option value="pollinations">🆓 Pollinations.ai — Gratuit illimité, sans clé (recommandé débutant)</option>
     <option value="recraft">🎨 Recraft API — Premium qualité menu, clé Bearer requise</option>
-    <option value="gemini">🔮 Gemini Flash Image — Gratuit 500/jour, clé Google AI Studio</option>
   </select>
 
   <div id="key-input-wrap" style="display:none">
@@ -194,41 +193,25 @@ function imgKey(n){ return 'img_'+n.toLowerCase().replace(/[^a-z0-9]/g,'_').slic
 function getImg(n){ return LS.get(imgKey(n),null); }
 function setImg(n,b64){ LS.set(imgKey(n),b64); }
 
-// ── All products ──
-const PRODUCTS = [
-  {id:'p1',cat:'boissons',name:'Coca / Soda'},{id:'p2',cat:'boissons',name:'Sirops'},
-  {id:'p3',cat:'boissons',name:'Jus de fruits'},{id:'p4',cat:'boissons',name:'Bière 0%'},
-  {id:'p5',cat:'boissons',name:'Diabolo'},{id:'p6',cat:'boissons',name:'Moktail'},
-  {id:'p7',cat:'boissons',name:'St Pellegrino 50cl'},{id:'p8',cat:'boissons',name:'Vittel 50cl'},
-  {id:'p9',cat:'boissons',name:'Ricard / Pastis'},{id:'p10',cat:'boissons',name:'Martini'},
-  {id:'p11',cat:'boissons',name:'Kir Tranquille'},{id:'p12',cat:'boissons',name:'Kir Pétillant'},
-  {id:'p13',cat:'boissons',name:'Mojito'},{id:'p14',cat:'boissons',name:'Apérol Spritz'},
-  {id:'p15',cat:'boissons',name:'Sangria'},{id:'p16',cat:'boissons',name:'Gin Tonic'},
-  {id:'p17',cat:'boissons',name:'Cuba Libre'},{id:'p18',cat:'boissons',name:'Shooter'},
-  {id:'p19',cat:'boissons',name:'1m de Shooters'},
-  {id:'p20',cat:'bieres',name:'Blonde 25cl'},{id:'p21',cat:'bieres',name:'Blonde 50cl'},
-  {id:'p22',cat:'bieres',name:'Blanche 25cl'},{id:'p23',cat:'bieres',name:'Blanche 50cl'},
-  {id:'p24',cat:'bieres',name:'Ambrée 25cl'},{id:'p25',cat:'bieres',name:'Rouge 50cl'},
-  {id:'p26',cat:'bieres',name:'Desperados'},{id:'p27',cat:'bieres',name:'Chimay Blonde'},
-  {id:'p28',cat:'bieres',name:'Duvel'},{id:'p29',cat:'bieres',name:'Panaché'},
-  {id:'p30',cat:'bieres',name:'Monaco'},
-  {id:'p31',cat:'vins',name:"L'Antocyane (verre)"},{id:'p32',cat:'vins',name:'Côte de Bœuf (verre)'},
-  {id:'p33',cat:'vins',name:'Chardonnay Moelleux'},{id:'p34',cat:'vins',name:'Chardonnay Sec'},
-  {id:'p35',cat:'vins',name:'Iles de Beauté'},{id:'p36',cat:'vins',name:'Champagne Nicolas F.'},
-  {id:'p37',cat:'entrees',name:'Salade Gésiers'},{id:'p38',cat:'entrees',name:'Ardoise Charcuterie ½'},
-  {id:'p39',cat:'entrees',name:'Ardoise Créole ½'},{id:'p40',cat:'entrees',name:'Carpaccio Tomate Burrata'},
-  {id:'p41',cat:'entrees',name:'Os à Moëlle'},{id:'p42',cat:'entrees',name:'Salade Méchouia'},
-  {id:'p43',cat:'plats',name:'Plat du Jour'},{id:'p44',cat:'plats',name:'Saumon Frais'},
-  {id:'p45',cat:'plats',name:'Poisson du Jour'},{id:'p46',cat:'plats',name:'Assiette de la Mer'},
-  {id:'p47',cat:'plats',name:'Burger Maison'},{id:'p48',cat:'plats',name:'Double Burger'},
-  {id:'p49',cat:'plats',name:"Côtes d'Agneau"},{id:'p50',cat:'plats',name:'Entrecôte 300g'},
-  {id:'p51',cat:'plats',name:'Côte de Bœuf 1kg'},{id:'p52',cat:'plats',name:'Garniture Supplémentaire'},
-  {id:'p53',cat:'salades',name:'La Chèvre / Vegan'},{id:'p54',cat:'salades',name:'La Gésiers'},
-  {id:'p55',cat:'salades',name:'La Chicken'},{id:'p56',cat:'salades',name:'La Gourmande'},
-  {id:'p57',cat:'desserts',name:'Tarte de Saison'},{id:'p58',cat:'desserts',name:'Crumble Banane Nutella'},
-  {id:'p59',cat:'desserts',name:'Crème Brûlée Maison'},{id:'p60',cat:'desserts',name:'Mousse au Chocolat'},
-  {id:'p61',cat:'desserts',name:'Tiramisu'},{id:'p62',cat:'desserts',name:'Café Gourmand'},
-];
+// ── Liste des produits : sync auto depuis Firestore config/menu.products ──
+// (plus de liste hardcoded - garde les images upload depuis caisse en sync)
+let PRODUCTS = [];
+
+// Sync products depuis Firestore (1ere fois + temps reel)
+onSnapshot(doc(db, 'config', 'menu'), snap => {
+  if(!snap.exists()) return;
+  const data = snap.data();
+  const fbProducts = data.products || [];
+  // Mappe vers le format setup-images attend (id, cat, name, imgUrl)
+  PRODUCTS = fbProducts.map(p => ({
+    id: p.id,
+    cat: p.cat || '?',
+    name: p.name || '',
+    imgUrl: p.imgUrl || null  // image Firebase Storage uploadee depuis caisse
+  }));
+  if(typeof renderGrid === 'function') renderGrid();
+  console.log('[setup-images] sync Firestore:', PRODUCTS.length, 'produits');
+});
 
 // ── Image file → product ID mapping ──
 const FILE_MAP = {
@@ -279,7 +262,8 @@ function renderGrid() {
   const grid = document.getElementById('img-grid');
   let ok=0, miss=0, gen=0;
   grid.innerHTML = PRODUCTS.map(p => {
-    const img = getImg(p.id) || getImg(p.name) || importedImages[p.id];
+    // Priorite : Firebase Storage (p.imgUrl) > localStorage > importedImages buffer
+    const img = p.imgUrl || getImg(p.id) || getImg(p.name) || importedImages[p.id];
     const isGen = importedImages[p.id] && importedImages[p.id].startsWith('data:image');
     if (img) ok++; else miss++;
     const catEmoji = {boissons:'🥤',bieres:'🍺',vins:'🍷',entrees:'🥗',plats:'🍽️',salades:'🥬',desserts:'🍮'}[p.cat]||'🍴';
