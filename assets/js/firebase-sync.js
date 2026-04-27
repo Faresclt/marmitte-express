@@ -186,6 +186,60 @@ export function escHtml(s) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Branding icons : applique logoUrl partout (favicon, apple-touch, pin-logo)
+// ═══════════════════════════════════════════════════════════
+const _BRAND_CACHE_KEY = 'marmitte_brand_logo_url';
+
+function _setLinkIcon(rel, href, sizes) {
+  let el = document.querySelector(`link[rel="${rel}"]`);
+  if (!el) {
+    el = document.createElement('link');
+    el.rel = rel;
+    document.head.appendChild(el);
+  }
+  el.href = href;
+  if (sizes) el.setAttribute('sizes', sizes);
+}
+
+export function applyBrandingIcons(logoUrl, opts = {}) {
+  if (!logoUrl) return;
+  // 1. Favicon + apple-touch-icon (PWA install + onglet)
+  _setLinkIcon('icon', logoUrl, '192x192');
+  _setLinkIcon('apple-touch-icon', logoUrl);
+  _setLinkIcon('apple-touch-icon-precomposed', logoUrl);
+  _setLinkIcon('shortcut icon', logoUrl);
+  // 2. Pin screen logo (caisse uniquement)
+  const pinLogo = document.getElementById('pin-logo');
+  if (pinLogo) {
+    pinLogo.style.background = '#0c0d10';
+    pinLogo.style.padding = '0';
+    pinLogo.style.overflow = 'hidden';
+    pinLogo.innerHTML = `<img src="${logoUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:16px">`;
+  }
+  // 3. Cache localStorage pour appliquer instantanément au prochain chargement
+  try { localStorage.setItem(_BRAND_CACHE_KEY, logoUrl); } catch (_) {}
+}
+
+// Auto-apply cached logo immediately at module load (avant Firestore async).
+try {
+  const cached = localStorage.getItem(_BRAND_CACHE_KEY);
+  if (cached) applyBrandingIcons(cached);
+} catch (_) {}
+
+// Auto-listen Firestore config/menu pour propager logoUrl à toutes les pages
+// sans avoir à modifier chaque listener existant.
+try {
+  onSnapshot(scopedDoc(db, 'config', 'menu'), (snap) => {
+    if (snap.exists && typeof snap.data === 'function') {
+      const b = (snap.data() || {}).branding || {};
+      if (b.logoUrl) applyBrandingIcons(b.logoUrl);
+    }
+  });
+} catch (e) {
+  console.warn('[firebase-sync] auto-listen branding échoué:', e);
+}
+
+// ═══════════════════════════════════════════════════════════
 // SYNC QUEUE — Phase 2.B.2 + 2.B.3
 // ═══════════════════════════════════════════════════════════
 //
