@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v8-dish-detail';
+const CACHE_NAME = 'marmite-v9-admin-fields';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',

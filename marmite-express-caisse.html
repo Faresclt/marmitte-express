@@ -717,6 +717,26 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="toggle-row"><span class="toggle-lbl">🔥 Choix de cuisson</span><label class="toggle"><input type="checkbox" id="pm-cuisson"><div class="toggle-track"></div></label></div>
         <div class="toggle-row"><span class="toggle-lbl">🍟 Choix de garniture</span><label class="toggle"><input type="checkbox" id="pm-garniture"><div class="toggle-track"></div></label></div>
       </div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">📋 Fiche détaillée client (modal QR)</div>
+        <div class="form-group"><label class="form-label">Description complète</label><textarea class="form-textarea" id="pm-description" placeholder="Description longue du plat affichée dans la fiche détail client" style="min-height:60px"></textarea></div>
+        <div class="form-group"><label class="form-label">Garniture incluse</label><input class="form-input" id="pm-garniture-text" placeholder="Ex : Frites maison, salade verte"></div>
+        <div class="form-group"><label class="form-label">Sauce / Accompagnement</label><input class="form-input" id="pm-sauces" placeholder="Ex : Sauce béarnaise"></div>
+        <div class="form-group">
+          <label class="form-label">Allergènes (cocher tout ce qui s'applique)</label>
+          <div id="pm-allergens" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:6px"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Régimes et tags</label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;margin-top:6px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:6px 10px;background:var(--card);border-radius:8px"><input type="checkbox" id="pm-vegetarian"> 🥬 Végétarien</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:6px 10px;background:var(--card);border-radius:8px"><input type="checkbox" id="pm-vegan"> 🌱 Vegan</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:6px 10px;background:var(--card);border-radius:8px"><input type="checkbox" id="pm-glutenFree"> 🌾 Sans gluten</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:6px 10px;background:var(--card);border-radius:8px"><input type="checkbox" id="pm-spicy"> 🌶️ Épicé</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:6px 10px;background:var(--card);border-radius:8px"><input type="checkbox" id="pm-alcohol"> 🍺 Alcool</label>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="modal-foot">
       <button class="mbtn mbtn-danger" id="pm-del-btn" onclick="deleteProduct()" style="display:none">🗑️ Supprimer</button>
@@ -2078,6 +2098,22 @@ function renderProdList(){
   });
 }
 
+// Liste des allergènes UE 14 obligatoires + courants
+const ALLERGENS_LIST = ['Gluten','Crustacés','Œuf','Poisson','Arachide','Soja','Lait','Fruits à coque','Céleri','Moutarde','Sésame','Sulfites','Lupin','Mollusques'];
+
+function buildAllergenCheckboxes(checkedList){
+  const checked = new Set(checkedList || []);
+  const box = document.getElementById('pm-allergens');
+  if(!box) return;
+  box.innerHTML = ALLERGENS_LIST.map(a =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:5px 8px;background:var(--card);border:1px solid var(--border);border-radius:6px"><input type="checkbox" value="${a}"${checked.has(a)?' checked':''}> ${a}</label>`
+  ).join('');
+}
+
+function getCheckedAllergens(){
+  return Array.from(document.querySelectorAll('#pm-allergens input[type=checkbox]:checked')).map(c => c.value);
+}
+
 function openAddProduct(){
   editingProdId=null; editingProdImg=null;
   document.getElementById('pm-title').textContent='Nouveau produit';
@@ -2091,6 +2127,11 @@ function openAddProduct(){
   document.getElementById('pm-garniture').checked=false;
   document.getElementById('pm-tva').value='10';
   document.getElementById('pm-stock').value='';
+  document.getElementById('pm-description').value='';
+  document.getElementById('pm-garniture-text').value='';
+  document.getElementById('pm-sauces').value='';
+  ['pm-vegetarian','pm-vegan','pm-glutenFree','pm-spicy','pm-alcohol'].forEach(id=>document.getElementById(id).checked=false);
+  buildAllergenCheckboxes([]);
   document.getElementById('pm-del-btn').style.display='none';
   document.getElementById('pm-img-preview').style.display='none';
   document.getElementById('pm-img-ph').style.display='block';
@@ -2115,6 +2156,15 @@ function openEditProduct(id){
   document.getElementById('pm-garniture').checked=!!p.hasGarniture;
   document.getElementById('pm-tva').value=String(p.tva||10);
   document.getElementById('pm-stock').value=(p.stock===undefined||p.stock===null||p.stock<0)?'':p.stock;
+  document.getElementById('pm-description').value=p.description||'';
+  document.getElementById('pm-garniture-text').value=p.garniture||'';
+  document.getElementById('pm-sauces').value=p.sauces||'';
+  document.getElementById('pm-vegetarian').checked=!!p.vegetarian;
+  document.getElementById('pm-vegan').checked=!!p.vegan;
+  document.getElementById('pm-glutenFree').checked=!!p.glutenFree;
+  document.getElementById('pm-spicy').checked=!!p.spicy;
+  document.getElementById('pm-alcohol').checked=!!p.alcohol;
+  buildAllergenCheckboxes(Array.isArray(p.allergens)?p.allergens:[]);
   document.getElementById('pm-del-btn').style.display='block';
   if(img){ document.getElementById('pm-img-preview').src=img; document.getElementById('pm-img-preview').style.display='block'; document.getElementById('pm-img-ph').style.display='none'; document.getElementById('pm-img-label').style.display='none'; }
   else{ document.getElementById('pm-img-preview').style.display='none'; document.getElementById('pm-img-ph').style.display='block'; document.getElementById('pm-img-label').style.display='block'; }
@@ -2175,13 +2225,24 @@ async function saveProduct(){
   const stockVal=document.getElementById('pm-stock').value.trim();
   const stock=(stockVal==='')?-1:parseInt(stockVal);
   
+  // Fiche détail client
+  const description=document.getElementById('pm-description').value.trim();
+  const garnitureText=document.getElementById('pm-garniture-text').value.trim();
+  const sauces=document.getElementById('pm-sauces').value.trim();
+  const allergens=getCheckedAllergens();
+  const vegetarian=document.getElementById('pm-vegetarian').checked;
+  const vegan=document.getElementById('pm-vegan').checked;
+  const glutenFree=document.getElementById('pm-glutenFree').checked;
+  const spicy=document.getElementById('pm-spicy').checked;
+  const alcohol=document.getElementById('pm-alcohol').checked;
+
   let prodId = editingProdId;
   if(editingProdId){
     const p=products.find(x=>x.id===editingProdId);
-    if(p){ p.name=nm; p.sub=document.getElementById('pm-sub').value.trim(); p.price=price; p.cat=cat; p.section=section; p.pdj=document.getElementById('pm-pdj').checked; p.active=document.getElementById('pm-active').checked; p.hasCuisson=hasCuisson; p.hasGarniture=hasGarniture; p.tva=tva; p.stock=stock; }
+    if(p){ p.name=nm; p.sub=document.getElementById('pm-sub').value.trim(); p.price=price; p.cat=cat; p.section=section; p.pdj=document.getElementById('pm-pdj').checked; p.active=document.getElementById('pm-active').checked; p.hasCuisson=hasCuisson; p.hasGarniture=hasGarniture; p.tva=tva; p.stock=stock; p.description=description; p.garniture=garnitureText; p.sauces=sauces; p.allergens=allergens; p.vegetarian=vegetarian; p.vegan=vegan; p.glutenFree=glutenFree; p.spicy=spicy; p.alcohol=alcohol; }
   } else {
     prodId='p_'+uid();
-    products.push({id:prodId,cat,name:nm,sub:document.getElementById('pm-sub').value.trim(),price,section,pdj:document.getElementById('pm-pdj').checked,active:document.getElementById('pm-active').checked,hasCuisson,hasGarniture,tva,stock});
+    products.push({id:prodId,cat,name:nm,sub:document.getElementById('pm-sub').value.trim(),price,section,pdj:document.getElementById('pm-pdj').checked,active:document.getElementById('pm-active').checked,hasCuisson,hasGarniture,tva,stock,description,garniture:garnitureText,sauces,allergens,vegetarian,vegan,glutenFree,spicy,alcohol});
   }
   
   // Upload image to Firebase Storage if new image
