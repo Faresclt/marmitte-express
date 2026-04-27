@@ -32,10 +32,12 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
 
 /* Header */
 .header{text-align:center;padding:48px 0 24px}
-.logo-icon{width:72px;height:72px;margin:0 auto 12px;position:relative}
-.logo-icon svg{width:100%;height:100%;filter:drop-shadow(0 0 20px rgba(245,166,35,.3))}
-.logo-icon::after{content:'';position:absolute;inset:-8px;border-radius:50%;background:radial-gradient(circle,rgba(245,166,35,.12) 0%,transparent 70%);animation:logoPulse 3s ease-in-out infinite}
-@keyframes logoPulse{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
+.logo-icon{max-width:200px;width:auto;height:auto;margin:0 auto 18px;position:relative;display:inline-block}
+.logo-icon svg{width:72px;height:72px;filter:drop-shadow(0 0 20px rgba(245,166,35,.3));display:block;margin:0 auto}
+.logo-icon img{max-width:100%;max-height:160px;width:auto;height:auto;display:block;margin:0 auto;filter:drop-shadow(0 8px 24px rgba(0,0,0,.5)) drop-shadow(0 0 30px rgba(245,166,35,.25));animation:logoFloat 4s ease-in-out infinite;border-radius:0 !important;object-fit:contain !important}
+.logo-icon::after{content:'';position:absolute;inset:-20px;background:radial-gradient(ellipse at center,rgba(245,166,35,.15) 0%,transparent 65%);animation:logoPulse 3s ease-in-out infinite;z-index:-1;pointer-events:none}
+@keyframes logoPulse{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.08)}}
+@keyframes logoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
 
 .logo-text{font-family:'Bebas Neue',sans-serif;font-size:46px;letter-spacing:4px;line-height:1}
 .logo-text span{color:var(--accent);text-shadow:0 0 30px rgba(245,166,35,.2)}
