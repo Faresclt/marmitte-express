@@ -203,6 +203,7 @@ function _setLinkIcon(rel, href, sizes) {
 
 export function applyBrandingIcons(logoUrl, opts = {}) {
   if (!logoUrl) return;
+  const brandName = (opts.name || '').trim();
   // 1. Favicon + apple-touch-icon (PWA install + onglet)
   _setLinkIcon('icon', logoUrl, '192x192');
   _setLinkIcon('apple-touch-icon', logoUrl);
@@ -216,14 +217,52 @@ export function applyBrandingIcons(logoUrl, opts = {}) {
     pinLogo.style.overflow = 'hidden';
     pinLogo.innerHTML = `<img src="${logoUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:16px">`;
   }
-  // 3. Cache localStorage pour appliquer instantanément au prochain chargement
-  try { localStorage.setItem(_BRAND_CACHE_KEY, logoUrl); } catch (_) {}
+  // 3. Manifest PWA dynamique : génère un manifest avec le logo upload
+  // pour que "Ajouter à l'écran d'accueil" iOS/Android utilise ton logo,
+  // pas l'icône statique icon-192.png/icon-512.png.
+  try {
+    const manifest = {
+      name: brandName || 'La Marmite Express',
+      short_name: (brandName || 'Marmite').slice(0, 12),
+      description: 'Système de caisse & commande en ligne',
+      start_url: './index.html',
+      scope: './',
+      display: 'standalone',
+      background_color: '#0a0b0e',
+      theme_color: '#f5a623',
+      orientation: 'any',
+      categories: ['business', 'food'],
+      icons: [
+        { src: logoUrl, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+        { src: logoUrl, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+      ]
+    };
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    const url = URL.createObjectURL(blob);
+    let link = document.querySelector('link[rel="manifest"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'manifest';
+      document.head.appendChild(link);
+    }
+    if (link._dynamicUrl) URL.revokeObjectURL(link._dynamicUrl);
+    link._dynamicUrl = url;
+    link.href = url;
+  } catch (e) {
+    console.warn('[brand] manifest dynamique échoué:', e);
+  }
+  // 4. Cache localStorage pour appliquer instantanément au prochain chargement
+  try {
+    localStorage.setItem(_BRAND_CACHE_KEY, logoUrl);
+    if (brandName) localStorage.setItem('marmitte_brand_name', brandName);
+  } catch (_) {}
 }
 
 // Auto-apply cached logo immediately at module load (avant Firestore async).
 try {
   const cached = localStorage.getItem(_BRAND_CACHE_KEY);
-  if (cached) applyBrandingIcons(cached);
+  const cachedName = localStorage.getItem('marmitte_brand_name') || '';
+  if (cached) applyBrandingIcons(cached, { name: cachedName });
 } catch (_) {}
 
 // Auto-listen Firestore config/menu pour propager logoUrl à toutes les pages
@@ -232,7 +271,7 @@ try {
   onSnapshot(scopedDoc(db, 'config', 'menu'), (snap) => {
     if (snap.exists && typeof snap.data === 'function') {
       const b = (snap.data() || {}).branding || {};
-      if (b.logoUrl) applyBrandingIcons(b.logoUrl);
+      if (b.logoUrl) applyBrandingIcons(b.logoUrl, { name: b.name || '' });
     }
   });
 } catch (e) {

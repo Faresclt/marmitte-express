@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v6-dynamic-icons';
+const CACHE_NAME = 'marmite-v7-dynamic-manifest';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',
