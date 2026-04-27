@@ -108,10 +108,56 @@ export function currentUid() {
   return auth.currentUser?.uid || null;
 }
 
-// Re-export des helpers Firestore utilisés partout
+// ═══════════════════════════════════════════════════════════
+// Multi-tenant scoping — Phase 3 cutover
+// ═══════════════════════════════════════════════════════════
+// Détecte slug resto depuis URL ?resto=... ou localStorage marmitte_resto_slug.
+// Si slug présent → toutes les références doc()/collection() sont préfixées
+// par restaurants/{slug}/ automatiquement, sans modifier les pages appelantes.
+// Si pas de slug → mode legacy (collections root) — backward compat.
+function _detectSlug() {
+  try {
+    const params = new URLSearchParams(location.search);
+    const fromUrl = params.get('resto');
+    if (fromUrl) {
+      const clean = String(fromUrl).trim().toLowerCase();
+      if (clean) { localStorage.setItem('marmitte_resto_slug', clean); return clean; }
+    }
+    return localStorage.getItem('marmitte_resto_slug') || null;
+  } catch (e) { return null; }
+}
+export const RESTO_SLUG = _detectSlug();
+const _MT_PREFIX = RESTO_SLUG ? ['restaurants', RESTO_SLUG] : null;
+if (_MT_PREFIX) console.log('[firebase-sync] multi-tenant ON: restaurants/' + RESTO_SLUG + '/');
+
+// Wrappers : si slug actif, préfixe restaurants/{slug}/ devant le path.
+// Si pas de slug : passe-plat vers les fonctions natives (mode legacy).
+function _isFirestoreInstance(x) {
+  // Firestore instance has _settings, _databaseId, etc. Simple heuristic.
+  return x && typeof x === 'object' && (x.type === 'firestore' || x._databaseId !== undefined || x.app !== undefined);
+}
+
+function scopedDoc(...args) {
+  // Signature originale: doc(firestore, collectionPath, docId, ...) ou doc(firestore, path)
+  if (!_MT_PREFIX) return doc(...args);
+  if (args.length >= 2 && _isFirestoreInstance(args[0])) {
+    return doc(args[0], ..._MT_PREFIX, ...args.slice(1));
+  }
+  return doc(...args);
+}
+
+function scopedCollection(...args) {
+  if (!_MT_PREFIX) return collection(...args);
+  if (args.length >= 2 && _isFirestoreInstance(args[0])) {
+    return collection(args[0], ..._MT_PREFIX, ...args.slice(1));
+  }
+  return collection(...args);
+}
+
+// Re-export : doc/collection sont scopés. Les pages appelantes ne changent pas.
 export {
-  doc,
-  collection,
+  scopedDoc as doc,
+  scopedCollection as collection,
   onSnapshot,
   getDoc,
   getDocs,
@@ -127,15 +173,13 @@ export {
   Timestamp
 };
 
-// Helpers collections — abstraction qui permettra de scoper par resto en phase 3
-// Phase 2 : retourne la collection racine
-// Phase 3 : sera modifié pour retourner restaurants/{slug}/collection
+// Helpers col/docRef — Phase 3 : scopés automatiquement via wrappers ci-dessous.
 export function col(name) {
-  return collection(db, name);
+  return scopedCollection(db, name);
 }
 
 export function docRef(collectionName, id) {
-  return doc(db, collectionName, id);
+  return scopedDoc(db, collectionName, id);
 }
 
 // Helper escape HTML (utilisé par plusieurs pages pour éviter XSS lors du rendu dynamique)
@@ -219,7 +263,7 @@ export function queueOp(op) {
 }
 
 async function executeOp(op) {
-  const ref = doc(db, op.collection, op.docId);
+  const ref = scopedDoc(db, op.collection, op.docId);
   if (op.type === "set") {
     await setDoc(ref, op.data);
   } else if (op.type === "update") {
