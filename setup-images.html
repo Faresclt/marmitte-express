@@ -197,20 +197,18 @@ function setImg(n,b64){ LS.set(imgKey(n),b64); }
 // (plus de liste hardcoded - garde les images upload depuis caisse en sync)
 let PRODUCTS = [];
 
-// Sync products depuis Firestore (1ere fois + temps reel)
+// Sync products depuis Firestore (1ere fois + temps reel) — DEDUP par id
 onSnapshot(doc(db, 'config', 'menu'), snap => {
   if(!snap.exists()) return;
   const data = snap.data();
   const fbProducts = data.products || [];
-  // Mappe vers le format setup-images attend (id, cat, name, imgUrl)
-  PRODUCTS = fbProducts.map(p => ({
-    id: p.id,
-    cat: p.cat || '?',
-    name: p.name || '',
-    imgUrl: p.imgUrl || null  // image Firebase Storage uploadee depuis caisse
-  }));
+  // Dedup par id (au cas où Firestore aurait des doublons)
+  const seen = new Set();
+  PRODUCTS = fbProducts
+    .filter(p => p.id && p.name && !seen.has(p.id) && (seen.add(p.id), true))
+    .map(p => ({ id: p.id, cat: p.cat || '?', name: p.name, imgUrl: p.imgUrl || null }));
   if(typeof renderGrid === 'function') renderGrid();
-  console.log('[setup-images] sync Firestore:', PRODUCTS.length, 'produits');
+  console.log('[setup-images] sync Firestore:', PRODUCTS.length, 'produits uniques');
 });
 
 // ── Image file → product ID mapping ──
@@ -267,7 +265,7 @@ function renderGrid() {
     const isGen = importedImages[p.id] && importedImages[p.id].startsWith('data:image');
     if (img) ok++; else miss++;
     const catEmoji = {boissons:'🥤',bieres:'🍺',vins:'🍷',entrees:'🥗',plats:'🍽️',salades:'🥬',desserts:'🍮'}[p.cat]||'🍴';
-    return `<div class="img-card" id="card-${p.id}">
+    return `<div class="img-card" id="card-${p.id}" onclick="openImgPreview('${p.id}')" style="cursor:pointer">
       ${img ? '<img src="'+img+'" loading="lazy">' : '<div class="img-ph">'+catEmoji+'</div>'}
       <div class="status ${img?'status-ok':'status-miss'}">${img?'✓':'!'}</div>
       <div class="label">${p.name}<small>${p.cat}</small></div>
@@ -395,20 +393,31 @@ window.toggleProviderKey = function() {
   }
 };
 
-// Génération via Pollinations.ai (gratuit, sans clé)
-async function genViaPollinations(prompt) {
+// Génération via Pollinations.ai (gratuit, sans clé) — retry 3x sur erreur réseau/timeout
+async function genViaPollinations(prompt, attempt = 1) {
   const seed = Math.floor(Math.random() * 1e9);
   const url = 'https://image.pollinations.ai/prompt/' + encodeURIComponent(prompt) +
               '?width=1024&height=1024&nologo=true&model=flux&seed=' + seed;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Pollinations HTTP ' + res.status);
-  const blob = await res.blob();
-  return await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = reject;
-    r.readAsDataURL(blob);
-  });
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60000); // 60s timeout
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  } catch (e) {
+    if (attempt < 3) {
+      await new Promise(r => setTimeout(r, 2000 * attempt));
+      return genViaPollinations(prompt, attempt + 1);
+    }
+    throw e;
+  }
 }
 
 // Génération via Recraft API
@@ -555,8 +564,103 @@ function addLog(logId, msg, type) {
   log.scrollTop = log.scrollHeight;
 }
 
+// ── Modal preview image (clic sur thumbnail = preview gros + actions) ──
+window.openImgPreview = function(prodId) {
+  const p = PRODUCTS.find(x => x.id === prodId);
+  if (!p) return;
+  const img = p.imgUrl || getImg(p.id) || getImg(p.name) || importedImages[p.id];
+  const modal = document.getElementById('img-preview-modal');
+  const imgEl = document.getElementById('img-preview-img');
+  const phEl = document.getElementById('img-preview-ph');
+  document.getElementById('img-preview-name').textContent = p.name;
+  document.getElementById('img-preview-cat').textContent = p.cat;
+  document.getElementById('img-preview-source').textContent = p.imgUrl ? '☁️ Firebase Storage (publié)' : (getImg(p.id) || getImg(p.name)) ? '💾 localStorage (sauvegardé)' : importedImages[p.id] ? '✨ Généré IA (non sauvegardé)' : '❌ Aucune image';
+  if (img) { imgEl.src = img; imgEl.style.display = 'block'; phEl.style.display = 'none'; }
+  else { imgEl.style.display = 'none'; phEl.style.display = 'flex'; }
+  modal._currentProdId = prodId;
+  modal.classList.add('show');
+};
+
+window.closeImgPreview = function() {
+  document.getElementById('img-preview-modal').classList.remove('show');
+};
+
+window.regenImage = async function() {
+  const modal = document.getElementById('img-preview-modal');
+  const prodId = modal._currentProdId;
+  if (!prodId) return;
+  const p = PRODUCTS.find(x => x.id === prodId);
+  if (!p) return;
+  const provider = document.getElementById('ia-provider').value;
+  const key = document.getElementById('gemini-key').value.trim();
+  if ((provider === 'recraft' || provider === 'gemini') && !key) return alert('Saisis ta clé API ' + provider);
+
+  const btn = document.getElementById('btn-regen');
+  btn.disabled = true; btn.textContent = '⏳ Régénération...';
+
+  try {
+    const isCold = p.cat === 'desserts';
+    const isDrink = DRINK_CATS.includes(p.cat);
+    const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
+    const prompt = isDrink ? stylePrompts.drink(p.name) : stylePrompts.food(p.name, isCold);
+    let imgDataUrl;
+    if (provider === 'pollinations') imgDataUrl = await genViaPollinations(prompt);
+    else if (provider === 'recraft') imgDataUrl = await genViaRecraft(prompt, key);
+    else throw new Error('Gemini removed');
+    if (imgDataUrl) {
+      importedImages[p.id] = imgDataUrl;
+      document.getElementById('img-preview-img').src = imgDataUrl;
+      document.getElementById('img-preview-img').style.display = 'block';
+      document.getElementById('img-preview-ph').style.display = 'none';
+      document.getElementById('img-preview-source').textContent = '✨ Généré IA (non sauvegardé)';
+      renderGrid();
+    }
+  } catch (e) {
+    alert('Erreur génération : ' + e.message);
+  }
+  btn.disabled = false; btn.textContent = '🎨 Régénérer';
+};
+
+window.deleteImage = function() {
+  const modal = document.getElementById('img-preview-modal');
+  const prodId = modal._currentProdId;
+  if (!prodId) return;
+  if (!confirm('Supprimer cette image localement ? La version Firebase reste intacte (republiez la carte pour pousser).')) return;
+  delete importedImages[prodId];
+  try {
+    const p = PRODUCTS.find(x => x.id === prodId);
+    localStorage.removeItem(imgKey(prodId));
+    if (p) localStorage.removeItem(imgKey(p.name));
+  } catch(_) {}
+  closeImgPreview();
+  renderGrid();
+};
+
 // Init
 renderGrid();
 </script>
+
+<!-- Modal preview image -->
+<div id="img-preview-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;display:none;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)closeImgPreview()">
+  <div style="background:var(--surface,#13141a);border-radius:20px;max-width:680px;width:100%;max-height:90vh;overflow-y:auto;border:1px solid var(--border,rgba(255,255,255,.08))">
+    <div style="position:relative">
+      <img id="img-preview-img" style="width:100%;display:none;border-radius:20px 20px 0 0;max-height:520px;object-fit:contain;background:#000">
+      <div id="img-preview-ph" style="display:none;width:100%;height:300px;align-items:center;justify-content:center;font-size:80px;color:#444;background:#0a0b0e;border-radius:20px 20px 0 0">🖼️</div>
+      <button onclick="closeImgPreview()" style="position:absolute;top:12px;right:12px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;font-size:18px;cursor:pointer">✕</button>
+    </div>
+    <div style="padding:20px">
+      <div id="img-preview-name" style="font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:1px;margin-bottom:4px"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <span id="img-preview-cat" style="font-size:11px;font-weight:700;padding:3px 10px;background:rgba(245,166,35,.12);color:var(--accent,#f5a623);border-radius:10px;text-transform:uppercase;letter-spacing:.5px"></span>
+      </div>
+      <div id="img-preview-source" style="font-size:12px;color:var(--muted,#6b7280);margin-bottom:18px"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button id="btn-regen" onclick="regenImage()" style="flex:1;min-width:140px;height:44px;padding:0 18px;background:rgba(165,108,255,.15);border:1px solid rgba(165,108,255,.3);color:#a56cff;font-weight:700;border-radius:10px;cursor:pointer;font-size:14px">🎨 Régénérer</button>
+        <button onclick="deleteImage()" style="flex:1;min-width:140px;height:44px;padding:0 18px;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.25);color:var(--red,#e84040);font-weight:700;border-radius:10px;cursor:pointer;font-size:14px">🗑 Supprimer locale</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
