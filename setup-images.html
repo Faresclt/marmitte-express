@@ -59,6 +59,12 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
 .style-icon{font-size:28px;margin-bottom:6px}
 .style-name{font-size:13px;font-weight:800;margin-bottom:4px}
 .style-desc{font-size:10px;color:var(--muted);line-height:1.4}
+.img-card.selected{border-color:var(--purple);box-shadow:0 0 0 2px var(--purple)}
+.check-box{position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:6px;background:rgba(0,0,0,.7);border:1.5px solid rgba(255,255,255,.4);color:#fff;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2;transition:all .15s}
+.check-box:hover{background:rgba(155,107,255,.8);border-color:#fff}
+.img-card.selected .check-box{background:var(--purple);border-color:#fff}
+.select-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;padding:10px 14px;background:var(--card);border:1px solid var(--border);border-radius:10px}
+.select-count-badge{background:var(--purple);color:#fff;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700}
 </style>
 </head>
 <body>
@@ -164,10 +170,17 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
   <div id="save-status" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
 </div>
 
-<!-- Image grid preview -->
+<!-- Image grid preview + selection -->
 <div class="section">
-  <div class="section-title">👁️ APERÇU DES PRODUITS</div>
-  <div class="section-sub">Vue d'ensemble de tous les produits et l'état de leurs images.</div>
+  <div class="section-title">👁️ APERÇU & SÉLECTION DES PRODUITS</div>
+  <div class="section-sub">Coche les produits à générer, puis lance "Générer la sélection". Click sur une carte pour preview.</div>
+  <div class="select-toolbar">
+    <span class="select-count-badge"><span id="select-bar-count">0</span> sélectionné(s)</span>
+    <button class="btn btn-purple" onclick="selectMissing()">📋 Sélectionner les manquants</button>
+    <button class="btn btn-blue" onclick="selectAll()">✓ Tout sélectionner</button>
+    <button class="btn btn-red" onclick="clearSelect()">✕ Désélectionner tout</button>
+    <button class="btn btn-accent" onclick="generateSelected()" style="margin-left:auto">🎨 Générer la sélection</button>
+  </div>
   <div class="grid" id="img-grid"></div>
 </div>
 
@@ -256,16 +269,47 @@ const importedImages = {};
 let stopGen = false;
 
 // ── Init: render grid and show current state ──
+// Selection mode pour generation ciblee
+window.selectedIds = window.selectedIds || new Set();
+
+window.toggleSelect = function(id, ev) {
+  if (ev) ev.stopPropagation();
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  renderGrid();
+};
+
+window.selectMissing = function() {
+  selectedIds.clear();
+  PRODUCTS.forEach(p => {
+    const img = p.imgUrl || getImg(p.id) || getImg(p.name) || importedImages[p.id];
+    if (!img) selectedIds.add(p.id);
+  });
+  renderGrid();
+};
+
+window.selectAll = function() {
+  selectedIds.clear();
+  PRODUCTS.forEach(p => selectedIds.add(p.id));
+  renderGrid();
+};
+
+window.clearSelect = function() {
+  selectedIds.clear();
+  renderGrid();
+};
+
 function renderGrid() {
   const grid = document.getElementById('img-grid');
   let ok=0, miss=0, gen=0;
   grid.innerHTML = PRODUCTS.map(p => {
-    // Priorite : Firebase Storage (p.imgUrl) > localStorage > importedImages buffer
     const img = p.imgUrl || getImg(p.id) || getImg(p.name) || importedImages[p.id];
     const isGen = importedImages[p.id] && importedImages[p.id].startsWith('data:image');
     if (img) ok++; else miss++;
     const catEmoji = {boissons:'🥤',bieres:'🍺',vins:'🍷',entrees:'🥗',plats:'🍽️',salades:'🥬',desserts:'🍮'}[p.cat]||'🍴';
-    return `<div class="img-card" id="card-${p.id}" onclick="openImgPreview('${p.id}')" style="cursor:pointer">
+    const checked = selectedIds.has(p.id);
+    return `<div class="img-card${checked?' selected':''}" id="card-${p.id}" onclick="openImgPreview('${p.id}')" style="cursor:pointer">
+      <div class="check-box" onclick="toggleSelect('${p.id}', event)">${checked ? '✓' : ''}</div>
       ${img ? '<img src="'+img+'" loading="lazy">' : '<div class="img-ph">'+catEmoji+'</div>'}
       <div class="status ${img?'status-ok':'status-miss'}">${img?'✓':'!'}</div>
       <div class="label">${p.name}<small>${p.cat}</small></div>
@@ -275,6 +319,8 @@ function renderGrid() {
   document.getElementById('stat-miss').textContent = miss;
   document.getElementById('stat-gen').textContent = gen;
   document.getElementById('stat-total').textContent = PRODUCTS.length;
+  const sb = document.getElementById('select-bar-count');
+  if (sb) sb.textContent = selectedIds.size;
 }
 
 function normalize(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').trim(); }
@@ -370,7 +416,7 @@ window.pickStyle = function(el) {
 const FOOD_CATS = ['entrees','plats','salades','desserts'];
 const DRINK_CATS = ['boissons','bieres','vins'];
 
-// Toggle key input visibility based on provider selection
+// Toggle key input visibility based on provider selection + persist key per provider
 window.toggleProviderKey = function() {
   const provider = document.getElementById('ia-provider').value;
   const wrap = document.getElementById('key-input-wrap');
@@ -386,12 +432,31 @@ window.toggleProviderKey = function() {
     label.textContent = 'Clé API Recraft (Bearer token)';
     input.placeholder = 'recraft_...';
     hint.innerHTML = 'Obtiens ta clé sur <a href="https://www.recraft.ai/docs" target="_blank" style="color:var(--accent)">recraft.ai/docs</a> — 50 crédits gratuits/mois.';
+    input.value = localStorage.getItem('recraft_api_key') || '';
   } else if (provider === 'gemini') {
     label.textContent = 'Clé API Gemini';
     input.placeholder = 'AIzaSy...';
     hint.innerHTML = 'Obtiens ta clé sur <a href="https://aistudio.google.com" target="_blank" style="color:var(--accent)">aistudio.google.com</a> → Get API Key (gratuit, 500/jour).';
+    input.value = localStorage.getItem('gemini_api_key') || '';
   }
+  // Auto-save key on input
+  input.oninput = () => {
+    const k = input.value.trim();
+    if (provider === 'recraft') localStorage.setItem('recraft_api_key', k);
+    else if (provider === 'gemini') localStorage.setItem('gemini_api_key', k);
+  };
 };
+// Auto-restore last provider on load
+const _savedProvider = localStorage.getItem('ia_provider_choice');
+if (_savedProvider) {
+  setTimeout(() => {
+    const sel = document.getElementById('ia-provider');
+    if (sel) { sel.value = _savedProvider; toggleProviderKey(); }
+  }, 100);
+}
+document.getElementById('ia-provider')?.addEventListener('change', () => {
+  localStorage.setItem('ia_provider_choice', document.getElementById('ia-provider').value);
+});
 
 // Génération via Pollinations.ai (gratuit, sans clé) — retry 3x sur erreur réseau/timeout
 async function genViaPollinations(prompt, attempt = 1) {
@@ -442,6 +507,129 @@ async function genViaRecraft(prompt, apiKey) {
   });
 }
 
+// Génère uniquement les produits cochés par l'utilisateur via checkboxes (selection ciblee)
+window.generateSelected = async function() {
+  if (selectedIds.size === 0) {
+    return alert('Aucun produit sélectionné. Coche au moins 1 produit ou clique "Sélectionner les manquants".');
+  }
+  const provider = document.getElementById('ia-provider').value;
+  const key = document.getElementById('gemini-key').value.trim();
+  if ((provider === 'recraft' || provider === 'gemini') && !key) {
+    return alert('Saisis ta clé API ' + provider + ' ou choisis Pollinations (sans clé).');
+  }
+  const targets = PRODUCTS.filter(p => selectedIds.has(p.id));
+  stopGen = false;
+  document.getElementById('btn-gen-all').disabled = true;
+  document.getElementById('btn-stop').style.display = '';
+  const log = document.getElementById('gen-log');
+  const prog = document.getElementById('gen-progress');
+  const status = document.getElementById('gen-status');
+  log.style.display = 'block';
+  log.innerHTML = '';
+  addLog('gen-log', 'ℹ ' + targets.length + ' produits sélectionnés à générer (style: ' + selectedStyle + ')', 'inf');
+  let done = 0;
+  for (const prod of targets) {
+    if (stopGen) { addLog('gen-log', '⏹ Génération arrêtée', 'warn'); break; }
+    status.textContent = '🎨 ' + prod.name + ' (' + (done+1) + '/' + targets.length + ')';
+    addLog('gen-log', '⏳ ' + prod.name + '...', 'inf');
+    try {
+      const isCold = prod.cat === 'desserts';
+      const isDrink = DRINK_CATS.includes(prod.cat);
+      const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
+      const prompt = isDrink ? stylePrompts.drink(prod.name) : stylePrompts.food(prod.name, isCold);
+      let imgDataUrl = null;
+      if (provider === 'pollinations') imgDataUrl = await genViaPollinations(prompt);
+      else if (provider === 'recraft') imgDataUrl = await genViaRecraft(prompt, key);
+      if (imgDataUrl) {
+        importedImages[prod.id] = imgDataUrl;
+        addLog('gen-log', '✓ ' + prod.name + ' (' + provider + ')', 'ok');
+        document.getElementById('stat-gen').textContent = parseInt(document.getElementById('stat-gen').textContent) + 1;
+        renderGrid();
+      } else {
+        addLog('gen-log', '✗ ' + prod.name + ': pas d\'image retournée', 'err');
+      }
+    } catch (err) {
+      addLog('gen-log', '✗ ' + prod.name + ': ' + (err.message || 'erreur réseau'), 'err');
+    }
+    done++;
+    prog.style.width = Math.round(done/targets.length*100) + '%';
+    await new Promise(r => setTimeout(r, 2500)); // 2.5s entre requetes pour eviter rate limit
+  }
+  status.textContent = done + ' images générées ! Click sur une carte pour preview/régénérer.';
+  document.getElementById('btn-gen-all').disabled = false;
+  document.getElementById('btn-stop').style.display = 'none';
+  // Auto-clear selection after gen
+  selectedIds.clear();
+  renderGrid();
+};
+
+// Génération ciblée selon checkboxes
+window.generateSelected = async function() {
+  if (selectedIds.size === 0) {
+    return alert('Aucun produit sélectionné. Coche au moins un produit ou clique "Sélectionner les manquants".');
+  }
+  const ids = Array.from(selectedIds);
+  const targets = PRODUCTS.filter(p => ids.includes(p.id));
+  await runGeneration(targets, 'selection');
+};
+
+async function runGeneration(targets, mode) {
+  const provider = document.getElementById('ia-provider').value;
+  const key = document.getElementById('gemini-key').value.trim();
+  if ((provider === 'recraft' || provider === 'gemini') && !key) {
+    return alert('Saisis ta clé API ' + provider + ' ou choisis Pollinations (sans clé).');
+  }
+  stopGen = false;
+  const btn = document.getElementById('btn-gen-all');
+  if (btn) btn.disabled = true;
+  document.getElementById('btn-stop').style.display = '';
+  const log = document.getElementById('gen-log');
+  const prog = document.getElementById('gen-progress');
+  const status = document.getElementById('gen-status');
+  log.style.display = 'block';
+  log.innerHTML = '';
+  addLog('gen-log', 'ℹ ' + targets.length + ' produits à générer (style: ' + selectedStyle + ', mode: ' + mode + ')', 'inf');
+  if (targets.length === 0) {
+    addLog('gen-log', '✓ Rien à générer.', 'ok');
+    if (btn) btn.disabled = false;
+    document.getElementById('btn-stop').style.display = 'none';
+    return;
+  }
+  let done = 0, errors = 0;
+  for (const prod of targets) {
+    if (stopGen) { addLog('gen-log', '⏹ Génération arrêtée', 'warn'); break; }
+    status.textContent = '🎨 Génération: ' + prod.name + ' (' + (done+1) + '/' + targets.length + ')';
+    addLog('gen-log', '⏳ ' + prod.name + '...', 'inf');
+    try {
+      const isCold = prod.cat === 'desserts';
+      const isDrink = DRINK_CATS.includes(prod.cat);
+      const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
+      const prompt = isDrink ? stylePrompts.drink(prod.name) : stylePrompts.food(prod.name, isCold);
+      let imgDataUrl = null;
+      if (provider === 'pollinations') imgDataUrl = await genViaPollinations(prompt);
+      else if (provider === 'recraft') imgDataUrl = await genViaRecraft(prompt, key);
+      if (imgDataUrl) {
+        importedImages[prod.id] = imgDataUrl;
+        addLog('gen-log', '✓ ' + prod.name + ' (' + provider + ')', 'ok');
+        renderGrid();
+      } else {
+        errors++;
+        addLog('gen-log', '✗ ' + prod.name + ': pas d\'image', 'err');
+      }
+    } catch (err) {
+      errors++;
+      addLog('gen-log', '✗ ' + prod.name + ': ' + (err.message || 'erreur reseau'), 'err');
+    }
+    done++;
+    prog.style.width = Math.round(done / targets.length * 100) + '%';
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  status.textContent = (done - errors) + '/' + targets.length + ' images générées' + (errors ? ' (' + errors + ' erreurs)' : '');
+  if (btn) btn.disabled = false;
+  document.getElementById('btn-stop').style.display = 'none';
+  renderGrid();
+}
+
 window.generateAllFood = async function() {
   const provider = document.getElementById('ia-provider').value;
   const key = document.getElementById('gemini-key').value.trim();
@@ -457,7 +645,21 @@ window.generateAllFood = async function() {
   if (genFood) allowedCats.push(...FOOD_CATS);
   if (genDrinks) allowedCats.push(...DRINK_CATS);
 
-  const genProducts = PRODUCTS.filter(p => allowedCats.includes(p.cat) && p.id !== 'p52');
+  const filtered = PRODUCTS.filter(p => allowedCats.includes(p.cat) && p.id !== 'p52');
+  // Auto-filter manquants seulement
+  const missingOnly = filtered.filter(p => !p.imgUrl && !getImg(p.id) && !getImg(p.name) && !importedImages[p.id]);
+  return runGeneration(missingOnly);
+};
+
+async function runGeneration(genProducts) {
+  const provider = document.getElementById('ia-provider').value;
+  const key = document.getElementById('gemini-key').value.trim();
+  if ((provider === 'recraft' || provider === 'gemini') && !key) {
+    return alert('Saisis ta clé API ' + provider + ' ou choisis Pollinations (sans clé).');
+  }
+  if (!genProducts || genProducts.length === 0) {
+    return alert('Aucun produit à générer.');
+  }
 
   stopGen = false;
   document.getElementById('btn-gen-all').disabled = true;
@@ -469,8 +671,10 @@ window.generateAllFood = async function() {
   log.style.display = 'block';
   log.innerHTML = '';
 
-  const missing = genProducts.filter(p => !getImg(p.id) && !getImg(p.name) && !importedImages[p.id]);
+  // Exclude items deja avec image (Firestore Storage p.imgUrl, localStorage, ou buffer)
+  const missing = genProducts.filter(p => !p.imgUrl && !getImg(p.id) && !getImg(p.name) && !importedImages[p.id]);
   addLog('gen-log', 'ℹ ' + missing.length + ' produits sans image à générer (style: ' + selectedStyle + ')', 'inf');
+  if (missing.length === 0) { alert('Tous les produits ont déjà une image ! Rien à générer.'); document.getElementById('btn-gen-all').disabled = false; document.getElementById('btn-stop').style.display = 'none'; return; }
 
   let done = 0;
   for (const prod of missing) {

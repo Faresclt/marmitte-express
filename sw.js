@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v10-ia-providers';
+const CACHE_NAME = 'marmite-v11-select-checkbox';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',
