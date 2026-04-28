@@ -342,16 +342,11 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🤖 Clé API Gemini (IA)</div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Pour la génération de descriptions et photos IA du Plat du Jour. Obtenez une clé gratuite sur <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent)">aistudio.google.com</a>. La clé est stockée de manière sécurisée dans Firebase, jamais dans le code source.</div>
-          <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-            <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px">
-              <label class="form-label">Clé API</label>
-              <input class="form-input" type="password" id="s-gemini-key" placeholder="AIzaSy..." style="letter-spacing:1px;font-family:monospace;font-size:12px">
-            </div>
-            <button class="hbtn" onclick="saveGeminiKey(document.getElementById('s-gemini-key').value.trim())" style="height:38px;padding:0 16px;background:rgba(34,201,122,.15);border:1px solid rgba(34,201,122,.3);color:#22c97a;font-weight:700">💾 Sauvegarder</button>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🤖 Génération IA</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Photos et descriptions du Plat du Jour générées via <strong style="color:#22c97a">Pollinations.ai</strong> (gratuit, illimité, aucune clé requise).</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:rgba(34,201,122,.08);border:1px solid rgba(34,201,122,.25);border-radius:8px;font-size:12px;color:#22c97a;font-weight:600">
+            <span style="font-size:16px">✓</span> IA active — aucune configuration requise
           </div>
-          <div id="gemini-key-status" style="margin-top:8px;font-size:11px;color:var(--muted)"></div>
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
           <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🔒 Code PIN de la caisse</div>
@@ -3801,23 +3796,19 @@ function handlePdjImg(e) {
 }
 
 async function generatePdjDesc() {
-  if (!GEMINI_KEY_PDJ) return toast('Configure ta clé API Gemini dans les Paramètres → Clé API Gemini (IA)', 'r');
+  // Description IA via Pollinations text-mode (gratuit, 0 cle).
   const nom = document.getElementById('pdj-nom').value.trim();
   if (!nom) return toast('Saisis d\'abord le nom du plat', 'o');
   const btn = document.getElementById('pdj-btn-desc');
   btn.textContent = '⏳ Génération...'; btn.disabled = true;
   try {
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + GEMINI_KEY_PDJ,
-      { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({contents:[{parts:[{text:'Génère une description courte et appétissante (10-14 mots max) pour un plat de restaurant appelé "' + nom + '". Réponds uniquement avec la description, sans guillemets ni ponctuation finale.'}]}]})
-      }
-    );
-    const data = await res.json();
-    const desc = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (desc) { document.getElementById('pdj-desc').value = desc; toast('Description générée !', 'g'); }
+    const prompt = `Genere une description courte et appetissante (10-14 mots max) pour un plat de restaurant appele "${nom}". Reponds uniquement avec la description, sans guillemets ni ponctuation finale.`;
+    const res = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const desc = (await res.text()).trim().replace(/^["']|["']$/g, '');
+    if (desc) { document.getElementById('pdj-desc').value = desc; toast('Description generee !', 'g'); }
     else toast('Erreur IA', 'r');
-  } catch(e) { toast('Erreur connexion IA', 'r'); }
+  } catch(e) { console.error(e); toast('Erreur connexion IA', 'r'); }
   btn.textContent = '✨ Générer description IA'; btn.disabled = false;
 }
 
@@ -3844,42 +3835,8 @@ async function generatePdjImage() {
   btn.textContent = '⏳ Génération image...'; btn.disabled = true;
   const prompt = 'A cinematic, high-end product photograph of "' + nom + '" for a French brasserie menu. Placed on a wet, dark charcoal slate stone surface with fine water droplets catching the light. Fresh, natural ingredients evoking the flavor profile artistically scattered around the base. Background is a softly blurred warm-lit bar or restaurant interior with amber and golden bokeh. Main light source: soft warm light from upper-left, creating rich golden highlights and deep shadows. Shallow depth of field. Color palette: deep dark blacks, warm amber and golden tones. Mood: sophisticated, artisanal, appetizing, French brasserie premium quality. Photorealistic, ultra-detailed.';
 
-  // Try Gemini first if key present
-  if (GEMINI_KEY_PDJ) {
-    status.textContent = '🎨 Gemini génère la photo...';
-    try {
-      const res = await fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=' + GEMINI_KEY_PDJ,
-        { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            contents:[{parts:[{text: prompt}]}],
-            generationConfig:{ responseModalities:['TEXT','IMAGE'] }
-          })
-        }
-      );
-      const data = await res.json();
-      const parts = data.candidates?.[0]?.content?.parts || [];
-      const imgPart = parts.find(p => p.inlineData);
-      if (imgPart) {
-        pdjImgData = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
-        const prev = document.getElementById('pdj-img-preview');
-        prev.src = pdjImgData;
-        prev.style.display = 'block';
-        document.getElementById('pdj-img-ph').style.display = 'none';
-        status.textContent = '✅ Photo générée (Gemini) !';
-        toast('Photo générée !', 'g');
-        btn.textContent = '🎨 Générer photo IA'; btn.disabled = false;
-        return;
-      }
-      status.textContent = '⚠️ Gemini sans image — fallback Pollinations...';
-    } catch (e) {
-      status.textContent = '⚠️ Gemini erreur — fallback Pollinations...';
-    }
-  } else {
-    status.textContent = '🎨 Pas de clé Gemini — utilisation Pollinations (gratuit)...';
-  }
-
-  // Fallback Pollinations
+  status.textContent = '🎨 Pollinations IA (gratuit) genere la photo...';
+  // Pollinations only (Gemini retire — pas besoin de cle API)
   try {
     pdjImgData = await generateImagePollinations(prompt);
     const prev = document.getElementById('pdj-img-preview');
