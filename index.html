@@ -146,13 +146,11 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
 .footer-text a{color:var(--accent);text-decoration:none;transition:color .2s}
 .footer-text a:hover{color:#ffc560}
 
-/* Install banner */
+/* Install banner — utilise .btn-primary de components.css */
 #install-banner{display:none;margin-top:20px;background:linear-gradient(135deg,rgba(245,166,35,.08),rgba(34,201,122,.05));border:1px solid rgba(245,166,35,.15);border-radius:var(--radius);padding:18px 20px;text-align:center}
 #install-banner.show{display:block}
 .install-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:6px}
 .install-desc{font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5}
-.install-btn{height:42px;padding:0 28px;border-radius:12px;background:var(--accent);color:#000;font-weight:800;font-size:13px;border:none;cursor:pointer;transition:all .15s;letter-spacing:.5px}
-.install-btn:hover{box-shadow:0 4px 20px rgba(245,166,35,.3);transform:translateY(-1px)}
 .install-btn:active{transform:scale(.96)}
 
 /* Animations */
@@ -282,7 +280,7 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
   <div id="install-banner">
     <div class="install-title">Installer l'application</div>
     <div class="install-desc">Ajoutez La Marmite Express sur votre ecran d'accueil pour un acces instantane</div>
-    <button class="install-btn" id="install-btn" onclick="installPWA()">Installer</button>
+    <button class="btn btn-primary btn-title" id="install-btn" onclick="installPWA()">Installer</button>
   </div>
 
   <!-- Firebase status -->

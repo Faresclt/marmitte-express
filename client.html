@@ -125,8 +125,8 @@ function renderMenu(){
     sec.items.forEach(p=>{
       const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
       const img = (p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null);
-      const imgHtml = img 
-        ? `<div class="prod-img"><img src="${img}" alt="${p.name}" loading="lazy"></div>` 
+      const imgHtml = img
+        ? `<div class="prod-img"><img src="${img}" alt="${p.name}" loading="lazy" decoding="async" width="64" height="64"></div>`
         : '';
       const outOfStock = p.stock!==undefined && p.stock>=0 && p.stock===0;
       html+=`<div class="prod-card${img?' has-img':''}${outOfStock?' sold-out':''}" onclick="openProductDetail('${p.id}')">
@@ -607,7 +607,7 @@ body{display:flex;flex-direction:column}
   <div id="detail-inner">
     <div class="detail-img" id="detail-img-wrap">
       <button id="detail-close" onclick="closeDetail()">✕</button>
-      <img id="detail-img" alt="" style="display:none">
+      <img id="detail-img" alt="" decoding="async" style="display:none">
       <div id="detail-img-ph" style="display:flex;align-items:center;justify-content:center;font-size:80px;width:100%;height:100%">🍽️</div>
     </div>
     <div class="detail-body">

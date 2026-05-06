@@ -62,9 +62,7 @@ onSnapshot(doc(db,'config','menu'), snap => {
 });
 </script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--text:#f0f0f0;--muted:#656878;--accent:#f5a623;--green:#22c97a;--radius:16px}
-html,body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+html,body{min-height:100vh}
 .container{max-width:1100px;margin:0 auto;padding:24px 20px 60px}
 .hdr{display:flex;align-items:center;gap:12px;margin-bottom:24px}
 .hdr a{height:34px;padding:0 14px;border-radius:10px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;text-decoration:none;display:flex;align-items:center;gap:4px}
