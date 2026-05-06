@@ -3,30 +3,20 @@
 <head>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Cuisine — La Marmitte Express</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Cuisine — La Marmite Express</title>
 <meta name="theme-color" content="#e84040">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/design-system.css">
+<link rel="stylesheet" href="assets/css/components.css">
 <style>
-:root {
-  --bg: #0a0b0e;
-  --surface: #111318;
-  --card: #181a22;
-  --border: rgba(255,255,255,.07);
-  --accent: #f5a623;
-  --green: #22c97a;
-  --red: #e84040;
-  --blue: #4a9eff;
-  --text: #f0f0f4;
-  --muted: #8b8fa3;
-  --radius: 14px;
-}
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:'DM Sans',sans-serif;background:#0a0b0e;color:#f0f0f4;height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+body{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 
 .hdr{display:flex;align-items:center;padding:8px 12px;gap:8px;background:#111318;border-bottom:2px solid rgba(255,255,255,.07);flex-shrink:0;flex-wrap:wrap}
 .hdr-logo{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:2px;display:flex;align-items:center;gap:8px}

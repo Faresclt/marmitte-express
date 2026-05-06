@@ -3,15 +3,20 @@
 <head>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Commander — La Marmitte Express</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Commander — La Marmite Express</title>
+<meta name="description" content="Commandez directement depuis votre table — La Marmite Express">
 <meta name="theme-color" content="#f5a623">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/design-system.css">
+<link rel="stylesheet" href="assets/css/components.css">
 
 <script type="module">
 import { db, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp, escHtml } from './assets/js/firebase-sync.js';
@@ -24,6 +29,8 @@ const tableId = params.get('id') || ('t'+tableNum);
 let menu = null;
 let cart = [];
 let productImages = {}; // {productId: base64_thumbnail}
+let activeFilters = new Set(); // tags actifs : 'vegan', 'glutenFree', 'spicy', 'vegetarian'
+let searchQuery = '';
 
 // Update page title and table display
 document.getElementById('table-display').textContent = tableNum;
@@ -69,6 +76,25 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
   }
 });
 
+function matchesFilters(p){
+  if(activeFilters.size === 0) return true;
+  for(const f of activeFilters){
+    if(f === 'vegan' && !p.vegan) return false;
+    if(f === 'vegetarian' && !p.vegetarian && !p.vegan) return false;
+    if(f === 'glutenFree' && !p.glutenFree) return false;
+    if(f === 'spicy' && !p.spicy) return false;
+  }
+  return true;
+}
+
+function matchesSearch(p){
+  if(!searchQuery) return true;
+  const q = searchQuery.toLowerCase().trim();
+  if(!q) return true;
+  const haystack = [p.name, p.sub, p.description].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(q);
+}
+
 function renderMenu(){
   if(!menu) return;
   const tabs = document.getElementById('menu-tabs');
@@ -78,12 +104,13 @@ function renderMenu(){
 
   let activeCat = tabs.dataset.active || cats[0]?.id;
   tabs.innerHTML = cats.map(c=>`
-    <button class="mtab${activeCat===c.id?' active':''}" onclick="switchTab('${c.id}')">
+    <button class="mtab${activeCat===c.id?' active':''}" onclick="switchTab('${c.id}')" aria-pressed="${activeCat===c.id}">
       ${c.icon||''} ${c.name}
     </button>`).join('');
   tabs.dataset.active = activeCat;
 
-  const prods = (menu.products||[]).filter(p=>p.cat===activeCat);
+  // Filtre catégorie + tags + recherche
+  const prods = (menu.products||[]).filter(p=>p.cat===activeCat && matchesFilters(p) && matchesSearch(p));
   const sections = [];
   prods.forEach(p=>{
     const sec = p.section||'';
@@ -123,8 +150,44 @@ function renderMenu(){
       </div>`;
     });
   });
-  content.innerHTML = html||'<div style="padding:30px;text-align:center;color:#888">Aucun article</div>';
+  if(!html){
+    const reason = (activeFilters.size > 0 || searchQuery)
+      ? 'Aucun plat ne correspond à vos filtres.<br><button onclick="clearFilters()" class="btn btn-ghost btn-sm" style="margin-top:12px">Réinitialiser les filtres</button>'
+      : 'Aucun article dans cette catégorie';
+    content.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">🍽️</div>${reason}</div>`;
+  } else {
+    content.innerHTML = html;
+  }
 }
+
+function clearFilters(){
+  activeFilters.clear();
+  searchQuery = '';
+  document.querySelectorAll('#filter-bar .chip').forEach(c => c.setAttribute('aria-pressed', 'false'));
+  const sb = document.getElementById('search-input');
+  if(sb) sb.value = '';
+  renderMenu();
+}
+
+function toggleFilter(tag, btn){
+  if(activeFilters.has(tag)){
+    activeFilters.delete(tag);
+    btn.setAttribute('aria-pressed', 'false');
+  } else {
+    activeFilters.add(tag);
+    btn.setAttribute('aria-pressed', 'true');
+  }
+  renderMenu();
+}
+
+function onSearch(value){
+  searchQuery = value;
+  renderMenu();
+}
+
+window.clearFilters = clearFilters;
+window.toggleFilter = toggleFilter;
+window.onSearch = onSearch;
 
 function changeQty(pid, price, delta, name, cuisson, garniture, tva, cat){
   // For products with options, find by pid+cuisson+garniture
@@ -342,10 +405,8 @@ window.selChip=selChip; window.confirmOpt=confirmOpt; window.closeOptModal=close
 </script>
 
 <style>
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--text:#f0f0f0;--muted:#6b7280;--green:#22c97a;--accent:#f5a623;--red:#e84040;--radius:16px}
 html,body{height:100%;overflow:hidden}
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column}
+body{display:flex;flex-direction:column}
 
 /* Header */
 #app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0}
@@ -383,8 +444,22 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);dis
 .qty-ctrl button:last-child{background:rgba(34,201,122,.12);color:var(--green)}
 .qty-ctrl span{font-family:'Bebas Neue',sans-serif;font-size:22px;min-width:24px;text-align:center}
 
+/* Search + filters */
+#search-bar{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+#search-input{flex:1;height:40px;padding:0 14px;background:var(--card);border:1px solid var(--border);border-radius:20px;color:var(--text);font-size:14px;outline:none;transition:border-color .15s}
+#search-input::placeholder{color:var(--muted-2)}
+#search-input:focus{border-color:var(--accent)}
+#filter-bar{display:flex;gap:6px;padding:8px 16px;overflow-x:auto;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;scrollbar-width:none}
+#filter-bar::-webkit-scrollbar{display:none}
+#filter-bar .chip{height:32px;padding:0 12px;font-size:12px;font-weight:700;flex-shrink:0}
+
+/* Skeleton */
+.skel-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.skel-img{width:64px;height:64px;border-radius:12px;flex-shrink:0}
+.skel-content{flex:1;display:flex;flex-direction:column;gap:8px}
+
 /* Cart bar */
-#cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--accent);padding:14px 20px;display:none;align-items:center;justify-content:space-between;cursor:pointer;z-index:40}
+#cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--accent);padding:14px 20px calc(14px + env(safe-area-inset-bottom));display:none;align-items:center;justify-content:space-between;cursor:pointer;z-index:40}
 #cart-count{font-size:14px;font-weight:700;color:#000}
 #cart-total-bar{font-family:'Bebas Neue',sans-serif;font-size:20px;color:#000}
 .cart-arrow{font-size:18px;color:#000}
@@ -456,21 +531,33 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);dis
   <div style="display:flex;align-items:center;gap:10px">
     <img id="resto-logo" alt="" style="display:none;width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0">
     <div>
-      <div id="resto-name">La <span style="color:var(--accent)">Marmitte</span> Express</div>
+      <div id="resto-name">La <span style="color:var(--accent)">Marmite</span> Express</div>
       <div class="tagline">COMMANDER EN LIGNE</div>
     </div>
   </div>
 </div>
 
-<div id="loading">
-  <div style="text-align:center">
-    <div style="font-size:40px;margin-bottom:12px">⏳</div>
-    <div style="font-size:14px">Chargement de la carte…</div>
+<div id="loading" aria-live="polite" aria-busy="true">
+  <div style="width:100%;flex:1;overflow:hidden">
+    <div class="skel-card"><div class="skel-img skeleton"></div><div class="skel-content"><div class="skeleton skeleton-line title"></div><div class="skeleton skeleton-line sm" style="width:40%"></div><div class="skeleton skeleton-line lg" style="width:25%"></div></div></div>
+    <div class="skel-card"><div class="skel-img skeleton"></div><div class="skel-content"><div class="skeleton skeleton-line title"></div><div class="skeleton skeleton-line sm" style="width:50%"></div><div class="skeleton skeleton-line lg" style="width:30%"></div></div></div>
+    <div class="skel-card"><div class="skel-img skeleton"></div><div class="skel-content"><div class="skeleton skeleton-line title"></div><div class="skeleton skeleton-line sm" style="width:35%"></div><div class="skeleton skeleton-line lg" style="width:25%"></div></div></div>
+    <div class="skel-card"><div class="skel-img skeleton"></div><div class="skel-content"><div class="skeleton skeleton-line title"></div><div class="skeleton skeleton-line sm" style="width:45%"></div><div class="skeleton skeleton-line lg" style="width:30%"></div></div></div>
+    <span class="sr-only">Chargement de la carte en cours…</span>
   </div>
 </div>
 
 <div id="app">
-  <div id="menu-tabs"></div>
+  <div id="search-bar">
+    <input id="search-input" type="search" placeholder="Rechercher un plat…" aria-label="Rechercher dans le menu" oninput="onSearch(this.value)">
+  </div>
+  <div id="filter-bar" role="group" aria-label="Filtres alimentaires">
+    <button class="chip" aria-pressed="false" onclick="toggleFilter('vegetarian', this)">🥬 Végé</button>
+    <button class="chip" aria-pressed="false" onclick="toggleFilter('vegan', this)">🌱 Vegan</button>
+    <button class="chip" aria-pressed="false" onclick="toggleFilter('glutenFree', this)">🌾 Sans gluten</button>
+    <button class="chip" aria-pressed="false" onclick="toggleFilter('spicy', this)">🌶️ Épicé</button>
+  </div>
+  <div id="menu-tabs" role="tablist"></div>
   <div id="menu-content"></div>
 </div>
 

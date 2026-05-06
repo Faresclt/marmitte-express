@@ -1,0 +1,366 @@
+/* ============================================================
+   components.css — Composants UI partagés
+   La Marmite Express · Phase 1
+
+   Dépend de design-system.css (variables CSS).
+   Inclure APRÈS design-system.css.
+   ============================================================ */
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--tap-min);
+  padding: 0 18px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: .3px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    background var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+/* Variantes */
+.btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 800;
+}
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 4px 18px var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: var(--card);
+  color: var(--text);
+  border-color: var(--border);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--card-hover);
+  border-color: var(--border-strong);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--card);
+}
+
+.btn-danger {
+  background: var(--red);
+  color: #fff;
+  font-weight: 800;
+}
+
+.btn-success {
+  background: var(--green);
+  color: #082014;
+  font-weight: 800;
+}
+
+/* Tailles */
+.btn-sm { min-height: 36px; padding: 0 14px; font-size: var(--fs-xs); }
+.btn-lg { min-height: 54px; padding: 0 24px; font-size: var(--fs-md); }
+
+/* Title button (Bebas Neue) */
+.btn-title {
+  font-family: var(--font-title);
+  font-size: var(--fs-lg);
+  letter-spacing: 1.5px;
+}
+
+.btn-block { width: 100%; }
+
+/* ============================================================
+   Cards
+   ============================================================ */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap-lg);
+  transition:
+    background var(--dur-normal) var(--ease-standard),
+    border-color var(--dur-normal) var(--ease-standard),
+    transform var(--dur-normal) var(--ease-standard),
+    box-shadow var(--dur-normal) var(--ease-standard);
+}
+
+.card-interactive {
+  cursor: pointer;
+}
+
+.card-interactive:hover {
+  background: var(--card-hover);
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+
+.card-interactive:active { transform: translateY(0) scale(.99); }
+
+/* ============================================================
+   Badges / chips
+   ============================================================ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: var(--card);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.badge-accent { background: var(--accent-soft); color: var(--accent); border-color: rgba(245,166,35,.25); }
+.badge-green  { background: rgba(34,201,122,.10); color: var(--green);  border-color: rgba(34,201,122,.25); }
+.badge-red    { background: rgba(232,64,64,.10);  color: var(--red);    border-color: rgba(232,64,64,.25); }
+.badge-blue   { background: rgba(74,158,255,.10); color: var(--blue);   border-color: rgba(74,158,255,.25); }
+.badge-purple { background: rgba(155,107,255,.10);color: var(--purple); border-color: rgba(155,107,255,.25); }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 20px;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-standard);
+  white-space: nowrap;
+}
+.chip:hover { border-color: var(--border-strong); }
+.chip.selected,
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ============================================================
+   Form inputs
+   ============================================================ */
+
+.input,
+.textarea,
+.select {
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  transition: border-color var(--dur-fast) var(--ease-standard);
+}
+
+.input::placeholder,
+.textarea::placeholder { color: var(--muted-2); }
+
+.input:focus,
+.textarea:focus,
+.select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.textarea { min-height: 80px; resize: vertical; }
+
+.label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 6px;
+}
+
+/* ============================================================
+   Modal / Sheet (bottom sheet mobile)
+   ============================================================ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .85);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn var(--dur-fast) var(--ease-standard);
+}
+.modal-backdrop.show { display: flex; }
+.modal-backdrop.sheet { align-items: flex-end; padding: 0; }
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--gap-lg);
+  animation: modalIn var(--dur-normal) var(--ease-spring);
+}
+
+.modal.sheet {
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  max-width: 520px;
+  padding-bottom: calc(var(--gap-lg) + env(safe-area-inset-bottom));
+  animation: slideUp var(--dur-normal) var(--ease-standard);
+}
+
+.modal-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+  margin: 0 auto 12px;
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(8px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* ============================================================
+   Toast
+   ============================================================ */
+
+.toast {
+  position: fixed;
+  top: calc(20px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%) translateY(-100px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 20px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  opacity: 0;
+  transition: opacity var(--dur-normal), transform var(--dur-normal) var(--ease-spring);
+  pointer-events: none;
+  max-width: 90vw;
+  text-align: center;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.toast.success { background: var(--green); color: #082014; border-color: transparent; }
+.toast.error   { background: var(--red);   color: #fff;    border-color: transparent; }
+.toast.warn    { background: var(--yellow); color: #000;   border-color: transparent; }
+
+/* ============================================================
+   Spinner / loaders
+   ============================================================ */
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Skeleton screens */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--card) 0%,
+    var(--card-hover) 50%,
+    var(--card) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeletonPulse 1.4s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+@keyframes skeletonPulse {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-line { height: 14px; margin-bottom: 8px; }
+.skeleton-line.sm { height: 10px; }
+.skeleton-line.lg { height: 20px; }
+.skeleton-line.title { height: 24px; width: 60%; }
+
+/* ============================================================
+   Status dot (avec animation pulse)
+   ============================================================ */
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted-2);
+}
+.status-dot.on  { background: var(--green); box-shadow: 0 0 8px rgba(34,201,122,.4); animation: dotPulse 2s ease-in-out infinite; }
+.status-dot.off { background: var(--red);   box-shadow: 0 0 6px rgba(232,64,64,.3); }
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .55; }
+}
+
+/* ============================================================
+   Container
+   ============================================================ */
+
+.container {
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: var(--gap-lg) var(--gap-md);
+}
