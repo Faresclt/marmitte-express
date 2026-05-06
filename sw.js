@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v15-pin-logo-empty-div';
+const CACHE_NAME = 'marmite-v16-seo-toast-404-syncbanner';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',
@@ -7,6 +7,8 @@ const ASSETS = [
   './cuisine.html',
   './qrcodes.html',
   './setup-images.html',
+  './signup.html',
+  './404.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
@@ -14,6 +16,7 @@ const ASSETS = [
   './assets/css/components.css',
   './assets/css/caisse.css',
   './assets/js/brand-boot.js',
+  './assets/js/sync-banner.js',
   './assets/js/firebase-sync.js',
   'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap'
 ];

@@ -6,6 +6,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Créer mon restaurant — La Marmite Express</title>
 <meta name="description" content="Créez votre restaurant sur La Marmite Express en 30 secondes">
+<meta property="og:title" content="Créer mon restaurant — La Marmite Express">
+<meta property="og:description" content="Créez votre restaurant sur La Marmite Express en 30 secondes">
+<meta property="og:image" content="icon-512.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
 <meta name="theme-color" content="#f5a623">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,34 +22,23 @@
   body{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px}
   .wrap{width:100%;max-width:480px}
   header{text-align:center;margin-bottom:32px}
-  .logo{display:inline-flex;align-items:center;gap:10px;margin-bottom:12px}
-  .logo img{width:56px;height:56px;border-radius:12px;object-fit:cover}
-  h1{font-family:'Bebas Neue',sans-serif;font-size:42px;letter-spacing:1px;line-height:1}
+  .header-logo{display:inline-flex;align-items:center;gap:10px;margin-bottom:12px}
+  .header-logo img{width:56px;height:56px;border-radius:12px;object-fit:cover}
+  h1{font-family:var(--font-title);font-size:clamp(34px,7vw,46px);letter-spacing:1px;line-height:1}
   h1 span{color:var(--accent)}
-  .sub{color:var(--muted);font-size:14px;margin-top:8px}
+  .sub{color:var(--muted);font-size:var(--fs-base);margin-top:8px}
   form{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;display:flex;flex-direction:column;gap:16px}
   .field{display:flex;flex-direction:column;gap:6px}
-  label{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-  input{background:var(--card);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:15px;padding:12px 14px;border-radius:10px;outline:none;transition:border-color .15s}
-  input:focus{border-color:var(--accent)}
-  input[readonly]{color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
-  .hint{font-size:12px;color:var(--muted)}
-  .btn{background:var(--accent);color:#1a1100;border:none;font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1.5px;padding:14px;border-radius:12px;cursor:pointer;transition:transform .1s,opacity .15s;margin-top:8px}
-  .btn:hover{transform:translateY(-1px)}
-  .btn:disabled{opacity:.6;cursor:not-allowed;transform:none}
-  .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:var(--red);color:#fff;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:1000;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
-  .toast.show{opacity:1}
-  .toast.ok{background:var(--green);color:#082014}
-  .spinner{display:inline-block;width:18px;height:18px;border:2px solid rgba(0,0,0,.25);border-top-color:#1a1100;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:8px}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .foot{text-align:center;margin-top:20px;font-size:13px;color:var(--muted)}
+  .input[readonly]{color:var(--muted);font-family:'DM Mono',monospace;font-size:13px}
+  .hint{font-size:var(--fs-xs);color:var(--muted)}
+  .foot{text-align:center;margin-top:20px;font-size:var(--fs-sm);color:var(--muted)}
   .foot a{color:var(--accent);text-decoration:none;font-weight:600}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <div class="logo">
+    <div class="header-logo">
       <img src="icon-192.png" alt="Logo" onerror="this.style.display='none'">
     </div>
     <h1>La Marmite <span>Express</span></h1>
@@ -53,27 +47,27 @@
 
   <form id="signup-form" autocomplete="on">
     <div class="field">
-      <label for="restoName">Nom du restaurant</label>
-      <input id="restoName" type="text" required placeholder="Le Petit Bistrot" maxlength="60">
+      <label class="label" for="restoName">Nom du restaurant</label>
+      <input class="input" id="restoName" type="text" required placeholder="Le Petit Bistrot" maxlength="60">
     </div>
     <div class="field">
-      <label for="slug">Identifiant URL</label>
-      <input id="slug" type="text" readonly placeholder="le-petit-bistrot">
+      <label class="label" for="slug">Identifiant URL</label>
+      <input class="input" id="slug" type="text" readonly placeholder="le-petit-bistrot">
       <div class="hint">Généré automatiquement. Sera utilisé dans l'URL de votre caisse.</div>
     </div>
     <div class="field">
-      <label for="email">Email administrateur</label>
-      <input id="email" type="email" required placeholder="contact@monresto.fr" autocomplete="email">
+      <label class="label" for="email">Email administrateur</label>
+      <input class="input" id="email" type="email" required placeholder="contact@monresto.fr" autocomplete="email">
     </div>
     <div class="field">
-      <label for="pwd">Mot de passe</label>
-      <input id="pwd" type="password" required minlength="8" placeholder="8 caractères minimum" autocomplete="new-password">
+      <label class="label" for="pwd">Mot de passe</label>
+      <input class="input" id="pwd" type="password" required minlength="8" placeholder="8 caractères minimum" autocomplete="new-password">
     </div>
     <div class="field">
-      <label for="pwd2">Confirmer le mot de passe</label>
-      <input id="pwd2" type="password" required minlength="8" autocomplete="new-password">
+      <label class="label" for="pwd2">Confirmer le mot de passe</label>
+      <input class="input" id="pwd2" type="password" required minlength="8" autocomplete="new-password">
     </div>
-    <button id="submit-btn" class="btn" type="submit">Créer mon restaurant</button>
+    <button id="submit-btn" class="btn btn-primary btn-title btn-block btn-lg" type="submit" style="margin-top:8px">Créer mon restaurant</button>
   </form>
 
   <div class="foot">
