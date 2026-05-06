@@ -55,15 +55,19 @@ async function loadImages(batchCount){
 onSnapshot(doc(db, 'config', 'menu'), snap => {
   if(snap.exists()){
     menu = snap.data();
-    // Apply branding
+    // Apply branding (le cache localStorage a déjà été appliqué par brand-boot.js)
     const b = menu.branding||{};
     if(b.name) { const safe = escHtml(b.name); document.getElementById('resto-name').innerHTML = safe.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>'); }
     if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
     const logoImg = document.getElementById('resto-logo');
     if(logoImg){
-      if(b.logoUrl){ logoImg.src = b.logoUrl; logoImg.style.display = 'block'; }
-      else { logoImg.style.display = 'none'; }
+      if(b.logoUrl){
+        if(logoImg.src !== b.logoUrl) logoImg.src = b.logoUrl;
+        logoImg.style.display = 'block';
+      } else { logoImg.style.display = 'none'; }
     }
+    // Persiste en cache pour la prochaine visite (élimine le FOUC)
+    window.BrandCache?.save(b);
     renderMenu();
     document.getElementById('loading').style.display='none';
     document.getElementById('app').style.display='flex';
@@ -536,6 +540,8 @@ body{display:flex;flex-direction:column}
     </div>
   </div>
 </div>
+
+<script src="assets/js/brand-boot.js"></script>
 
 <div id="loading" aria-live="polite" aria-busy="true">
   <div style="width:100%;flex:1;overflow:hidden">

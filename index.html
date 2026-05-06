@@ -190,6 +190,8 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
     <div class="version"><span class="version-dot"></span> v2.0 — Marmite Express POS</div>
   </div>
 
+  <script src="assets/js/brand-boot.js"></script>
+
   <div class="grid">
     <a href="marmite-express-caisse.html" class="app-card caisse">
       <div class="card-icon-wrap">
@@ -338,7 +340,7 @@ try {
       const cats = (data.cats||[]).length;
       document.getElementById('dot-menu').classList.add('on');
       document.getElementById('val-menu').textContent = count+' produits · '+cats+' cat.';
-      // Apply branding (logo, name, accent)
+      // Apply branding (logo, name, accent) + persist en cache pour next visit
       const b = data.branding || {};
       if(b.accent){
         document.documentElement.style.setProperty('--accent', b.accent);
@@ -357,13 +359,16 @@ try {
       const img = document.getElementById('brand-logo-img');
       const svg = document.getElementById('brand-logo-svg');
       if(b.logoUrl && img && svg){
-        img.src = b.logoUrl;
+        // Évite de réassigner si la src est déjà la bonne (brand-boot l'a déjà fait)
+        if(img.src !== b.logoUrl) img.src = b.logoUrl;
         img.style.display = 'block';
         svg.style.display = 'none';
       } else if(img && svg){
         img.style.display = 'none';
         svg.style.display = 'block';
       }
+      // Persiste en cache pour la prochaine visite (élimine le FOUC)
+      window.BrandCache?.save(b);
     } else {
       document.getElementById('dot-menu').classList.add('off');
       document.getElementById('val-menu').textContent = 'Non publie';

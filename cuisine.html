@@ -120,6 +120,8 @@ body{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidd
   </div>
 </div>
 
+<script src="assets/js/brand-boot.js"></script>
+
 <div id="sum"><div id="sum-body"></div></div>
 
 <div class="board">
@@ -172,12 +174,16 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
     }
     const img = document.getElementById('resto-logo-img');
     if(img){
-      if(b.logoUrl){ img.src = b.logoUrl; img.style.display = 'inline-block'; }
-      else { img.style.display = 'none'; }
+      if(b.logoUrl){
+        if(img.src !== b.logoUrl) img.src = b.logoUrl;
+        img.style.display = 'inline-block';
+      } else { img.style.display = 'none'; }
     }
     const nameEl = document.getElementById('resto-name-cuisine');
     if(nameEl && b.name){ nameEl.textContent = '· ' + b.name; }
     if(b.name) document.title = b.name + ' — Cuisine';
+    // Persiste en cache pour la prochaine visite (élimine le FOUC)
+    window.BrandCache?.save(b);
   }
   let allCats = [];
   if (data && data.categories) {
