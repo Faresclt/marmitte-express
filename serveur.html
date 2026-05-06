@@ -3,15 +3,42 @@
 <head>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Commander — La Marmitte Express</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Serveur — La Marmite Express</title>
 <meta name="theme-color" content="#f5a623">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/design-system.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<script>
+/* Brand pre-boot — voir index.html pour la justification.
+   Variante serveur : cibles #resto-logo (img). */
+(function(){
+  try {
+    function read(k){
+      var v = localStorage.getItem(k);
+      if (v == null) return null;
+      if (v.length >= 2 && v.charAt(0) === '"' && v.charAt(v.length-1) === '"') {
+        try { return JSON.parse(v); } catch(e){}
+      }
+      return v;
+    }
+    var lu = read('brand_logoUrl');
+    var ln = read('brand_name');
+    var la = read('brand_accent');
+    if (la) document.documentElement.style.setProperty('--accent', la);
+    if (lu || ln) {
+      window.__brandPreBoot = { logoUrl: lu, name: ln, accent: la };
+    }
+  } catch(e){}
+})();
+</script>
 
 <script type="module">
 import { db, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp, escHtml } from './assets/js/firebase-sync.js';
@@ -28,7 +55,7 @@ let productImages = {};
 // Update page title and table display
 function updateTableDisplay(){
   document.getElementById('table-display').textContent = tableNum || '?';
-  document.title = tableNum ? `Table ${tableNum} — Commander` : 'Serveur — La Marmitte Express';
+  document.title = tableNum ? `Table ${tableNum} — Commander` : 'Serveur — La Marmite Express';
 }
 updateTableDisplay();
 
@@ -205,9 +232,13 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
     if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
     const logoEl = document.getElementById('resto-logo');
     if(logoEl){
-      if(b.logoUrl){ logoEl.src = b.logoUrl; logoEl.style.display = 'block'; }
-      else { logoEl.style.display = 'none'; }
+      if(b.logoUrl){
+        if(logoEl.src !== b.logoUrl) logoEl.src = b.logoUrl;
+        logoEl.style.display = 'block';
+      } else { logoEl.style.display = 'none'; }
     }
+    // Persiste en cache pour la prochaine visite (élimine le FOUC)
+    window.BrandCache?.save(b);
     renderMenu();
     if(menu.imageBatches && menu.imageBatches > 0){
       loadImages(menu.imageBatches);
@@ -523,10 +554,8 @@ window.selChip=selChip; window.confirmOpt=confirmOpt; window.closeOptModal=close
 </script>
 
 <style>
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-:root{--bg:#0c0d10;--surface:#13141a;--card:#1a1c24;--border:rgba(255,255,255,.08);--text:#f0f0f0;--muted:#6b7280;--green:#22c97a;--accent:#f5a623;--red:#e84040;--radius:16px}
 html{height:100%;height:100dvh}
-body{height:100%;height:100dvh;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;overflow:hidden}
+body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 
 /* Header */
 #app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0}
@@ -565,7 +594,7 @@ body{height:100%;height:100dvh;font-family:'DM Sans',sans-serif;background:var(-
 .qty-ctrl span{font-family:'Bebas Neue',sans-serif;font-size:22px;min-width:24px;text-align:center}
 
 /* Cart bar */
-#cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--accent);padding:14px 20px;display:none;align-items:center;justify-content:space-between;cursor:pointer;z-index:40}
+#cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--accent);padding:14px 20px calc(14px + env(safe-area-inset-bottom));display:none;align-items:center;justify-content:space-between;cursor:pointer;z-index:40}
 #cart-count{font-size:14px;font-weight:700;color:#000}
 #cart-total-bar{font-family:'Bebas Neue',sans-serif;font-size:20px;color:#000}
 .cart-arrow{font-size:18px;color:#000}
@@ -653,10 +682,12 @@ body{height:100%;height:100dvh;font-family:'DM Sans',sans-serif;background:var(-
   <div class="table-pill" id="table-pill-num" onclick="changeTable()" style="cursor:pointer" title="Changer de table">TABLE <span id="table-display">?</span> ✎</div>
   <img id="resto-logo" alt="" style="display:none;width:32px;height:32px;border-radius:7px;object-fit:cover;flex-shrink:0">
   <div style="flex:1">
-    <div id="resto-name">La <span style="color:var(--accent)">Marmitte</span> Express</div>
+    <div id="resto-name">La <span style="color:var(--accent)">Marmite</span> Express</div>
     <div class="tagline">PRISE DE COMMANDE</div>
   </div>
 </div>
+
+<script src="assets/js/brand-boot.js"></script>
 
 <div id="loading">
   <div style="text-align:center">

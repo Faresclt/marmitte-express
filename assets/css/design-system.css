@@ -1,101 +1,259 @@
-/* design-system.css — CSS variables partagées
-   Phase 2.A.4 : extraction des tokens depuis les pages HTML.
-   Phase 1 (4e dans l'ordre) : enrichira avec classes utilitaires (.btn, .card, etc.)
-   Phase 4 : les variables seront override dynamiquement par le branding resto
-            via document.documentElement.style.setProperty()
-*/
+/* ============================================================
+   design-system.css — Source unique de vérité (SSOT)
+   La Marmite Express · Phase 1 (audit design)
+
+   Ce fichier remplace les `:root` locaux dispersés dans les pages.
+   Toutes les pages doivent l'inclure AVANT leur <style> inline.
+   ============================================================ */
 
 :root {
-  /* Couleurs de base (dark theme par défaut) */
-  --bg: #0c0d10;
-  --surface: #13141a;
-  --card: #1a1c24;
-  --border: #262836;
+  /* ── Fonds / surfaces (dark theme par défaut) ─────────────── */
+  --bg:            #0a0b0e;
+  --surface:       #111318;
+  --card:          #161820;
+  --card-hover:    #1c1e28;
+  --border:        rgba(255, 255, 255, .07);
+  --border-strong: rgba(255, 255, 255, .12);
 
-  /* Accents (override par resto en phase 4) */
-  --accent: #f5a623;
-  --accent-2: #e89500;
+  /* ── Texte ─────────────────────────────────────────────────── */
+  --text:      #f0f0f4;
+  --text-dim:  #c8c8d0;
+  --muted:     #8b8fa3;
+  --muted-2:   #5a5e72;
 
-  /* Sémantiques */
-  --green: #22c97a;
-  --red: #e84040;
-  --blue: #4a9eff;
-  --purple: #9b6bff;
-  --yellow: #f5c23c;
+  /* ── Accents ──────────────────────────────────────────────── */
+  --accent:        #f5a623;
+  --accent-2:      #e89500;
+  --accent-glow:   rgba(245, 166, 35, .15);
+  --accent-soft:   rgba(245, 166, 35, .08);
+  --on-accent:     #1a1100;
 
-  /* Texte */
-  --text: #f0f0f4;
-  --muted: #656878;
-  --text-dim: #9a9db0;
+  /* ── Sémantiques (rôles + états) ──────────────────────────── */
+  --green:   #22c97a;
+  --red:     #e84040;
+  --blue:    #4a9eff;
+  --purple:  #9b6bff;
+  --cyan:    #06d6a0;
+  --yellow:  #f5c23c;
 
-  /* Layout */
-  --radius: 14px;
+  /* ── Layout / radius ──────────────────────────────────────── */
   --radius-sm: 8px;
-  --radius-lg: 20px;
+  --radius:    14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
 
-  /* Spacing (phase 1 étendra) */
+  /* ── Spacing (échelle 4px) ────────────────────────────────── */
   --gap-xs: 4px;
   --gap-sm: 8px;
   --gap-md: 16px;
   --gap-lg: 24px;
   --gap-xl: 32px;
+  --gap-2xl: 48px;
 
-  /* Typographie */
-  --font-title: 'Bebas Neue', sans-serif;
-  --font-body: 'DM Sans', sans-serif;
+  /* ── Typographie ──────────────────────────────────────────── */
+  --font-title: 'Bebas Neue', system-ui, sans-serif;
+  --font-body:  'DM Sans', system-ui, -apple-system, sans-serif;
 
-  /* Animations (phase 1 étendra) */
+  /* Échelle fluide (clamp = mobile → desktop) */
+  --fs-xs:   clamp(11px, 0.7vw + 9px, 12px);
+  --fs-sm:   clamp(12px, 0.7vw + 10px, 13px);
+  --fs-base: clamp(14px, 0.7vw + 12px, 15px);
+  --fs-md:   clamp(15px, 0.8vw + 13px, 17px);
+  --fs-lg:   clamp(18px, 1vw + 15px, 22px);
+  --fs-xl:   clamp(22px, 1.6vw + 18px, 32px);
+  --fs-2xl:  clamp(28px, 2.4vw + 20px, 46px);
+
+  /* ── Shadows ──────────────────────────────────────────────── */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, .25);
+  --shadow:    0 6px 20px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, .45);
+
+  /* ── Animations ───────────────────────────────────────────── */
   --ease-standard: cubic-bezier(.4, 0, .2, 1);
-  --dur-fast: 150ms;
+  --ease-spring:   cubic-bezier(.34, 1.56, .64, 1);
+  --dur-fast:   150ms;
   --dur-normal: 250ms;
-  --dur-slow: 400ms;
+  --dur-slow:   400ms;
+
+  /* ── Touch targets (a11y) ─────────────────────────────────── */
+  --tap-min: 44px;
 }
 
-/* Reset minimal commun */
+/* ── Mode clair (opt-in via [data-theme="light"] ou prefers) ── */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg:            #f8f9fb;
+    --surface:       #ffffff;
+    --card:          #f1f2f6;
+    --card-hover:    #e8eaf0;
+    --border:        rgba(0, 0, 0, .08);
+    --border-strong: rgba(0, 0, 0, .14);
+    --text:          #15161c;
+    --text-dim:      #2c2e38;
+    --muted:         #5a5e72;
+    --muted-2:       #8b8fa3;
+    --accent-glow:   rgba(245, 166, 35, .25);
+    --accent-soft:   rgba(245, 166, 35, .12);
+  }
+}
+
+[data-theme="light"] {
+  --bg:            #f8f9fb;
+  --surface:       #ffffff;
+  --card:          #f1f2f6;
+  --card-hover:    #e8eaf0;
+  --border:        rgba(0, 0, 0, .08);
+  --border-strong: rgba(0, 0, 0, .14);
+  --text:          #15161c;
+  --text-dim:      #2c2e38;
+  --muted:         #5a5e72;
+  --muted-2:       #8b8fa3;
+}
+
+/* ============================================================
+   Reset commun + bases
+   ============================================================ */
+
 *, *::before, *::after {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+* { margin: 0; padding: 0; }
+
+html, body {
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 body {
-  margin: 0;
-  padding: 0;
+  font-family: var(--font-body);
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-/* Sticky banner pour état sync — sera utilisé bloc 2.B.4 */
+img, svg, video {
+  display: block;
+  max-width: 100%;
+}
+
+button, input, textarea, select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* ============================================================
+   Accessibilité — focus visible global
+   ============================================================ */
+
+:focus { outline: none; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: var(--accent) !important;
+}
+
+/* Skip link pour navigation clavier */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 8px;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  border-radius: 8px;
+  z-index: 9999;
+  transition: top var(--dur-fast) var(--ease-standard);
+}
+.skip-link:focus { top: 8px; }
+
+/* Visually hidden (screen reader only) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ============================================================
+   Préférences utilisateur
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   Safe areas (iOS notch / home bar)
+   ============================================================ */
+
+.safe-top    { padding-top:    env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-left   { padding-left:   env(safe-area-inset-left); }
+.safe-right  { padding-right:  env(safe-area-inset-right); }
+
+/* ============================================================
+   Sync banner (état réseau) — utilisé dans toutes les pages
+   ============================================================ */
+
 .sync-banner {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 8px 16px;
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
   font-size: 12px;
   font-weight: 600;
   text-align: center;
   z-index: 9999;
-  transform: translateY(100%);
+  transform: translateY(110%);
   transition: transform var(--dur-normal) var(--ease-standard);
 }
 
-.sync-banner.visible {
-  transform: translateY(0);
-}
-
-.sync-banner.offline {
-  background: var(--red);
-  color: #fff;
-}
-
-.sync-banner.pending {
-  background: var(--yellow);
-  color: #000;
-}
-
-.sync-banner.online {
-  background: var(--green);
-  color: #000;
-}
+.sync-banner.visible { transform: translateY(0); }
+.sync-banner.offline { background: var(--red);    color: #fff; }
+.sync-banner.pending { background: var(--yellow); color: #000; }
+.sync-banner.online  { background: var(--green);  color: #000; }

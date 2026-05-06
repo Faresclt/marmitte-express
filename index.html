@@ -3,20 +3,67 @@
 <head>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>La Marmite Express — Accueil</title>
 <meta name="description" content="La Marmite Express — Système de caisse & commande en ligne pour votre restaurant">
+<meta property="og:title" content="La Marmite Express">
+<meta property="og:description" content="Système de caisse & commande en ligne pour votre restaurant">
+<meta property="og:image" content="icon-512.png">
+<meta property="og:type" content="website">
 <meta name="theme-color" content="#f5a623">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/design-system.css">
+<link rel="stylesheet" href="assets/css/components.css">
+<script>
+/* Brand pre-boot — exécuté AVANT le parse du body pour éliminer
+   le flash du logo par défaut au chargement (FOUC).
+   Lit localStorage et injecte une règle CSS qui masque le SVG si
+   un logo custom est en cache. brand-boot.js (chargé plus tard)
+   appliquera ensuite l'image et le texte. */
+(function(){
+  try {
+    function read(k){
+      var v = localStorage.getItem(k);
+      if (v == null) return null;
+      if (v.length >= 2 && v.charAt(0) === '"' && v.charAt(v.length-1) === '"') {
+        try { return JSON.parse(v); } catch(e){}
+      }
+      return v;
+    }
+    var lu = read('brand_logoUrl');
+    var ln = read('brand_name');
+    var la = read('brand_accent');
+    if (la) {
+      document.documentElement.style.setProperty('--accent', la);
+    }
+    if (lu) {
+      // On masque uniquement le SVG par défaut. brand-boot.js révélera
+      // l'<img> une fois sa src posée (sinon flash icône image cassée).
+      var s = document.createElement('style');
+      s.textContent = '#brand-logo-svg{display:none!important}';
+      document.head.appendChild(s);
+      // Préchargement de l'image pour gagner sur le RTT réseau
+      var pre = document.createElement('link');
+      pre.rel = 'preload';
+      pre.as = 'image';
+      pre.href = lu;
+      document.head.appendChild(pre);
+      window.__brandPreBoot = { logoUrl: lu, name: ln, accent: la };
+      if (ln) document.title = ln;
+    }
+  } catch(e){}
+})();
+</script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-:root{--bg:#0a0b0e;--surface:#111318;--card:#161820;--card-hover:#1c1e28;--border:rgba(255,255,255,.06);--accent:#f5a623;--accent-glow:rgba(245,166,35,.15);--green:#22c97a;--blue:#4a9eff;--red:#e84040;--purple:#9b6bff;--cyan:#06d6a0;--text:#f0f0f4;--muted:#8b8fa3;--radius:18px}
-html,body{min-height:100vh;min-height:100dvh;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden}
+html, body { overflow-x: hidden; }
+:root { --radius: 18px; }
 
 /* Animated gradient background */
 body::before{content:'';position:fixed;inset:0;background:
@@ -139,13 +186,11 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
 .footer-text a{color:var(--accent);text-decoration:none;transition:color .2s}
 .footer-text a:hover{color:#ffc560}
 
-/* Install banner */
+/* Install banner — utilise .btn-primary de components.css */
 #install-banner{display:none;margin-top:20px;background:linear-gradient(135deg,rgba(245,166,35,.08),rgba(34,201,122,.05));border:1px solid rgba(245,166,35,.15);border-radius:var(--radius);padding:18px 20px;text-align:center}
 #install-banner.show{display:block}
 .install-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:6px}
 .install-desc{font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5}
-.install-btn{height:42px;padding:0 28px;border-radius:12px;background:var(--accent);color:#000;font-weight:800;font-size:13px;border:none;cursor:pointer;transition:all .15s;letter-spacing:.5px}
-.install-btn:hover{box-shadow:0 4px 20px rgba(245,166,35,.3);transform:translateY(-1px)}
 .install-btn:active{transform:scale(.96)}
 
 /* Animations */
@@ -162,7 +207,9 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
 </head>
 <body>
 
-<div class="container">
+<a href="#main" class="skip-link">Aller au contenu</a>
+
+<div class="container" id="main">
   <div class="header">
     <div class="logo-icon" id="brand-logo-wrapper">
       <img id="brand-logo-img" alt="" style="display:none;width:100%;height:100%;object-fit:cover;border-radius:50%">
@@ -182,6 +229,8 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
     <div class="header-line"></div>
     <div class="version"><span class="version-dot"></span> v2.0 — Marmite Express POS</div>
   </div>
+
+  <script src="assets/js/brand-boot.js"></script>
 
   <div class="grid">
     <a href="marmite-express-caisse.html" class="app-card caisse">
@@ -273,7 +322,7 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
   <div id="install-banner">
     <div class="install-title">Installer l'application</div>
     <div class="install-desc">Ajoutez La Marmite Express sur votre ecran d'accueil pour un acces instantane</div>
-    <button class="install-btn" id="install-btn" onclick="installPWA()">Installer</button>
+    <button class="btn btn-primary btn-title" id="install-btn" onclick="installPWA()">Installer</button>
   </div>
 
   <!-- Firebase status -->
@@ -331,7 +380,7 @@ try {
       const cats = (data.cats||[]).length;
       document.getElementById('dot-menu').classList.add('on');
       document.getElementById('val-menu').textContent = count+' produits · '+cats+' cat.';
-      // Apply branding (logo, name, accent)
+      // Apply branding (logo, name, accent) + persist en cache pour next visit
       const b = data.branding || {};
       if(b.accent){
         document.documentElement.style.setProperty('--accent', b.accent);
@@ -350,13 +399,16 @@ try {
       const img = document.getElementById('brand-logo-img');
       const svg = document.getElementById('brand-logo-svg');
       if(b.logoUrl && img && svg){
-        img.src = b.logoUrl;
+        // Évite de réassigner si la src est déjà la bonne (brand-boot l'a déjà fait)
+        if(img.src !== b.logoUrl) img.src = b.logoUrl;
         img.style.display = 'block';
         svg.style.display = 'none';
       } else if(img && svg){
         img.style.display = 'none';
         svg.style.display = 'block';
       }
+      // Persiste en cache pour la prochaine visite (élimine le FOUC)
+      window.BrandCache?.save(b);
     } else {
       document.getElementById('dot-menu').classList.add('off');
       document.getElementById('val-menu').textContent = 'Non publie';
