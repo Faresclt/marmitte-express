@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v11-select-checkbox';
+const CACHE_NAME = 'marmite-v13-fix-pin-logo-fouc';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',
@@ -10,6 +10,11 @@ const ASSETS = [
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
+  './assets/css/design-system.css',
+  './assets/css/components.css',
+  './assets/css/caisse.css',
+  './assets/js/brand-boot.js',
+  './assets/js/firebase-sync.js',
   'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap'
 ];
 
@@ -40,7 +45,7 @@ self.addEventListener('fetch', event => {
      event.request.url.includes('generativelanguage.googleapis.com')) {
     return;
   }
-  
+
   event.respondWith(
     fetch(event.request)
       .then(response => {

@@ -21,6 +21,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/design-system.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<style id="brand-preboot-style">
+/* SVG par défaut caché par défaut. Si pas de logo en cache, le pre-boot
+   ci-dessous le révélera. Sinon brand-boot.js révélera l'<img>.
+   Cela élimine TOUT flash de logo au chargement, même au premier visite. */
+#brand-logo-svg { display: none; }
+.no-cached-brand-logo #brand-logo-svg { display: block; }
+</style>
 <script>
 /* Brand pre-boot — exécuté AVANT le parse du body pour éliminer
    le flash du logo par défaut au chargement (FOUC).
@@ -44,12 +51,8 @@
       document.documentElement.style.setProperty('--accent', la);
     }
     if (lu) {
-      // On masque uniquement le SVG par défaut. brand-boot.js révélera
-      // l'<img> une fois sa src posée (sinon flash icône image cassée).
-      var s = document.createElement('style');
-      s.textContent = '#brand-logo-svg{display:none!important}';
-      document.head.appendChild(s);
-      // Préchargement de l'image pour gagner sur le RTT réseau
+      // Logo custom en cache → on précharge l'image. Le SVG reste hidden
+      // (déjà fait par #brand-preboot-style ci-dessus).
       var pre = document.createElement('link');
       pre.rel = 'preload';
       pre.as = 'image';
@@ -57,8 +60,14 @@
       document.head.appendChild(pre);
       window.__brandPreBoot = { logoUrl: lu, name: ln, accent: la };
       if (ln) document.title = ln;
+    } else {
+      // Pas de cache → on révèle le SVG par défaut (sinon rien ne s'affiche)
+      document.documentElement.classList.add('no-cached-brand-logo');
     }
-  } catch(e){}
+  } catch(e){
+    // En cas d'erreur localStorage, fallback sur le SVG par défaut
+    document.documentElement.classList.add('no-cached-brand-logo');
+  }
 })();
 </script>
 <style>
