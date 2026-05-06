@@ -131,11 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
 <link rel="stylesheet" href="./assets/css/design-system.css">
 <link rel="stylesheet" href="./assets/css/components.css">
 <link rel="stylesheet" href="./assets/css/caisse.css">
-<style id="brand-preboot-style">
-/* PIN-logo : caché par défaut. Le pre-boot ci-dessous décide quoi afficher. */
-#pin-logo .pin-logo-default { display: none; }
-.no-cached-brand-logo #pin-logo .pin-logo-default { display: flex; }
-</style>
 <script>
 /* Pre-boot caisse : si un logo custom est en cache, on précharge l'image
    et on l'injecte dans #pin-logo dès qu'il est parsé. Sinon, on révèle
@@ -190,23 +185,28 @@ document.addEventListener('DOMContentLoaded', () => {
 <!-- ═══════════════ PIN LOCK SCREEN ═══════════════ -->
 <div id="pin-screen" style="position:fixed;inset:0;background:#0c0d10;z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:0">
   <div style="text-align:center;margin-bottom:28px">
-    <div id="pin-logo" style="width:64px;height:64px;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;overflow:hidden">
-      <span class="pin-logo-default" style="width:100%;height:100%;background:linear-gradient(135deg,#f5a623,#e8941a);border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:32px">🍲</span>
-    </div>
+    <div id="pin-logo" style="width:64px;height:64px;border-radius:16px;margin:0 auto 14px;overflow:hidden"></div>
     <script>
-    /* Application immédiate du logo custom dès que #pin-logo est parsé,
-       avant le first paint. Évite le flash de l'emoji par défaut. */
+    /* Décide CE qu'on affiche dans #pin-logo AVANT le first paint :
+       - Logo custom si en cache (lu par pre-boot dans <head>)
+       - Sinon, emoji par défaut (le pre-boot a déjà sauvé l'emoji
+         dans __brandPreBoot.emoji, ou fallback 🍲). */
     (function(){
-      var pre = window.__brandPreBoot;
-      if (!pre || !pre.logoUrl) return;
       var el = document.getElementById('pin-logo');
       if (!el) return;
-      var img = document.createElement('img');
-      img.src = pre.logoUrl;
-      img.alt = pre.name || '';
-      img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:16px;display:block';
-      el.innerHTML = '';
-      el.appendChild(img);
+      var pre = window.__brandPreBoot || {};
+      if (pre.logoUrl) {
+        var img = document.createElement('img');
+        img.src = pre.logoUrl;
+        img.alt = pre.name || '';
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:16px;display:block';
+        el.appendChild(img);
+      } else {
+        var span = document.createElement('span');
+        span.style.cssText = 'width:100%;height:100%;background:linear-gradient(135deg,#f5a623,#e8941a);border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:32px';
+        span.textContent = pre.emoji || '🍲';
+        el.appendChild(span);
+      }
     })();
     </script>
     <div style="font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:2px;color:#f0f0f0">La <span style="color:#f5a623">Marmite</span> Express</div>

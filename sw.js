@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v14-pin-logo-serveur';
+const CACHE_NAME = 'marmite-v15-pin-logo-empty-div';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',

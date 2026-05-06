@@ -16,11 +16,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/design-system.css">
 <link rel="stylesheet" href="assets/css/components.css">
-<style id="brand-preboot-style">
-/* PIN serveur : si un logo restaurant est en cache, on cache l'emoji
-   par défaut (🍽️). Le script post-élément injectera l'image. */
-.has-cached-brand-logo #pin-logo-default { display: none; }
-</style>
 <script>
 /* Brand pre-boot — voir index.html pour la justification.
    Variante serveur : cibles #resto-logo (img) + #pin-logo (PIN screen). */
@@ -681,23 +676,23 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 
 <!-- PIN LOCK SCREEN -->
 <div id="pin-screen">
-  <div class="pin-logo" id="pin-logo">
-    <span id="pin-logo-default">🍽️</span>
-  </div>
+  <div class="pin-logo" id="pin-logo"></div>
   <script>
-  /* Injection du logo resto cache dès que #pin-logo est parsé,
-     avant le first paint. */
+  /* Décide ce qu'on affiche dans #pin-logo AVANT le first paint :
+     - Logo custom si en cache, sinon emoji 🍽️ par défaut. */
   (function(){
-    var pre = window.__brandPreBoot;
-    if (!pre || !pre.logoUrl) return;
     var el = document.getElementById('pin-logo');
     if (!el) return;
-    var img = document.createElement('img');
-    img.src = pre.logoUrl;
-    img.alt = pre.name || '';
-    img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:14px;display:block;margin:0 auto';
-    el.innerHTML = '';
-    el.appendChild(img);
+    var pre = window.__brandPreBoot || {};
+    if (pre.logoUrl) {
+      var img = document.createElement('img');
+      img.src = pre.logoUrl;
+      img.alt = pre.name || '';
+      img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:14px;display:block;margin:0 auto';
+      el.appendChild(img);
+    } else {
+      el.textContent = '🍽️';
+    }
   })();
   </script>
   <div class="pin-title">Espace <span>Serveur</span></div>
