@@ -16,6 +16,29 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/design-system.css">
 <link rel="stylesheet" href="assets/css/components.css">
+<script>
+/* Brand pre-boot — voir index.html pour la justification.
+   Variante serveur : cibles #resto-logo (img). */
+(function(){
+  try {
+    function read(k){
+      var v = localStorage.getItem(k);
+      if (v == null) return null;
+      if (v.length >= 2 && v.charAt(0) === '"' && v.charAt(v.length-1) === '"') {
+        try { return JSON.parse(v); } catch(e){}
+      }
+      return v;
+    }
+    var lu = read('brand_logoUrl');
+    var ln = read('brand_name');
+    var la = read('brand_accent');
+    if (la) document.documentElement.style.setProperty('--accent', la);
+    if (lu || ln) {
+      window.__brandPreBoot = { logoUrl: lu, name: ln, accent: la };
+    }
+  } catch(e){}
+})();
+</script>
 
 <script type="module">
 import { db, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp, escHtml } from './assets/js/firebase-sync.js';

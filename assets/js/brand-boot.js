@@ -89,10 +89,14 @@
     }
   }
 
+  // Exécution synchrone immédiate. Le script est inclus APRÈS les éléments
+  // de logo dans le body, donc ils sont déjà dans le DOM. Le pre-boot inline
+  // dans <head> a déjà fait le minimum (couleur d'accent + style hide SVG) ;
+  // ici on complète avec img.src + texte du nom.
+  applyBrandToDom();
+  // Filet de sécurité : si pour une raison X le DOM n'est pas prêt, on retente.
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', applyBrandToDom);
-  } else {
-    applyBrandToDom();
   }
 
   // ── API publique pour persister depuis les listeners Firebase ──
