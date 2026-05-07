@@ -31,7 +31,14 @@
   white-space: nowrap;
   user-select: none;
   -webkit-user-select: none;
+  /* Ripple ready */
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
 }
+
+/* Tous les .btn ont automatiquement le ripple */
+.btn { -webkit-tap-highlight-color: transparent; }
 
 .btn:active { transform: scale(.97); }
 .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
@@ -353,6 +360,56 @@
   0%, 100% { opacity: 1; }
   50%      { opacity: .55; }
 }
+
+/* ============================================================
+   Tap ripple — feedback tactile sur cards et boutons
+   Activé via tap-feedback.js qui ajoute un <span.ripple-wave>
+   au point de contact. La couleur s'adapte via --ripple-color.
+   ============================================================ */
+
+/* Tous les éléments interactifs reçoivent automatiquement le ripple
+   via tap-feedback.js. Ce sélecteur garantit qu'ils peuvent contenir
+   la <span.ripple-wave> sans débordement. */
+.ripple,
+.btn,
+.app-card,
+.card-interactive,
+.chip,
+.add-btn,
+.mtab,
+.pin-key,
+.tbtn,
+.hbtn {
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  isolation: isolate;
+}
+
+.ripple-wave {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: var(--ripple-color, rgba(245, 166, 35, 0.35));
+  transform: scale(0);
+  opacity: 0.8;
+  animation: rippleExpand 600ms var(--ease-standard);
+  z-index: 0;
+}
+
+@keyframes rippleExpand {
+  to {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ripple-wave { display: none; }
+}
+
+/* Conserve les enfants au-dessus de la wave */
+.ripple > * { position: relative; z-index: 1; }
 
 /* ============================================================
    Container
