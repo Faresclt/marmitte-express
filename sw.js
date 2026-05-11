@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v17-tap-feedback-ripple';
+const CACHE_NAME = 'marmite-v18-pwa-safearea-darkforce';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',

@@ -79,23 +79,10 @@
   --tap-min: 44px;
 }
 
-/* ── Mode clair (opt-in via [data-theme="light"] ou prefers) ── */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg:            #f8f9fb;
-    --surface:       #ffffff;
-    --card:          #f1f2f6;
-    --card-hover:    #e8eaf0;
-    --border:        rgba(0, 0, 0, .08);
-    --border-strong: rgba(0, 0, 0, .14);
-    --text:          #15161c;
-    --text-dim:      #2c2e38;
-    --muted:         #5a5e72;
-    --muted-2:       #8b8fa3;
-    --accent-glow:   rgba(245, 166, 35, .25);
-    --accent-soft:   rgba(245, 166, 35, .12);
-  }
-}
+/* ── Mode clair (opt-in uniquement via [data-theme="light"]) ──
+   On NE détecte PLUS prefers-color-scheme automatiquement, parce que
+   l'app est conçue pour un dark theme cohérent (PIN screens, cuisine,
+   client en service de soir). Mode clair = choix explicite seulement. */
 
 [data-theme="light"] {
   --bg:            #f8f9fb;
@@ -124,6 +111,7 @@
 html, body {
   min-height: 100vh;
   min-height: 100dvh;
+  color-scheme: dark;
 }
 
 body {
@@ -234,6 +222,43 @@ select:focus-visible {
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 .safe-left   { padding-left:   env(safe-area-inset-left); }
 .safe-right  { padding-right:  env(safe-area-inset-right); }
+
+/* ============================================================
+   PWA standalone — pousse les headers sous le notch / Dynamic Island
+   En mode standalone iOS, le contenu va jusqu'à y=0, sous la status bar.
+   On ajoute le safe-area-inset-top à tous les headers fixés ou non.
+   ============================================================ */
+
+@media (display-mode: standalone) {
+  /* Headers communs aux pages */
+  #app-header,
+  #pos-header,
+  .hdr,
+  .header,
+  #pin-screen {
+    padding-top: max(env(safe-area-inset-top), 12px) !important;
+  }
+  /* index.html : le .container a déjà du padding mais pas le safe-area */
+  .container {
+    padding-top: calc(env(safe-area-inset-top) + var(--gap-lg, 24px)) !important;
+  }
+  /* PIN screens centrés verticalement : on pousse aussi pour que le
+     logo ne soit pas sous le notch */
+  #pin-screen {
+    padding-top: max(env(safe-area-inset-top), 12px) !important;
+    padding-bottom: max(env(safe-area-inset-bottom), 12px) !important;
+  }
+}
+
+/* iOS Safari sans standalone : si viewport-fit=cover, on a besoin
+   de safe-area dans certains contextes (orientation paysage avec notch).
+   On applique seulement aux headers fixes sticky/fixed pour ne pas
+   casser le layout en navigateur normal. */
+#app-header[style*="position:fixed"],
+#app-header.fixed,
+.hdr.fixed {
+  padding-top: max(env(safe-area-inset-top), 12px);
+}
 
 /* ============================================================
    Sync banner (état réseau) — utilisé dans toutes les pages
