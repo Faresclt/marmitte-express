@@ -15,7 +15,7 @@
 <!-- Firebase SDK (via module centralisé) -->
 <script type="module">
 import {
-  db, storage, doc, setDoc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, getDocs, serverTimestamp,
+  db, storage, doc, setDoc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, getDoc, getDocs, serverTimestamp,
   storageRef, uploadString, getDownloadURL, deleteObject
 } from './assets/js/firebase-sync.js';
 
@@ -27,6 +27,11 @@ window.FB = {
   db, storage,
   // Listen to a document in real-time
   listen: (path, id, cb) => onSnapshot(doc(db, path, id), snap => cb(snap.exists() ? snap.data() : null)),
+  // One-shot fetch (force server, bypass cache)
+  getOnce: async (path, id) => {
+    const snap = await getDoc(doc(db, path, id));
+    return snap.exists() ? snap.data() : null;
+  },
   // Listen to entire collection
   listenCol: (path, cb) => onSnapshot(collection(db, path), snap => {
     const docs = {}; snap.forEach(d => docs[d.id] = {...d.data(), _id: d.id}); cb(docs);
@@ -625,6 +630,7 @@ document.addEventListener('DOMContentLoaded', () => {
     <div id="salle-mode-tabs" style="display:flex;gap:6px;margin-left:16px">
       <button id="stab-service" class="hbtn" style="background:rgba(34,201,122,.15);border:1px solid rgba(34,201,122,.3);color:var(--green)" onclick="setSalleMode('service')">🍽️ Service</button>
       <button id="stab-edit" class="hbtn hbtn-admin" onclick="setSalleMode('edit')">✏️ Éditer le plan</button>
+      <button id="stab-resync" class="hbtn" style="background:rgba(74,158,255,.15);border:1px solid rgba(74,158,255,.3);color:#4a9eff" onclick="resyncSalleFromFirebase()" title="Forcer la lecture du plan depuis Firebase">🔄 Sync</button>
     </div>
     <!-- Edit toolbar (hidden in service mode) -->
     <div id="salle-toolbar" style="display:none;gap:8px;margin-left:8px;align-items:center">
@@ -2601,6 +2607,33 @@ function initSalle(){
   drawGrid();
   updateDetailPanel(null);
 }
+
+// Force fetch du plan de salle depuis Firebase (bypass listener et cache local)
+// Bouton "🔄 Sync" dans le header du Salle screen
+async function resyncSalleFromFirebase(){
+  if(!window.FB || !window.FB.getOnce){ toast('Firebase non connecté','r'); return; }
+  toast('🔄 Lecture Firebase…','o');
+  try {
+    const data = await window.FB.getOnce('config', 'menu');
+    if(!data){
+      toast('Aucune carte publiée dans Firebase','r');
+      return;
+    }
+    if(!data.salleLayout || !data.salleLayout.length){
+      toast('⚠ Firebase n\'a pas de plan de salle ! Tu dois en créer un et Publier.','r');
+      return;
+    }
+    salleElements = data.salleLayout;
+    LS.set('salleLayout', salleElements);
+    renderSalle();
+    drawGrid();
+    toast('✓ '+salleElements.length+' éléments depuis Firebase');
+  } catch(e){
+    console.error('[Salle] Resync failed:', e);
+    toast('Erreur réseau','r');
+  }
+}
+window.resyncSalleFromFirebase = resyncSalleFromFirebase;
 
 function setSalleMode(m){
   salleMode=m;
