@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v24-aggressive-html';
+const CACHE_NAME = 'marmite-v25-serveur-pin-bypass';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
