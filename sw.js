@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v20-fix-salle-sync';
+const CACHE_NAME = 'marmite-v21-salle-safety-net';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',

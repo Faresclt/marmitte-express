@@ -2585,6 +2585,16 @@ const ELEMENT_TYPES = {
 };
 
 function initSalle(){
+  // Safety net : re-sync depuis localStorage (qui a été mis à jour par le
+  // listener Firebase config/menu) à chaque ouverture du Salle screen.
+  // Élimine tout risque de désync entre le module Firebase (scope module)
+  // et le script classic (où salleElements est déclaré).
+  try {
+    var fresh = LS.get('salleLayout', null);
+    if (fresh && Array.isArray(fresh) && fresh.length > 0) {
+      salleElements = fresh;
+    }
+  } catch(e){}
   salleMode='service';
   applySalleMode();
   renderSalle();
