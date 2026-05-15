@@ -36,8 +36,10 @@ window.FB = {
   listenCol: (path, cb) => onSnapshot(collection(db, path), snap => {
     const docs = {}; snap.forEach(d => docs[d.id] = {...d.data(), _id: d.id}); cb(docs);
   }),
-  // Write
+  // Write (overwrite full doc)
   set: (path, id, data) => setDoc(doc(db, path, id), data),
+  // Write with merge (preserve other fields)
+  setMerge: (path, id, data) => setDoc(doc(db, path, id), data, { merge: true }),
   // Add with auto-id
   add: (path, data) => addDoc(collection(db, path), data),
   // Update
@@ -631,6 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <button id="stab-service" class="hbtn" style="background:rgba(34,201,122,.15);border:1px solid rgba(34,201,122,.3);color:var(--green)" onclick="setSalleMode('service')">🍽️ Service</button>
       <button id="stab-edit" class="hbtn hbtn-admin" onclick="setSalleMode('edit')">✏️ Éditer le plan</button>
       <button id="stab-resync" class="hbtn" style="background:rgba(74,158,255,.15);border:1px solid rgba(74,158,255,.3);color:#4a9eff" onclick="resyncSalleFromFirebase()" title="Forcer la lecture du plan depuis Firebase">🔄 Sync</button>
+      <button id="stab-recover" class="hbtn" style="background:rgba(155,107,255,.12);border:1px solid rgba(155,107,255,.3);color:#9b6bff" onclick="showSalleRecovery()" title="Chercher d'anciens plans dans les backups Firebase">🔍 Récupérer</button>
     </div>
     <!-- Edit toolbar (hidden in service mode) -->
     <div id="salle-toolbar" style="display:none;gap:8px;margin-left:8px;align-items:center">
@@ -2607,6 +2610,91 @@ function initSalle(){
   drawGrid();
   updateDetailPanel(null);
 }
+
+// Récupération d'un ancien plan de salle depuis les backups Firebase
+async function showSalleRecovery(){
+  if(!window.FB || !window.FB.db){ toast('Firebase non connecté','r'); return; }
+  toast('🔍 Scan des backups…','o');
+  try {
+    const snap = await getDocs(collection(window.FB.db, 'config'));
+    const candidates = [];
+    snap.forEach(d => {
+      const data = d.data();
+      if(data && data.salleLayout && Array.isArray(data.salleLayout) && data.salleLayout.length > 0){
+        candidates.push({
+          id: d.id,
+          count: data.salleLayout.length,
+          layout: data.salleLayout,
+          date: data.backupDate || data.publishedAt || null,
+          label: data.backupLabel || ''
+        });
+      }
+    });
+    if(!candidates.length){
+      toast('Aucun plan trouvé dans Firebase','r');
+      return;
+    }
+    // Trier par nombre de tables décroissant (le plan avec le plus de tables = probablement le bon)
+    candidates.sort((a, b) => b.count - a.count);
+
+    let html = '<div style="font-family:\'Bebas Neue\',sans-serif;font-size:20px;letter-spacing:1px;margin-bottom:12px">🔍 Plans trouvés</div>';
+    html += '<div style="font-size:13px;color:var(--muted);margin-bottom:16px">Choisis celui à restaurer (clique pour appliquer).</div>';
+    candidates.forEach((c, i) => {
+      const dateStr = c.label || (c.date ? new Date(c.date).toLocaleString('fr-FR') : '');
+      const tables = c.layout.filter(e => e.type==='table-round' || e.type==='table-rect').length;
+      const bars = c.layout.filter(e => e.type==='bar').length;
+      html += `<button onclick="restoreSalleFromBackup(${i})" style="width:100%;text-align:left;padding:14px;margin-bottom:8px;border-radius:10px;background:var(--card);border:1px solid var(--border);color:var(--text);cursor:pointer;display:flex;align-items:center;gap:10px">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:var(--accent);min-width:48px;text-align:center">${c.count}</div>
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:700">${c.id}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${tables} table${tables>1?'s':''} · ${bars} bar${bars>1?'s':''} · ${c.layout.length} éléments</div>
+          ${dateStr ? `<div style="font-size:10px;color:var(--muted-2);margin-top:2px">${dateStr}</div>` : ''}
+        </div>
+        <div style="font-size:14px;color:var(--purple)">→</div>
+      </button>`;
+    });
+    // Stockage des candidats pour restoreSalleFromBackup
+    window._salleRecoveryCandidates = candidates;
+
+    // Modal simple
+    let modal = document.getElementById('salle-recovery-modal');
+    if(!modal){
+      modal = document.createElement('div');
+      modal.id = 'salle-recovery-modal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
+      modal.onclick = (e) => { if(e.target === modal) modal.remove(); };
+      document.body.appendChild(modal);
+    }
+    modal.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;max-width:480px;width:100%;max-height:80vh;overflow-y:auto">
+      ${html}
+      <button onclick="document.getElementById('salle-recovery-modal').remove()" style="width:100%;margin-top:8px;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text);font-weight:700;cursor:pointer">Fermer</button>
+    </div>`;
+  } catch(e){
+    console.error('[Recovery] Failed:', e);
+    toast('Erreur de scan : '+e.message,'r');
+  }
+}
+window.showSalleRecovery = showSalleRecovery;
+
+function restoreSalleFromBackup(idx){
+  const cand = (window._salleRecoveryCandidates || [])[idx];
+  if(!cand){ toast('Sélection invalide','r'); return; }
+  if(!confirm(`Restaurer le plan "${cand.id}" avec ${cand.count} éléments ?\n\nIl sera AUSSI publié sur Firebase pour le rendre visible à tous (serveur, cuisine).`)) return;
+  // Applique localement
+  salleElements = cand.layout;
+  LS.set('salleLayout', salleElements);
+  renderSalle();
+  drawGrid();
+  // Publie sur Firebase via merge (préserve cats/products/branding existants)
+  window.FB.setMerge('config', 'menu', { salleLayout: cand.layout })
+    .then(() => toast('✓ Plan restauré et publié ('+cand.count+' éléments)'))
+    .catch(err => {
+      console.error('[Recovery] Publish failed:', err);
+      toast('✓ Plan restauré localement, échec publish Firebase','r');
+    });
+  document.getElementById('salle-recovery-modal')?.remove();
+}
+window.restoreSalleFromBackup = restoreSalleFromBackup;
 
 // Force fetch du plan de salle depuis Firebase (bypass listener et cache local)
 // Bouton "🔄 Sync" dans le header du Salle screen

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v22-resync-button';
+const CACHE_NAME = 'marmite-v23-salle-recovery';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',
