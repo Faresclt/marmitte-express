@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v19-pwa-safearea-theme-auto';
+const CACHE_NAME = 'marmite-v20-fix-salle-sync';
 const ASSETS = [
   './index.html',
   './marmite-express-caisse.html',

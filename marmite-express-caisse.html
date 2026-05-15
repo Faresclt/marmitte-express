@@ -93,19 +93,22 @@ window.initFirebaseListeners = function(){
       }
     }
     // Sync salle layout : Firebase = source de vérité.
-    // Restore si Firebase a un layout et qu'il diffère du local
-    // (avant : refusait restore si local >8 éléments → bloquait sync entre serveur et caisse)
+    // IMPORTANT : on accède aux globals via window.* car ce script est en
+    // type="module" et ne peut PAS voir les `let` du script classique.
+    // (Avant : les bare-name salleElements/renderSalle étaient inaccessibles
+    //  et la sync était silencieusement skippée → caisse bloquée sur DEFAULT_SALLE
+    //  alors que serveur voyait le vrai plan de salle Firebase.)
     if(data && data.salleLayout && data.salleLayout.length > 0){
       const localSalle = LS.get('salleLayout', null);
       const localJson = JSON.stringify(localSalle || []);
       const remoteJson = JSON.stringify(data.salleLayout);
       if(localJson !== remoteJson){
-        if(typeof salleElements !== 'undefined'){
-          salleElements = data.salleLayout;
-          LS.set('salleLayout', salleElements);
-          console.log('[Salle] Synced '+salleElements.length+' elements from Firebase (diff detected)');
-          if(typeof renderSalle === 'function') renderSalle();
+        if(typeof window.salleElements !== 'undefined'){
+          window.salleElements = data.salleLayout;
         }
+        LS.set('salleLayout', data.salleLayout);
+        console.log('[Salle] Synced '+data.salleLayout.length+' elements from Firebase (diff detected)');
+        if(typeof window.renderSalle === 'function') window.renderSalle();
       }
     }
   });
@@ -1157,7 +1160,7 @@ let products = LS.get('products', DEFAULT_PRODUCTS);
     if (changed) LS.set('products', products);
   }
 })();
-let branding = LS.get('branding', {name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'});
+var branding = LS.get('branding', {name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'});
 let settings = LS.get('settings', {showImg:true,tableMode:false,showSub:true,currency:'€',tva:5.5,cuissons:'Bleu,Saignant,À point,Bien cuit',garnitures:'Frites maison,Salade,Pommes de terre sautées,Pâtes'});
 
 function saveAll(){ LS.set('cats',cats); LS.set('products',products); LS.set('branding',branding); LS.set('settings',settings); }
@@ -2565,7 +2568,7 @@ const DEFAULT_SALLE = [
   {id:'d1', type:'plant',       number:'',    seats:0, x:540, y:420, size:40},
 ];
 
-let salleElements = LS.get('salleLayout', DEFAULT_SALLE);
+var salleElements = LS.get('salleLayout', DEFAULT_SALLE);
 let tableData = LS.get('tableData', {}); // {tableId: {persons, ticket}}
 let currentTableId = null;
 let salleMode = 'service'; // 'service' | 'edit'
