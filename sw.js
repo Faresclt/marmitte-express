@@ -1,14 +1,5 @@
-const CACHE_NAME = 'marmite-v23-salle-recovery';
+const CACHE_NAME = 'marmite-v24-aggressive-html';
 const ASSETS = [
-  './index.html',
-  './marmite-express-caisse.html',
-  './client.html',
-  './serveur.html',
-  './cuisine.html',
-  './qrcodes.html',
-  './setup-images.html',
-  './signup.html',
-  './404.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
@@ -23,7 +14,7 @@ const ASSETS = [
   'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap'
 ];
 
-// Install — cache essential files
+// Install — cache static assets only (NOT HTML pages, on les veut toujours frais)
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -32,30 +23,62 @@ self.addEventListener('install', event => {
   );
 });
 
-// Activate — clean old caches
+// Activate — clean old caches + take over all open tabs immédiatement
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+      .then(() => {
+        // Notifie toutes les pages ouvertes qu'un nouveau SW est actif
+        // → elles vont se reload pour avoir le HTML frais
+        return self.clients.matchAll({ type: 'window' }).then(clients => {
+          clients.forEach(c => c.postMessage({ type: 'SW_UPDATED', cache: CACHE_NAME }));
+        });
+      })
   );
 });
 
-// Fetch — network first, fallback to cache
+// Fetch strategy — différent selon le type de ressource
 self.addEventListener('fetch', event => {
-  // Skip Firebase, Gemini AI, and external API requests
-  if(event.request.url.includes('firestore') ||
-     event.request.url.includes('firebase') ||
-     event.request.url.includes('gstatic.com/firebasejs') ||
-     event.request.url.includes('generativelanguage.googleapis.com')) {
+  const url = event.request.url;
+
+  // Skip Firebase / fonts dynamiques / APIs externes
+  if (url.includes('firestore') ||
+      url.includes('firebase') ||
+      url.includes('gstatic.com/firebasejs') ||
+      url.includes('generativelanguage.googleapis.com') ||
+      url.includes('googleapis.com/identitytoolkit') ||
+      url.includes('pollinations.ai') ||
+      url.includes('recraft.ai')) {
     return;
   }
 
+  // HTML pages : network-only (avec cache fallback uniquement si offline)
+  // → Garantit que l'utilisateur a toujours le HTML le plus récent
+  const isHTML = event.request.mode === 'navigate' ||
+                 (event.request.headers.get('accept') || '').includes('text/html');
+  if (isHTML) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          // Pas de cache pour le HTML — on veut toujours frais
+          return response;
+        })
+        .catch(() => {
+          // Offline → on tente le cache en dernier recours
+          return caches.match(event.request)
+            .then(cached => cached || caches.match('./index.html'));
+        })
+    );
+    return;
+  }
+
+  // Assets statiques (CSS/JS/images) : network-first avec cache fallback
   event.respondWith(
     fetch(event.request)
       .then(response => {
-        // Cache successful responses
-        if(response.ok){
+        if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
         }

@@ -634,6 +634,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <button id="stab-edit" class="hbtn hbtn-admin" onclick="setSalleMode('edit')">✏️ Éditer le plan</button>
       <button id="stab-resync" class="hbtn" style="background:rgba(74,158,255,.15);border:1px solid rgba(74,158,255,.3);color:#4a9eff" onclick="resyncSalleFromFirebase()" title="Forcer la lecture du plan depuis Firebase">🔄 Sync</button>
       <button id="stab-recover" class="hbtn" style="background:rgba(155,107,255,.12);border:1px solid rgba(155,107,255,.3);color:#9b6bff" onclick="showSalleRecovery()" title="Chercher d'anciens plans dans les backups Firebase">🔍 Récupérer</button>
+      <button id="stab-emergency" class="hbtn" style="background:rgba(232,64,64,.12);border:1px solid rgba(232,64,64,.3);color:#e84040" onclick="restoreEmergency19Tables()" title="Restaurer un plan d'urgence de 19 tables">🆘 19 tables</button>
     </div>
     <!-- Edit toolbar (hidden in service mode) -->
     <div id="salle-toolbar" style="display:none;gap:8px;margin-left:8px;align-items:center">
@@ -2695,6 +2696,61 @@ function restoreSalleFromBackup(idx){
   document.getElementById('salle-recovery-modal')?.remove();
 }
 window.restoreSalleFromBackup = restoreSalleFromBackup;
+
+// Plan d'urgence : 19 tables reconstitué à partir de la screenshot serveur
+// du restaurant. Permet à l'utilisateur de récupérer un layout proche sans
+// avoir à le redessiner à la main.
+function restoreEmergency19Tables(){
+  if(!confirm('Restaurer le plan d\'urgence de 19 tables ?\n\nCela remplacera le plan actuel et publiera sur Firebase pour que le serveur et la cuisine le voient.\n\nTu pourras ensuite affiner les positions dans Éditer le plan.')) return;
+  // Layout inspiré de la screenshot serveur (tables 1-19 + 2 bars)
+  // Coordonnées sur une grille de 720×900 pour bien tenir sur mobile
+  const RESTAURANT_19_TABLES = [
+    // Rangée haute
+    {id:'t17', type:'table-rect',  number:'17', seats:4, x: 60,  y: 80,  size:90},
+    {id:'t13', type:'table-round', number:'13', seats:6, x:280,  y: 60,  size:130},
+    {id:'t6',  type:'table-rect',  number:'6',  seats:4, x:520,  y: 80,  size:90},
+    // Rangée 2
+    {id:'t16', type:'table-rect',  number:'16', seats:2, x: 60,  y:220,  size:75},
+    {id:'t12', type:'table-rect',  number:'12', seats:2, x:230,  y:220,  size:75},
+    {id:'t9',  type:'table-rect',  number:'9',  seats:2, x:400,  y:220,  size:75},
+    {id:'t5',  type:'table-rect',  number:'5',  seats:4, x:560,  y:220,  size:90},
+    // Rangée 3
+    {id:'t15', type:'table-rect',  number:'15', seats:2, x: 60,  y:330,  size:75},
+    {id:'t11', type:'table-rect',  number:'11', seats:2, x:230,  y:330,  size:75},
+    {id:'t8',  type:'table-rect',  number:'8',  seats:2, x:400,  y:330,  size:75},
+    {id:'t4',  type:'table-rect',  number:'4',  seats:2, x:580,  y:330,  size:75},
+    // Rangée 3.5
+    {id:'t3',  type:'table-rect',  number:'3',  seats:2, x:580,  y:420,  size:75},
+    // Rangée 4
+    {id:'t14', type:'table-rect',  number:'14', seats:2, x: 60,  y:440,  size:75},
+    {id:'t10', type:'table-rect',  number:'10', seats:2, x:230,  y:440,  size:75},
+    {id:'t7',  type:'table-rect',  number:'7',  seats:2, x:400,  y:440,  size:75},
+    {id:'t2',  type:'table-rect',  number:'2',  seats:2, x:580,  y:530,  size:75},
+    // Rangée 4.5
+    {id:'t1',  type:'table-rect',  number:'1',  seats:2, x:580,  y:620,  size:75},
+    // Rangée basse + bars
+    {id:'t18', type:'table-rect',  number:'18', seats:4, x: 60,  y:580,  size:90},
+    {id:'t19', type:'table-rect',  number:'19', seats:2, x: 60,  y:700,  size:75},
+    // Bars
+    {id:'b1',  type:'bar', number:'BAR', seats:0, x:230, y:600, size:280, w:280, h:55},
+    {id:'b2',  type:'bar', number:'BAR', seats:0, x:280, y:680, size:60,  w:60,  h:130}
+  ];
+  salleElements = RESTAURANT_19_TABLES;
+  LS.set('salleLayout', salleElements);
+  renderSalle();
+  drawGrid();
+  toast('🆘 Plan de 19 tables restauré localement','o');
+  // Publie sur Firebase (merge, pour préserver products/branding/etc)
+  if(window.FB && window.FB.setMerge){
+    window.FB.setMerge('config', 'menu', { salleLayout: RESTAURANT_19_TABLES })
+      .then(() => toast('✓ 19 tables publiées sur Firebase'))
+      .catch(err => {
+        console.error('[Emergency] Publish failed:', err);
+        toast('Restauré localement, échec publish Firebase','r');
+      });
+  }
+}
+window.restoreEmergency19Tables = restoreEmergency19Tables;
 
 // Force fetch du plan de salle depuis Firebase (bypass listener et cache local)
 // Bouton "🔄 Sync" dans le header du Salle screen

@@ -124,4 +124,19 @@
       } catch (e) {}
     }
   };
+
+  // ── Reload auto si le SW signale une nouvelle version ──
+  // Évite que l'utilisateur reste bloqué sur du code obsolète après une MAJ.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'SW_UPDATED') {
+        // Marqueur pour éviter une boucle si l'update n'a pas pris
+        var last = sessionStorage.getItem('sw_reloaded');
+        if (last !== event.data.cache) {
+          sessionStorage.setItem('sw_reloaded', event.data.cache);
+          window.location.reload();
+        }
+      }
+    });
+  }
 })();
