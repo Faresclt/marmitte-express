@@ -69,42 +69,46 @@ window.initFirebaseListeners = function(){
     showFirebaseStatus('connected');
   });
 
-  // Listen to incoming orders (from waiter/client apps)
+  // Listen to incoming orders (logique d'origine restaurée + polling fallback)
   window.FB.listenCol('orders', (data) => {
     window.fbOrders = data;
+    window.__lastOrdersPoll = Date.now();
     processPendingOrders(data);
   });
 
-  // Polling de secours : utilise getDocsFromServer pour BYPASS le cache
-  // IndexedDB. Sinon getDocs() peut retourner des données stale et rater
-  // les nouveaux orders. Critical sur iOS Safari où le cache local peut
-  // être désynchronisé.
+  // Polling de secours toutes les 3s : si onSnapshot meurt (iOS Safari)
+  // on continue de récupérer les commandes via getDocs (cache + serveur)
   async function pollOrdersFallback(){
     try {
-      const snap = await getDocsFromServer(collection(db, 'orders'));
+      const snap = await getDocs(collection(db, 'orders'));
       const data = {};
       snap.forEach(d => { data[d.id] = {...d.data(), _id: d.id}; });
       window.fbOrders = data;
       window.__lastOrdersPoll = Date.now();
+      window.__lastOrdersPollError = null;
       processPendingOrders(data);
     } catch(e) {
       console.warn('[orders poll] error:', e?.message || e);
       window.__lastOrdersPollError = e?.message || String(e);
     }
   }
-  setInterval(pollOrdersFallback, 4000);
-  // Premier poll dans 1 seconde (sans attendre les 4s)
-  setTimeout(pollOrdersFallback, 1000);
+  setInterval(pollOrdersFallback, 3000);
+  setTimeout(pollOrdersFallback, 800);
 
   function processPendingOrders(data){
-    const pending = Object.values(data).filter(o => o.status === 'pending');
+    const pending = Object.values(data).filter(o => o && o.status === 'pending');
     if(!pending.length) return;
     pending.forEach(order => {
-      if(order.tableId && order.items && typeof window.importOrderToTable === 'function'){
-        try { window.importOrderToTable(order); } catch(e){ console.error('[import] error:', e); }
-        // Marque comme reçue pour ne pas réimporter (idempotence)
-        try { window.FB.update('orders', order._id, {status: 'received'}); } catch(e){}
+      if(!order.tableId || !order.items) return;
+      // Importe (function declaration auto-bind sur window, mais on
+      // ressayye via window.* pour être robuste si import accessible
+      // que via une voie)
+      var fn = window.importOrderToTable || (typeof importOrderToTable !== 'undefined' ? importOrderToTable : null);
+      if(typeof fn === 'function'){
+        try { fn(order); } catch(e){ console.error('[import] error:', e); }
       }
+      // Marque comme reçue pour ne pas réimporter
+      try { window.FB.update('orders', order._id, {status: 'received'}); } catch(e){}
     });
   }
 
@@ -144,13 +148,12 @@ window.initFirebaseListeners = function(){
     }
   });
 
-  // ── BOOTSTRAP : force pull initial depuis SERVEUR Firebase (bypass cache) ──
-  // getDocFromServer / getDocsFromServer contournent IndexedDB persistence
-  // qui peut retourner des données stale sur iOS Safari.
+  // ── BOOTSTRAP : pull initial via getDoc/getDocs standard ──
+  // Sans attendre onSnapshot (qui peut être lent à fire). Tolère un cache stale ;
+  // le polling 3s ramène la fraîcheur ensuite.
   (async () => {
     try {
-      // 1. Force pull plan de salle DEPUIS SERVEUR
-      const menuSnap = await getDocFromServer(doc(db, 'config', 'menu'));
+      const menuSnap = await getDoc(doc(db, 'config', 'menu'));
       if(menuSnap.exists()){
         const data = menuSnap.data();
         if(data.salleLayout && data.salleLayout.length > 0){
@@ -166,8 +169,7 @@ window.initFirebaseListeners = function(){
           if(typeof window.applyBranding === 'function') window.applyBranding();
         }
       }
-      // 2. Force pull orders DEPUIS SERVEUR (bypass cache !)
-      const ordersSnap = await getDocsFromServer(collection(db, 'orders'));
+      const ordersSnap = await getDocs(collection(db, 'orders'));
       const ordersData = {};
       ordersSnap.forEach(d => { ordersData[d.id] = {...d.data(), _id: d.id}; });
       window.fbOrders = ordersData;
@@ -3543,6 +3545,9 @@ function importOrderToTable(order){
     o.start(ctx.currentTime); o.stop(ctx.currentTime+0.4);
   }catch(e){}
 }
+// Expose explicitement à window pour que le listener Firebase (module scope)
+// puisse appeler la fonction de manière robuste.
+window.importOrderToTable = importOrderToTable;
 
 function showOrderNotif(order){
   // Notification now handled inside importOrderToTable

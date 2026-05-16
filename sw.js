@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v29-visible-debug-badge';
+const CACHE_NAME = 'marmite-v30-orders-revert-expose';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
