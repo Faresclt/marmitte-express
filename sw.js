@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v28-server-fetch-bypass-cache';
+const CACHE_NAME = 'marmite-v29-visible-debug-badge';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

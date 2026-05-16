@@ -253,6 +253,76 @@ document.addEventListener('DOMContentLoaded', () => {
 </head>
 <body>
 
+<!-- ═══ DEBUG/STATUS BADGE — Firebase + orders ═══ -->
+<div id="fb-debug-badge" style="position:fixed;top:calc(env(safe-area-inset-top) + 6px);right:8px;z-index:9000;font-family:monospace;font-size:11px;font-weight:700;background:rgba(0,0,0,.75);color:#fff;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.15);pointer-events:auto;cursor:pointer;backdrop-filter:blur(8px);max-width:42vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="window.fbDebugBadgeToggle && window.fbDebugBadgeToggle()" title="Cliquer pour copier l'état complet">
+  <span id="fb-debug-icon">⏳</span>
+  <span id="fb-debug-text">Init…</span>
+</div>
+
+<script>
+/* Met à jour le badge debug Firebase toutes les 1s.
+   Cliquer = copie l'état complet dans le presse-papier pour partage. */
+(function(){
+  var EL = null, ICON = null, TXT = null;
+  function tick(){
+    EL = EL || document.getElementById('fb-debug-badge');
+    ICON = ICON || document.getElementById('fb-debug-icon');
+    TXT = TXT || document.getElementById('fb-debug-text');
+    if(!EL) return;
+    var fb = window.FB;
+    var orders = window.fbOrders || {};
+    var oCount = Object.keys(orders).length;
+    var pending = Object.values(orders).filter(function(o){return o && o.status === 'pending';}).length;
+    var lastPoll = window.__lastOrdersPoll || 0;
+    var ago = lastPoll ? Math.round((Date.now() - lastPoll)/1000) : null;
+    var err = window.__bootstrapError || window.__lastOrdersPollError || null;
+    var fbReady = !!(fb && fb.getOnce);
+
+    if(err){
+      ICON.textContent = '❌';
+      TXT.textContent = (''+err).slice(0,40);
+      EL.style.background = 'rgba(232,64,64,.85)';
+    } else if(!fbReady){
+      ICON.textContent = '⏳';
+      TXT.textContent = 'FB init…';
+      EL.style.background = 'rgba(245,166,35,.85)';
+      EL.style.color = '#000';
+    } else if(ago === null){
+      ICON.textContent = '🔄';
+      TXT.textContent = 'Premier poll…';
+      EL.style.background = 'rgba(74,158,255,.85)';
+    } else if(ago > 15){
+      ICON.textContent = '⚠️';
+      TXT.textContent = oCount+'o · '+pending+'p · '+ago+'s';
+      EL.style.background = 'rgba(232,64,64,.85)';
+    } else {
+      ICON.textContent = '✓';
+      TXT.textContent = oCount+'o · '+pending+'p · '+ago+'s';
+      EL.style.background = 'rgba(34,201,122,.85)';
+      EL.style.color = '#000';
+    }
+  }
+  setInterval(tick, 1000);
+  window.fbDebugBadgeToggle = function(){
+    var state = {
+      fb_ready: !!(window.FB && window.FB.getOnce),
+      orders_count: Object.keys(window.fbOrders||{}).length,
+      orders_pending: Object.values(window.fbOrders||{}).filter(function(o){return o && o.status==='pending';}).length,
+      orders_list: Object.values(window.fbOrders||{}).map(function(o){return {id:o._id, tableId:o.tableId, status:o.status, items:(o.items||[]).length};}),
+      last_poll: window.__lastOrdersPoll ? new Date(window.__lastOrdersPoll).toISOString() : null,
+      bootstrap_error: window.__bootstrapError || null,
+      poll_error: window.__lastOrdersPollError || null,
+      salle_elements: (window.salleElements||[]).length,
+      table_data_keys: Object.keys(window.tableData||{})
+    };
+    var s = JSON.stringify(state, null, 2);
+    if(navigator.clipboard) navigator.clipboard.writeText(s).then(function(){ alert('Debug copié !\n\n'+s); }).catch(function(){ alert(s); });
+    else alert(s);
+  };
+})();
+</script>
+
+
 <!-- ═══════════════ PIN LOCK SCREEN ═══════════════ -->
 <div id="pin-screen" style="position:fixed;inset:0;background:#0c0d10;z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:0">
   <div style="text-align:center;margin-bottom:28px">
