@@ -488,6 +488,18 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">⭐ Avis clients</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Les liens apparaîtront en bas du ticket de caisse (imprimé / SMS / mail) pour inciter à laisser un avis.</div>
+          <div class="form-group">
+            <label class="form-label">Lien Avis Google</label>
+            <input class="form-input" id="s-google-review" placeholder="https://g.page/r/votre-resto/review" oninput="saveSettings()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Lien TripAdvisor</label>
+            <input class="form-input" id="s-tripadvisor" placeholder="https://www.tripadvisor.fr/Restaurant_Review-..." oninput="saveSettings()">
+          </div>
+        </div>
+        <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
           <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🤖 Génération IA</div>
           <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Photos et descriptions du Plat du Jour générées via <strong style="color:#22c97a">Pollinations.ai</strong> (gratuit, illimité, aucune clé requise).</div>
           <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:rgba(34,201,122,.08);border:1px solid rgba(34,201,122,.25);border-radius:8px;font-size:12px;color:#22c97a;font-weight:600">
@@ -2049,11 +2061,16 @@ function showPrintOption(){
   setTimeout(()=>{
     const printToast = document.createElement('div');
     printToast.id = 'print-toast';
-    printToast.innerHTML = `<span>🖨️ Imprimer le ticket ?</span><button onclick="printReceipt();this.parentElement.remove()">Imprimer</button><button onclick="this.parentElement.remove()" style="background:none;border:1px solid var(--border);color:var(--muted)">Non</button>`;
-    printToast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:12px 16px;display:flex;align-items:center;gap:10px;z-index:1001;box-shadow:0 8px 40px rgba(0,0,0,.6);animation:sup .2s ease';
+    printToast.innerHTML = `<span>🧾 Ticket :</span>
+      <button onclick="printReceipt();this.parentElement.remove()" data-primary="1">🖨️ Imprimer</button>
+      <button onclick="sendReceiptByEmail();this.parentElement.remove()">📧 Email</button>
+      <button onclick="sendReceiptBySMS();this.parentElement.remove()">💬 SMS</button>
+      <button onclick="this.parentElement.remove()" data-muted="1">✕</button>`;
+    printToast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:12px 16px;display:flex;align-items:center;gap:8px;z-index:1001;box-shadow:0 8px 40px rgba(0,0,0,.6);animation:sup .2s ease;flex-wrap:wrap;max-width:90vw';
     printToast.querySelectorAll('button').forEach(b=>{
-      b.style.cssText += ';height:34px;padding:0 14px;border-radius:10px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap';
-      if(b.textContent==='Imprimer') b.style.cssText += ';background:var(--accent);color:#000;border:none';
+      b.style.cssText += ';height:34px;padding:0 12px;border-radius:10px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;border:1px solid var(--border);background:var(--card);color:var(--text)';
+      if(b.dataset.primary) b.style.cssText += ';background:var(--accent);color:#000;border:none';
+      if(b.dataset.muted) b.style.cssText += ';background:none;color:var(--muted)';
     });
     document.body.appendChild(printToast);
     setTimeout(()=>{ if(document.getElementById('print-toast')) document.getElementById('print-toast').remove(); }, 8000);
@@ -2112,11 +2129,53 @@ function printReceipt(){
     <div style="font-size:11px;color:#666">Merci de votre visite !</div>
     <div style="font-size:10px;color:#999;margin-top:4px">TVA FR — Tous prix TTC</div>
   </div>
+  ${(settings.googleReviewUrl||settings.tripadvisorUrl) ? `
+  <div class="dline"></div>
+  <div class="center" style="margin-top:10px;font-size:11px">
+    <div style="margin-bottom:6px;font-weight:700">Ça vous a plu ?</div>
+    ${settings.googleReviewUrl ? `<div style="margin:4px 0">⭐ Avis Google :<br><span style="font-size:10px;word-break:break-all">${settings.googleReviewUrl}</span></div>` : ''}
+    ${settings.tripadvisorUrl ? `<div style="margin:4px 0">🦉 TripAdvisor :<br><span style="font-size:10px;word-break:break-all">${settings.tripadvisorUrl}</span></div>` : ''}
+  </div>` : ''}
   <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`);
   w.document.close();
 }
 window.printReceipt = printReceipt;
+
+// Envoie le ticket par email/SMS via les schémas natifs iOS
+function sendReceiptByEmail(){
+  if(!lastReceipt) return;
+  const r = lastReceipt;
+  const tbl = r.tableId ? salleElements.find(e=>e.id===r.tableId) : null;
+  const tableName = tbl ? 'Table '+(tbl.number||'') : 'Vente directe';
+  const subject = 'Ticket — '+(branding.name||'La Marmite Express')+' — '+r.date;
+  let body = (branding.name||'La Marmite Express')+'\n';
+  body += 'Ticket du '+r.date+' à '+r.time+'\n';
+  body += tableName+' — '+(r.payType==='cb'?'Carte bancaire':r.payType==='cash'?'Espèces':'Offert')+'\n\n';
+  r.items.forEach(i=>{
+    const opts=[i.cuisson,i.garniture].filter(Boolean).join(', ');
+    body += i.qty+'x '+i.name+(opts?' ('+opts+')':'')+' — '+(i.qty*i.price).toFixed(2)+'€\n';
+  });
+  body += '\nTotal : '+r.total.toFixed(2)+'€\n\nMerci de votre visite !';
+  if(settings.googleReviewUrl) body += '\n\nLaissez-nous un avis Google : '+settings.googleReviewUrl;
+  if(settings.tripadvisorUrl) body += '\n\nTripAdvisor : '+settings.tripadvisorUrl;
+  window.location.href = 'mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+}
+window.sendReceiptByEmail = sendReceiptByEmail;
+
+function sendReceiptBySMS(){
+  if(!lastReceipt) return;
+  const r = lastReceipt;
+  const tbl = r.tableId ? salleElements.find(e=>e.id===r.tableId) : null;
+  const tableName = tbl ? 'Table '+(tbl.number||'') : 'Vente directe';
+  let body = (branding.name||'La Marmite Express')+' — '+tableName+'\n';
+  body += 'Total : '+r.total.toFixed(2)+'€\n';
+  body += r.date+' '+r.time;
+  if(settings.googleReviewUrl) body += '\nAvis : '+settings.googleReviewUrl;
+  // Le schéma sms:&body= ouvre l'app Messages avec le corps pré-rempli
+  window.location.href = 'sms:?&body='+encodeURIComponent(body);
+}
+window.sendReceiptBySMS = sendReceiptBySMS;
 
 // ═══ MOBILE NAV ═══
 function mobShowMenu(){
@@ -2440,6 +2499,8 @@ function applySettingsForm(){
   document.getElementById('s-cuissons').value=settings.cuissons||'Bleu,Saignant,À point,Bien cuit';
   document.getElementById('s-garnitures').value=settings.garnitures||'Frites maison,Salade,Pommes de terre sautées,Pâtes';
   document.getElementById('s-serveur-pin').value=LS.get('serveur_pin','0000');
+  const gr=document.getElementById('s-google-review'); if(gr) gr.value=settings.googleReviewUrl||'';
+  const ta=document.getElementById('s-tripadvisor');   if(ta) ta.value=settings.tripadvisorUrl||'';
   // Gemini key status
   const gk=GEMINI_KEY_PDJ;
   const gkStatus=document.getElementById('gemini-key-status');
@@ -2458,6 +2519,10 @@ function saveSettings(){
   settings.tva=parseFloat(document.getElementById('s-tva').value)||5.5;
   settings.cuissons=document.getElementById('s-cuissons').value.trim();
   settings.garnitures=document.getElementById('s-garnitures').value.trim();
+  const gr = document.getElementById('s-google-review');
+  const ta = document.getElementById('s-tripadvisor');
+  if(gr) settings.googleReviewUrl = gr.value.trim();
+  if(ta) settings.tripadvisorUrl  = ta.value.trim();
   LS.set('settings',settings); toast('Paramètres sauvegardés');
 }
 
@@ -3688,7 +3753,7 @@ function saveToHistory(entry){
   const history=LS.get(key,[]);
   const tbl=salleElements.find(e=>e.id===entry.tableId);
   const tvaDetails = calculateTVADetails(entry.items||[]);
-  history.push({
+  const sale = {
     time: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),
     tableLabel: tbl ? 'Table '+(tbl.number||tbl.id) : (entry.label||entry.tableId||'—'),
     items: (entry.items||[]).map(r=>({name:r.name, qty:r.qty, price:r.price, tva:r.tva||10})),
@@ -3696,18 +3761,79 @@ function saveToHistory(entry){
     totalHT: tvaDetails.totalHT,
     totalTVA: tvaDetails.totalTVA,
     tvaRates: tvaDetails.rates,
-    payType: entry.payType||'cb'
-  });
+    payType: entry.payType||'cb',
+    ts: Date.now()
+  };
+  history.push(sale);
   LS.set(key, history);
-  // Schedule auto-backup to Firebase (30s after last payment)
+  // Push immédiat vers Firebase /sales/{date} (cross-device, instantané)
+  // L'utilisateur peut voir le CA depuis n'importe quel device sans manip.
+  if(window.FB && window.FB.setMerge){
+    try {
+      const today = new Date().toISOString().slice(0,10);
+      // On utilise un timestamp comme clé d'item pour permettre des écritures
+      // concurrentes depuis plusieurs devices sans collisions.
+      const saleKey = 't'+sale.ts+'_'+Math.random().toString(36).slice(2,6);
+      window.FB.setMerge('sales', today, { [saleKey]: sale })
+        .catch(err => console.warn('[sales->FB] error:', err?.message || err));
+    } catch(e){ console.warn('[sales->FB] error:', e); }
+  }
+  // Schedule auto-backup (full snapshot) — 30s après dernier paiement
   if(typeof scheduleAutoBackup==='function') scheduleAutoBackup();
 }
 
 function clearHistory(){ LS.set(getTodayKey(),[]); }
 
+// Fusionne deux listes de ventes en dédupliquant via ts + tableLabel
+function mergeSales(local, remote){
+  const seen = new Set();
+  const out = [];
+  function add(s){
+    if(!s || !s.total) return;
+    const k = (s.ts||'') + '|' + (s.tableLabel||'') + '|' + s.total;
+    if(seen.has(k)) return;
+    seen.add(k);
+    out.push(s);
+  }
+  (local||[]).forEach(add);
+  (remote||[]).forEach(add);
+  // Trie par timestamp si dispo
+  out.sort((a,b) => (a.ts||0) - (b.ts||0));
+  return out;
+}
+
+// Fetch ventes du jour depuis Firebase + merge avec local
+// Permet au CA de s'afficher peu importe le device qui a encaissé.
+async function fetchSalesFromFirebase(dateKey){
+  if(!window.FB || !window.FB.getOnce) return null;
+  try {
+    const today = dateKey || new Date().toISOString().slice(0,10);
+    const data = await window.FB.getOnce('sales', today);
+    if(!data) return [];
+    // Convertit l'objet {key1: sale1, key2: sale2} en array
+    return Object.values(data).filter(v => v && typeof v === 'object' && v.total);
+  } catch(e){
+    console.warn('[sales fetch] error:', e?.message || e);
+    return null;
+  }
+}
+
 function renderHistorique(){
   const key=getTodayKey();
-  const history=LS.get(key,[]);
+  let history=LS.get(key,[]);
+  // En arrière-plan, on tente de fusionner avec les ventes Firebase
+  // (autres devices ayant encaissé aujourd'hui). Le render se refera.
+  fetchSalesFromFirebase().then(remote => {
+    if(!remote || !remote.length) return;
+    const merged = mergeSales(history, remote);
+    if(merged.length !== history.length){
+      LS.set(key, merged);
+      // Re-render si on est encore sur l'écran historique
+      if(document.getElementById('histo-screen')?.classList.contains('active')){
+        renderHistorique();
+      }
+    }
+  });
   const totalJour=history.reduce((s,e)=>s+e.total,0);
   const totalHT=history.reduce((s,e)=>s+(e.totalHT||e.total/(1.1)),0);
   const nbTransac=history.length;

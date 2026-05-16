@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v32-clean-ui';
+const CACHE_NAME = 'marmite-v34-sales-sync-receipt-share-reviews';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
