@@ -27,7 +27,7 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 #ticket-panel{width:360px;display:flex;flex-direction:column;background:var(--surface);flex-shrink:0}
 
 /* Header */
-#pos-header{height:58px;display:flex;align-items:center;padding:0 16px;gap:12px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+#pos-header{min-height:58px;display:flex;align-items:center;padding:0 16px;gap:12px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
 .app-logo{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px;color:var(--text);line-height:1;cursor:pointer}
 .app-logo span{color:var(--accent)}
 .app-sub{font-size:10px;color:var(--muted);letter-spacing:.5px}

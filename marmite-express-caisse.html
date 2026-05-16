@@ -626,7 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <!-- ═══════════════ SALLE SCREEN (full-screen floor plan) ═══════════════ -->
 <div class="screen" id="salle-screen" style="background:var(--bg)">
   <!-- Header -->
-  <div style="height:58px;display:flex;align-items:center;padding:0 16px;gap:10px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
+  <div id="salle-header" style="min-height:58px;display:flex;align-items:center;padding:0 16px;gap:10px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
     <button class="btn-back" onclick="closeSalle()">← Retour caisse</button>
     <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px;color:var(--accent)">🗺️ Plan de salle</div>
     <div id="salle-mode-tabs" style="display:flex;gap:6px;margin-left:16px">
