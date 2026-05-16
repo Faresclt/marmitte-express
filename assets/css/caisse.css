@@ -301,7 +301,7 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 
 /* ═══════════════════ ADMIN SCREEN ═══════════════════ */
 #admin-screen{background:var(--bg)}
-#admin-header{height:58px;display:flex;align-items:center;padding:0 20px;gap:14px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+#admin-header{min-height:58px;display:flex;align-items:center;padding:0 20px;gap:14px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
 #admin-header h1{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1.5px;color:var(--accent)}
 .btn-back{height:36px;padding:0 14px;border-radius:var(--radius-sm);background:var(--card);border:1px solid var(--border);color:var(--text2);font-size:12px;font-weight:700}
 .btn-back:hover{border-color:var(--accent);color:var(--accent)}

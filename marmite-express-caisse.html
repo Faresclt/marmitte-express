@@ -256,9 +256,10 @@ document.addEventListener('DOMContentLoaded', () => {
 <body>
 
 <!-- ═══ DEBUG/STATUS BADGE — Firebase + orders ═══ -->
-<div id="fb-debug-badge" style="position:fixed;top:calc(env(safe-area-inset-top) + 6px);right:8px;z-index:9000;font-family:monospace;font-size:11px;font-weight:700;background:rgba(0,0,0,.75);color:#fff;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.15);pointer-events:auto;cursor:pointer;backdrop-filter:blur(8px);max-width:42vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="window.fbDebugBadgeToggle && window.fbDebugBadgeToggle()" title="Cliquer pour copier l'état complet">
-  <span id="fb-debug-icon">⏳</span>
-  <span id="fb-debug-text">Init…</span>
+<!-- Petit point en bas à gauche, n'interfère avec aucune UI -->
+<div id="fb-debug-badge" style="position:fixed;bottom:calc(env(safe-area-inset-bottom) + 8px);left:8px;z-index:9000;font-family:monospace;font-size:10px;font-weight:700;background:rgba(0,0,0,.7);color:#fff;padding:4px 8px;border-radius:14px;border:1px solid rgba(255,255,255,.12);pointer-events:auto;cursor:pointer;backdrop-filter:blur(8px);display:flex;align-items:center;gap:4px;opacity:.7;transition:opacity .2s,max-width .25s;max-width:30px;overflow:hidden;white-space:nowrap" onclick="window.fbDebugBadgeToggle && window.fbDebugBadgeToggle()" onmouseover="this.style.opacity='1';this.style.maxWidth='200px'" onmouseout="this.style.opacity='.7';this.style.maxWidth='30px'" title="Cliquer pour copier l'état Firebase">
+  <span id="fb-debug-icon" style="font-size:12px">⏳</span>
+  <span id="fb-debug-text" style="font-size:10px"></span>
 </div>
 
 <script>

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v30-orders-revert-expose';
+const CACHE_NAME = 'marmite-v31-debug-discreet-admin-safearea';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

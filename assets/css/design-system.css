@@ -233,6 +233,8 @@ select:focus-visible {
   /* Headers communs aux pages */
   #app-header,
   #pos-header,
+  #admin-header,
+  #salle-header,
   .hdr,
   .header,
   #pin-screen {
