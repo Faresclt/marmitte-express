@@ -138,6 +138,41 @@ window.initFirebaseListeners = function(){
       }
     }
   });
+
+  // ── BOOTSTRAP : force pull initial via getDoc/getDocs ──
+  // Sans attendre que onSnapshot fire. Si le WebSocket Firestore est mort
+  // sur iOS Safari, au moins on a l'état initial correct.
+  (async () => {
+    try {
+      // 1. Force pull plan de salle
+      const menuSnap = await getDoc(doc(db, 'config', 'menu'));
+      if(menuSnap.exists()){
+        const data = menuSnap.data();
+        if(data.salleLayout && data.salleLayout.length > 0){
+          LS.set('salleLayout', data.salleLayout);
+          if(typeof window.salleElements !== 'undefined'){
+            window.salleElements = data.salleLayout;
+          }
+          if(typeof window.renderSalle === 'function') window.renderSalle();
+          console.log('[Bootstrap] Salle pull OK ('+data.salleLayout.length+' éléments)');
+        }
+        // Aussi sync branding
+        if(data.branding && typeof window.branding !== 'undefined'){
+          Object.assign(window.branding, data.branding);
+          if(typeof window.applyBranding === 'function') window.applyBranding();
+        }
+      }
+      // 2. Force pull orders pour ne rien manquer
+      const ordersSnap = await getDocs(collection(db, 'orders'));
+      const ordersData = {};
+      ordersSnap.forEach(d => { ordersData[d.id] = {...d.data(), _id: d.id}; });
+      window.fbOrders = ordersData;
+      if(typeof processPendingOrders === 'function') processPendingOrders(ordersData);
+      console.log('[Bootstrap] Orders pull OK ('+Object.keys(ordersData).length+' docs)');
+    } catch(e) {
+      console.error('[Bootstrap] Failed:', e);
+    }
+  })();
 };
 
 window.fbTables = {};

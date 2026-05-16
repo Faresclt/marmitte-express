@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v26-orders-polling';
+const CACHE_NAME = 'marmite-v27-bootstrap-force-pull';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
