@@ -255,76 +255,6 @@ document.addEventListener('DOMContentLoaded', () => {
 </head>
 <body>
 
-<!-- ═══ DEBUG/STATUS BADGE — Firebase + orders ═══ -->
-<!-- Petit point en bas à gauche, n'interfère avec aucune UI -->
-<div id="fb-debug-badge" style="position:fixed;bottom:calc(env(safe-area-inset-bottom) + 8px);left:8px;z-index:9000;font-family:monospace;font-size:10px;font-weight:700;background:rgba(0,0,0,.7);color:#fff;padding:4px 8px;border-radius:14px;border:1px solid rgba(255,255,255,.12);pointer-events:auto;cursor:pointer;backdrop-filter:blur(8px);display:flex;align-items:center;gap:4px;opacity:.7;transition:opacity .2s,max-width .25s;max-width:30px;overflow:hidden;white-space:nowrap" onclick="window.fbDebugBadgeToggle && window.fbDebugBadgeToggle()" onmouseover="this.style.opacity='1';this.style.maxWidth='200px'" onmouseout="this.style.opacity='.7';this.style.maxWidth='30px'" title="Cliquer pour copier l'état Firebase">
-  <span id="fb-debug-icon" style="font-size:12px">⏳</span>
-  <span id="fb-debug-text" style="font-size:10px"></span>
-</div>
-
-<script>
-/* Met à jour le badge debug Firebase toutes les 1s.
-   Cliquer = copie l'état complet dans le presse-papier pour partage. */
-(function(){
-  var EL = null, ICON = null, TXT = null;
-  function tick(){
-    EL = EL || document.getElementById('fb-debug-badge');
-    ICON = ICON || document.getElementById('fb-debug-icon');
-    TXT = TXT || document.getElementById('fb-debug-text');
-    if(!EL) return;
-    var fb = window.FB;
-    var orders = window.fbOrders || {};
-    var oCount = Object.keys(orders).length;
-    var pending = Object.values(orders).filter(function(o){return o && o.status === 'pending';}).length;
-    var lastPoll = window.__lastOrdersPoll || 0;
-    var ago = lastPoll ? Math.round((Date.now() - lastPoll)/1000) : null;
-    var err = window.__bootstrapError || window.__lastOrdersPollError || null;
-    var fbReady = !!(fb && fb.getOnce);
-
-    if(err){
-      ICON.textContent = '❌';
-      TXT.textContent = (''+err).slice(0,40);
-      EL.style.background = 'rgba(232,64,64,.85)';
-    } else if(!fbReady){
-      ICON.textContent = '⏳';
-      TXT.textContent = 'FB init…';
-      EL.style.background = 'rgba(245,166,35,.85)';
-      EL.style.color = '#000';
-    } else if(ago === null){
-      ICON.textContent = '🔄';
-      TXT.textContent = 'Premier poll…';
-      EL.style.background = 'rgba(74,158,255,.85)';
-    } else if(ago > 15){
-      ICON.textContent = '⚠️';
-      TXT.textContent = oCount+'o · '+pending+'p · '+ago+'s';
-      EL.style.background = 'rgba(232,64,64,.85)';
-    } else {
-      ICON.textContent = '✓';
-      TXT.textContent = oCount+'o · '+pending+'p · '+ago+'s';
-      EL.style.background = 'rgba(34,201,122,.85)';
-      EL.style.color = '#000';
-    }
-  }
-  setInterval(tick, 1000);
-  window.fbDebugBadgeToggle = function(){
-    var state = {
-      fb_ready: !!(window.FB && window.FB.getOnce),
-      orders_count: Object.keys(window.fbOrders||{}).length,
-      orders_pending: Object.values(window.fbOrders||{}).filter(function(o){return o && o.status==='pending';}).length,
-      orders_list: Object.values(window.fbOrders||{}).map(function(o){return {id:o._id, tableId:o.tableId, status:o.status, items:(o.items||[]).length};}),
-      last_poll: window.__lastOrdersPoll ? new Date(window.__lastOrdersPoll).toISOString() : null,
-      bootstrap_error: window.__bootstrapError || null,
-      poll_error: window.__lastOrdersPollError || null,
-      salle_elements: (window.salleElements||[]).length,
-      table_data_keys: Object.keys(window.tableData||{})
-    };
-    var s = JSON.stringify(state, null, 2);
-    if(navigator.clipboard) navigator.clipboard.writeText(s).then(function(){ alert('Debug copié !\n\n'+s); }).catch(function(){ alert(s); });
-    else alert(s);
-  };
-})();
-</script>
-
 
 <!-- ═══════════════ PIN LOCK SCREEN ═══════════════ -->
 <div id="pin-screen" style="position:fixed;inset:0;background:#0c0d10;z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:0">
@@ -765,10 +695,11 @@ document.addEventListener('DOMContentLoaded', () => {
     <div id="salle-mode-tabs" style="display:flex;gap:6px;margin-left:16px">
       <button id="stab-service" class="hbtn" style="background:rgba(34,201,122,.15);border:1px solid rgba(34,201,122,.3);color:var(--green)" onclick="setSalleMode('service')">🍽️ Service</button>
       <button id="stab-edit" class="hbtn hbtn-admin" onclick="setSalleMode('edit')">✏️ Éditer le plan</button>
-      <button id="stab-resync" class="hbtn" style="background:rgba(74,158,255,.15);border:1px solid rgba(74,158,255,.3);color:#4a9eff" onclick="resyncSalleFromFirebase()" title="Forcer la lecture du plan depuis Firebase">🔄 Sync</button>
-      <button id="stab-recover" class="hbtn" style="background:rgba(155,107,255,.12);border:1px solid rgba(155,107,255,.3);color:#9b6bff" onclick="showSalleRecovery()" title="Chercher d'anciens plans dans les backups Firebase">🔍 Récupérer</button>
-      <button id="stab-emergency" class="hbtn" style="background:rgba(232,64,64,.12);border:1px solid rgba(232,64,64,.3);color:#e84040" onclick="restoreEmergency19Tables()" title="Restaurer un plan d'urgence de 19 tables">🆘 19 tables</button>
     </div>
+    <!-- Fonctions de récupération restent accessibles via console JS si besoin :
+         window.resyncSalleFromFirebase()  → force pull Firebase
+         window.showSalleRecovery()         → scan backups Firebase
+         window.restoreEmergency19Tables() → restore plan 19 tables -->
     <!-- Edit toolbar (hidden in service mode) -->
     <div id="salle-toolbar" style="display:none;gap:8px;margin-left:8px;align-items:center">
       <span style="font-size:11px;color:var(--muted);font-weight:700">AJOUTER :</span>

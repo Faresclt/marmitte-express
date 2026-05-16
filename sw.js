@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v31-debug-discreet-admin-safearea';
+const CACHE_NAME = 'marmite-v32-clean-ui';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
