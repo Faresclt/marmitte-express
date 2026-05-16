@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v27-bootstrap-force-pull';
+const CACHE_NAME = 'marmite-v28-server-fetch-bypass-cache';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
