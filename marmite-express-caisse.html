@@ -72,17 +72,36 @@ window.initFirebaseListeners = function(){
   // Listen to incoming orders (from waiter/client apps)
   window.FB.listenCol('orders', (data) => {
     window.fbOrders = data;
-    const pending = Object.values(data).filter(o => o.status === 'pending');
-    if(pending.length > 0){
-      // Auto-import pending orders into their tables
-      pending.forEach(order => {
-        if(order.tableId && order.items){
-          importOrderToTable(order);
-          window.FB.update('orders', order._id, {status: 'received'});
-        }
-      });
-    }
+    processPendingOrders(data);
   });
+
+  // Polling de secours : si le WebSocket Firestore meurt sur iOS Safari
+  // (sleep/reconnect), le listener ne fire plus. On poll toutes les 4s
+  // en parallèle via getDocs. Idempotent (filtre status==='pending').
+  async function pollOrdersFallback(){
+    try {
+      const snap = await getDocs(collection(db, 'orders'));
+      const data = {};
+      snap.forEach(d => { data[d.id] = {...d.data(), _id: d.id}; });
+      window.fbOrders = data;
+      processPendingOrders(data);
+    } catch(e) {
+      console.warn('[orders poll] error:', e);
+    }
+  }
+  setInterval(pollOrdersFallback, 4000);
+
+  function processPendingOrders(data){
+    const pending = Object.values(data).filter(o => o.status === 'pending');
+    if(!pending.length) return;
+    pending.forEach(order => {
+      if(order.tableId && order.items && typeof window.importOrderToTable === 'function'){
+        try { window.importOrderToTable(order); } catch(e){ console.error('[import] error:', e); }
+        // Marque comme reçue pour ne pas réimporter (idempotence)
+        try { window.FB.update('orders', order._id, {status: 'received'}); } catch(e){}
+      }
+    });
+  }
 
   // Listen to menu published by caisse (for waiter app)
   window.FB.listen('config', 'menu', (data) => {
