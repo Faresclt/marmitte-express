@@ -118,17 +118,24 @@
       if (!branding) return;
       window.__fbBranding = branding;
 
-      // Met à jour localStorage brand_* pour que brand-boot.js et applyBranding utilisent
+      // Met à jour localStorage brand_* SEULEMENT si Firebase a une valeur.
+      // Ne JAMAIS supprimer le cache local si Firebase est vide :
+      // sinon on perd les paramètres locaux que le user a configurés
+      // mais qui ne sont pas (encore) montés dans Firebase.
       try {
         if (branding.logoUrl) localStorage.setItem('brand_logoUrl', JSON.stringify(branding.logoUrl));
-        else localStorage.removeItem('brand_logoUrl');
-        if (branding.name)   localStorage.setItem('brand_name',   JSON.stringify(branding.name));
-        if (branding.accent) localStorage.setItem('brand_accent', JSON.stringify(branding.accent));
+        if (branding.name)    localStorage.setItem('brand_name',    JSON.stringify(branding.name));
+        if (branding.accent)  localStorage.setItem('brand_accent',  JSON.stringify(branding.accent));
       } catch (e) {}
 
       // Met à jour l'objet `branding` JS si défini (caisse classic script)
+      // Seuls les champs présents dans Firebase écrasent le local
       if (typeof window.branding !== 'undefined' && window.branding) {
-        Object.assign(window.branding, branding);
+        if (branding.name)    window.branding.name = branding.name;
+        if (branding.tagline) window.branding.tagline = branding.tagline;
+        if (branding.emoji)   window.branding.emoji = branding.emoji;
+        if (branding.accent)  window.branding.accent = branding.accent;
+        if (branding.logoUrl) window.branding.logoUrl = branding.logoUrl;
         if (typeof window.applyBranding === 'function') {
           try { window.applyBranding(); } catch(e){}
         }
@@ -148,6 +155,47 @@
   // Pull branding au boot puis toutes les 30s (peu fréquent, change rarement)
   setTimeout(pullBrandingViaREST, 1000);
   setInterval(pullBrandingViaREST, 30000);
+
+  // Auto-récupération du logo : si Firebase config/menu n'a pas de logoUrl
+  // mais que le fichier existe dans Firebase Storage (branding/logo.png),
+  // on le restaure automatiquement. Couvre le cas où le user a upload
+  // un logo dans le passé mais que l'URL a été perdue dans config/menu.
+  async function autoRestoreLogo() {
+    try {
+      // Si Firebase a déjà un logoUrl OU on n'a pas encore les data, skip
+      if (window.__fbBranding && window.__fbBranding.logoUrl) return;
+      if (!window.__fbBranding) return;
+      // Test si Storage a un logo
+      var storageUrl = 'https://firebasestorage.googleapis.com/v0/b/la-marmitte-express.firebasestorage.app/o/branding%2Flogo.png?alt=media';
+      var head = await fetch(storageUrl, { method: 'HEAD', mode: 'cors' });
+      if (!head.ok) return;
+      // Storage a un logo mais config/menu pas. On le restaure si le SDK est dispo.
+      if (window.FB && window.FB.setMerge) {
+        console.log('[auto-restore] logo trouvé dans Storage, restoration → config/menu');
+        var newBranding = Object.assign({}, window.__fbBranding || {}, { logoUrl: storageUrl });
+        await window.FB.setMerge('config', 'menu', { branding: newBranding });
+        // Update local
+        try { localStorage.setItem('brand_logoUrl', JSON.stringify(storageUrl)); } catch(e){}
+        if (typeof window.branding !== 'undefined') {
+          window.branding.logoUrl = storageUrl;
+          if (typeof window.applyBranding === 'function') window.applyBranding();
+        }
+        console.log('[auto-restore] logo restauré dans Firebase config/menu');
+      } else {
+        // SDK pas dispo, applique localement au moins
+        try { localStorage.setItem('brand_logoUrl', JSON.stringify(storageUrl)); } catch(e){}
+        if (typeof window.branding !== 'undefined') {
+          window.branding.logoUrl = storageUrl;
+          if (typeof window.applyBranding === 'function') window.applyBranding();
+        }
+        console.log('[auto-restore] logo appliqué localement (SDK indispo, pas pushé sur Firebase)');
+      }
+    } catch (e) {
+      console.warn('[auto-restore] error:', e && e.message || e);
+    }
+  }
+  window.autoRestoreLogo = autoRestoreLogo;
+  setTimeout(autoRestoreLogo, 3000); // après que pullBrandingViaREST ait remplit __fbBranding
 
   window.pollOrdersViaREST = pollOrdersViaREST;
 

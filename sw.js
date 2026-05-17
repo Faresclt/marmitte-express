@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v39-brand-rest-sync-autopublish';
+const CACHE_NAME = 'marmite-v40-logo-auto-restore-no-overwrite';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
