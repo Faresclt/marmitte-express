@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v43-logo-history-fix-publish';
+const CACHE_NAME = 'marmite-v44-emailjs-ticket-sender';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
