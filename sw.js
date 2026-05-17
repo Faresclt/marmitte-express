@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v50-cancel-tip-note-86-cloture-z';
+const CACHE_NAME = 'marmite-v51-setup-images-refactor';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

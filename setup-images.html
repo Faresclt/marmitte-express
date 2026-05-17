@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://image.pollinations.ai https://external.api.recraft.ai https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Setup Images — La Marmite Express</title>
@@ -162,13 +162,13 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
   <div class="log" id="gen-log" style="display:none"></div>
 </div>
 
-<!-- STEP 3: Save to localStorage + Publish -->
+<!-- STEP 3: Publish -->
 <div class="section">
-  <div class="section-title" style="color:var(--green)">💾 ÉTAPE 3 — Sauvegarder & Publier</div>
-  <div class="section-sub">Toutes les images sont stockées dans le localStorage du navigateur, prêtes à être publiées depuis la Caisse.</div>
+  <div class="section-title" style="color:var(--green)">💾 ÉTAPE 3 — Publier sur Firebase</div>
+  <div class="section-sub">✨ Auto-sauvegarde : chaque image est enregistrée immédiatement dans le localStorage du navigateur. Il suffit ensuite d'ouvrir la Caisse et de cliquer "☁️ Publier" pour pousser sur Firebase et synchroniser tous les devices.</div>
   <div class="row">
-    <button class="btn btn-green" onclick="saveToLS()" id="btn-save">✓ Sauvegarder dans localStorage</button>
     <a href="marmite-express-caisse.html" class="btn btn-accent" style="text-decoration:none;display:inline-flex;align-items:center">→ Ouvrir la Caisse</a>
+    <button class="btn btn-green" onclick="forceSaveAll()" id="btn-save" title="Force la sauvegarde de toutes les images du buffer (déjà fait automatiquement)">↻ Re-sauvegarder tout</button>
   </div>
   <div id="save-status" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
 </div>
@@ -182,7 +182,7 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
     <button class="btn btn-purple" onclick="selectMissing()">📋 Sélectionner les manquants</button>
     <button class="btn btn-blue" onclick="selectAll()">✓ Tout sélectionner</button>
     <button class="btn btn-red" onclick="clearSelect()">✕ Désélectionner tout</button>
-    <button class="btn btn-accent" onclick="generateSelected()" style="margin-left:auto">🎨 Générer la sélection</button>
+    <button class="btn btn-accent" id="btn-gen-selected" onclick="generateSelected()" style="margin-left:auto">🎨 Générer la sélection</button>
   </div>
   <div class="grid" id="img-grid"></div>
 </div>
@@ -326,7 +326,43 @@ function renderGrid() {
   if (sb) sb.textContent = selectedIds.size;
 }
 
-function normalize(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').trim(); }
+function normalize(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
+
+// Fuzzy-match : essaye d'abord FILE_MAP (boissons hardcod\u00e9es), sinon
+// recherche un produit dont le nom partage assez de mots avec le fichier.
+// Retourne l'id du produit ou null si pas de match suffisant.
+function fuzzyMatchProduct(fileName) {
+  const norm = normalize(fileName.replace(/\.[^.]+$/, ''));
+  // 1) FILE_MAP en priorit\u00e9 (cas des fichiers boissons fournisseur, noms courts)
+  for (const [key, pid] of Object.entries(FILE_MAP)) {
+    if (norm.includes(normalize(key))) return pid;
+  }
+  // 2) Fallback : score word-overlap sur tous les produits Firestore
+  const fileWords = norm.split(' ').filter(w => w.length >= 3);
+  if (fileWords.length === 0) return null;
+  let best = null, bestScore = 0;
+  for (const p of PRODUCTS) {
+    const pNorm = normalize(p.name);
+    const pWords = pNorm.split(' ').filter(w => w.length >= 3);
+    if (pWords.length === 0) continue;
+    let common = 0;
+    for (const fw of fileWords) {
+      for (const pw of pWords) {
+        // Match exact OU inclusion (ex: "burger" matche "burgers", "pizza" matche "pizzas")
+        if (pw === fw || (pw.length >= 4 && fw.length >= 4 && (pw.includes(fw) || fw.includes(pw)))) {
+          common++; break;
+        }
+      }
+    }
+    const score = common / Math.max(fileWords.length, pWords.length);
+    // Seuil : il faut au moins 50% de mots en commun pour matcher
+    if (score > bestScore && score >= 0.5) {
+      bestScore = score;
+      best = p.id;
+    }
+  }
+  return best;
+}
 
 // ── Compress image ──
 async function compressImg(src, maxW=600, q=0.82) {
@@ -344,7 +380,7 @@ async function compressImg(src, maxW=600, q=0.82) {
   });
 }
 
-// ── Import folder ──
+// ── Import folder (avec fuzzy-match étendu à tous les produits) ──
 window.importFolder = async function(e) {
   const files = Array.from(e.target.files).filter(f => f.type.startsWith('image/'));
   if (!files.length) return;
@@ -360,31 +396,27 @@ window.importFolder = async function(e) {
 
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
-    const nameNorm = normalize(f.name.replace(/\.[^.]+$/, ''));
-
-    // Try to match to a product
-    let prodId = null;
-    for (const [key, pid] of Object.entries(FILE_MAP)) {
-      if (nameNorm.includes(normalize(key))) { prodId = pid; break; }
-    }
+    // Fuzzy-match : FILE_MAP en priorité, puis word-overlap sur tous les produits
+    const prodId = fuzzyMatchProduct(f.name);
 
     if (prodId) {
       const url = URL.createObjectURL(f);
       const b64 = await compressImg(url, 600, 0.85);
       URL.revokeObjectURL(url);
       importedImages[prodId] = b64;
+      autoSaveImage(prodId, b64); // ★ auto-save aussi pour l'import
       const prod = PRODUCTS.find(p => p.id === prodId);
-      addLog('import-log', '✓ ' + f.name + ' → ' + (prod?.name||prodId), 'ok');
+      addLog('import-log', '✓ ' + f.name + ' → ' + (prod?.name || prodId), 'ok');
       matched++;
     } else {
-      addLog('import-log', '? ' + f.name + ' — non mappé', 'warn');
+      addLog('import-log', '? ' + f.name + ' — aucun produit ne correspond (renomme le fichier ou upload manuellement depuis la Caisse)', 'warn');
     }
 
     prog.style.width = Math.round((i+1)/total*100)+'%';
     if ((i+1) % 5 === 0) await new Promise(r => setTimeout(r, 10)); // yield
   }
 
-  document.getElementById('import-status').textContent = matched + ' images importées sur ' + total + ' fichiers';
+  document.getElementById('import-status').textContent = `${matched}/${total} images importées et auto-sauvegardées` + (matched < total ? ` (${total - matched} non mappées)` : '');
   renderGrid();
 };
 
@@ -431,23 +463,12 @@ window.toggleProviderKey = function() {
     return;
   }
   wrap.style.display = 'block';
-  if (provider === 'recraft') {
-    label.textContent = 'Clé API Recraft (Bearer token)';
-    input.placeholder = 'recraft_...';
-    hint.innerHTML = 'Obtiens ta clé sur <a href="https://www.recraft.ai/docs" target="_blank" style="color:var(--accent)">recraft.ai/docs</a> — 50 crédits gratuits/mois.';
-    input.value = localStorage.getItem('recraft_api_key') || '';
-  } else if (provider === 'gemini') {
-    label.textContent = 'Clé API Gemini';
-    input.placeholder = 'AIzaSy...';
-    hint.innerHTML = 'Obtiens ta clé sur <a href="https://aistudio.google.com" target="_blank" style="color:var(--accent)">aistudio.google.com</a> → Get API Key (gratuit, 500/jour).';
-    input.value = localStorage.getItem('gemini_api_key') || '';
-  }
-  // Auto-save key on input
-  input.oninput = () => {
-    const k = input.value.trim();
-    if (provider === 'recraft') localStorage.setItem('recraft_api_key', k);
-    else if (provider === 'gemini') localStorage.setItem('gemini_api_key', k);
-  };
+  // Seul "recraft" reste avec une clé requise (gemini retiré du select)
+  label.textContent = 'Clé API Recraft (Bearer token)';
+  input.placeholder = 'recraft_...';
+  hint.innerHTML = 'Obtiens ta clé sur <a href="https://www.recraft.ai/docs" target="_blank" style="color:var(--accent)">recraft.ai/docs</a> — 50 crédits gratuits/mois.';
+  input.value = localStorage.getItem('recraft_api_key') || '';
+  input.oninput = () => localStorage.setItem('recraft_api_key', input.value.trim());
 };
 // Auto-restore last provider on load
 const _savedProvider = localStorage.getItem('ia_provider_choice');
@@ -510,255 +531,184 @@ async function genViaRecraft(prompt, apiKey) {
   });
 }
 
-// Génère uniquement les produits cochés par l'utilisateur via checkboxes (selection ciblee)
-window.generateSelected = async function() {
-  if (selectedIds.size === 0) {
-    return alert('Aucun produit sélectionné. Coche au moins 1 produit ou clique "Sélectionner les manquants".');
+// ─────────────────────────────────────────────────────────────────────
+// GÉNÉRATION IA — version unifiée et propre
+// ─────────────────────────────────────────────────────────────────────
+// Fonction unique qui gère toute la logique de génération. Plus de doublons,
+// plus de re-filter caché, plus de code mort Gemini.
+
+// État UI : disable TOUS les boutons de génération (pas seulement btn-gen-all)
+// → empêche le double-clic en parallèle sur "Générer la sélection"
+let _isGenerating = false;
+function setGeneratingState(active) {
+  _isGenerating = active;
+  ['btn-gen-all', 'btn-gen-selected'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = active;
+  });
+  const stop = document.getElementById('btn-stop');
+  if (stop) stop.style.display = active ? '' : 'none';
+}
+
+// Sauve immédiatement une image dans le localStorage (auto-save)
+// Plus de double-stockage par nom — uniquement par ID
+function autoSaveImage(prodId, b64) {
+  try {
+    setImg(prodId, b64);
+  } catch (e) {
+    console.warn('[autoSave] échec', e);
+    // Quota dépassé → on alerte explicitement
+    addLog('gen-log', '⚠ localStorage saturé — image en buffer mais non sauvegardée. Publier la carte pour libérer.', 'warn');
   }
+}
+
+// Récupère le provider et la clé. Renvoie {provider, key} ou null si invalide.
+function getProviderConfig() {
   const provider = document.getElementById('ia-provider').value;
   const key = document.getElementById('gemini-key').value.trim();
-  if ((provider === 'recraft' || provider === 'gemini') && !key) {
-    return alert('Saisis ta clé API ' + provider + ' ou choisis Pollinations (sans clé).');
+  if (provider === 'recraft' && !key) {
+    alert('Saisis ta clé API Recraft ou choisis Pollinations (sans clé).');
+    return null;
   }
-  const targets = PRODUCTS.filter(p => selectedIds.has(p.id));
+  return { provider, key };
+}
+
+// Génère une image via le provider sélectionné, puis la compresse pour tenir
+// dans le quota localStorage (Pollinations renvoie du 1024×1024 ~1.5 MB →
+// après compressImg, on est à ~50 KB).
+async function genOneImage(prod, provider, key) {
+  const isCold = prod.cat === 'desserts';
+  const isDrink = DRINK_CATS.includes(prod.cat);
+  const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
+  const prompt = isDrink ? stylePrompts.drink(prod.name) : stylePrompts.food(prod.name, isCold);
+  const rawImg = (provider === 'recraft')
+    ? await genViaRecraft(prompt, key)
+    : await genViaPollinations(prompt);
+  if (!rawImg) return null;
+  // ★ CRITIQUE : compression avant stockage pour éviter saturation quota
+  return await compressImg(rawImg, 600, 0.82);
+}
+
+// Boucle de génération principale. Respecte la liste exacte passée en
+// argument (jamais de re-filter caché). Auto-save après chaque succès.
+async function runGenerationLoop(targets, contextLabel) {
+  if (_isGenerating) {
+    return alert('Une génération est déjà en cours. Attends qu\'elle finisse ou clique "⏹ Arrêter".');
+  }
+  if (!targets || targets.length === 0) {
+    return alert('Aucun produit à générer.');
+  }
+  const cfg = getProviderConfig();
+  if (!cfg) return;
+
+  // Confirmation avant génération massive (>5) car ça prend du temps ET
+  // consomme des crédits API si Recraft
+  if (targets.length > 5) {
+    const eta = Math.ceil(targets.length * 1.5);
+    const apiCost = cfg.provider === 'recraft' ? `\n⚠ Recraft consomme ${targets.length} crédit(s).` : '';
+    if (!confirm(`Générer ${targets.length} images via ${cfg.provider} ?\n\n⏱️ Temps estimé : ~${eta}s${apiCost}\n\nContinuer ?`)) return;
+  }
+
   stopGen = false;
-  document.getElementById('btn-gen-all').disabled = true;
-  document.getElementById('btn-stop').style.display = '';
+  setGeneratingState(true);
+
   const log = document.getElementById('gen-log');
   const prog = document.getElementById('gen-progress');
   const status = document.getElementById('gen-status');
   log.style.display = 'block';
   log.innerHTML = '';
-  addLog('gen-log', 'ℹ ' + targets.length + ' produits sélectionnés à générer (style: ' + selectedStyle + ')', 'inf');
-  let done = 0;
+  prog.style.width = '0%';
+  addLog('gen-log', `ℹ ${targets.length} produit(s) à générer — style: ${selectedStyle}, provider: ${cfg.provider} (${contextLabel})`, 'inf');
+
+  let done = 0, ok = 0, errors = 0;
   for (const prod of targets) {
-    if (stopGen) { addLog('gen-log', '⏹ Génération arrêtée', 'warn'); break; }
-    status.textContent = '🎨 ' + prod.name + ' (' + (done+1) + '/' + targets.length + ')';
-    addLog('gen-log', '⏳ ' + prod.name + '...', 'inf');
+    if (stopGen) { addLog('gen-log', '⏹ Génération arrêtée par l\'utilisateur', 'warn'); break; }
+    status.textContent = `🎨 ${prod.name} (${done + 1}/${targets.length})`;
+    addLog('gen-log', `⏳ ${prod.name}...`, 'inf');
     try {
-      const isCold = prod.cat === 'desserts';
-      const isDrink = DRINK_CATS.includes(prod.cat);
-      const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
-      const prompt = isDrink ? stylePrompts.drink(prod.name) : stylePrompts.food(prod.name, isCold);
-      let imgDataUrl = null;
-      if (provider === 'pollinations') imgDataUrl = await genViaPollinations(prompt);
-      else if (provider === 'recraft') imgDataUrl = await genViaRecraft(prompt, key);
-      if (imgDataUrl) {
-        importedImages[prod.id] = imgDataUrl;
-        addLog('gen-log', '✓ ' + prod.name + ' (' + provider + ')', 'ok');
-        document.getElementById('stat-gen').textContent = parseInt(document.getElementById('stat-gen').textContent) + 1;
+      const compressed = await genOneImage(prod, cfg.provider, cfg.key);
+      if (compressed) {
+        importedImages[prod.id] = compressed;
+        autoSaveImage(prod.id, compressed); // ★ AUTO-SAVE immédiat
+        addLog('gen-log', `✓ ${prod.name} (auto-sauvegardé)`, 'ok');
+        ok++;
         renderGrid();
       } else {
-        addLog('gen-log', '✗ ' + prod.name + ': pas d\'image retournée', 'err');
+        errors++;
+        addLog('gen-log', `✗ ${prod.name} : pas d'image retournée`, 'err');
       }
     } catch (err) {
-      addLog('gen-log', '✗ ' + prod.name + ': ' + (err.message || 'erreur réseau'), 'err');
+      errors++;
+      addLog('gen-log', `✗ ${prod.name} : ${err.message || 'erreur réseau'}`, 'err');
     }
     done++;
-    prog.style.width = Math.round(done/targets.length*100) + '%';
-    await new Promise(r => setTimeout(r, 2500)); // 2.5s entre requetes pour eviter rate limit
+    prog.style.width = Math.round(done / targets.length * 100) + '%';
+    // Rate limit (sauf sur le dernier item)
+    if (done < targets.length && !stopGen) {
+      await new Promise(r => setTimeout(r, 1500));
+    }
   }
-  status.textContent = done + ' images générées ! Click sur une carte pour preview/régénérer.';
-  document.getElementById('btn-gen-all').disabled = false;
-  document.getElementById('btn-stop').style.display = 'none';
-  // Auto-clear selection after gen
-  selectedIds.clear();
+
+  status.textContent = `${ok}/${targets.length} générées${errors ? ` · ${errors} erreur(s)` : ''} — auto-sauvegardées dans le localStorage`;
+  setGeneratingState(false);
   renderGrid();
+}
+
+// ── Wrappers publics ──
+
+// "Générer toutes les images manquantes" — sur les catégories cochées
+window.generateAllFood = async function() {
+  const genFood = document.getElementById('gen-food').checked;
+  const genDrinks = document.getElementById('gen-drinks').checked;
+  if (!genFood && !genDrinks) return alert('Sélectionne au moins une catégorie à générer');
+  const allowedCats = [];
+  if (genFood) allowedCats.push(...FOOD_CATS);
+  if (genDrinks) allowedCats.push(...DRINK_CATS);
+  // On filtre les produits sans image (Firestore, LS ou buffer)
+  const targets = PRODUCTS.filter(p =>
+    allowedCats.includes(p.cat) &&
+    !p.imgUrl && !getImg(p.id) && !importedImages[p.id]
+  );
+  if (targets.length === 0) return alert('Tous les produits de ces catégories ont déjà une image. Rien à générer.');
+  return runGenerationLoop(targets, 'manquants');
 };
 
-// Génération ciblée selon checkboxes
+// "Générer la sélection" — respecte exactement les cases cochées par
+// l'utilisateur, MÊME si le produit a déjà une image (régénération assumée)
 window.generateSelected = async function() {
   if (selectedIds.size === 0) {
     return alert('Aucun produit sélectionné. Coche au moins un produit ou clique "Sélectionner les manquants".');
   }
-  const ids = Array.from(selectedIds);
-  const targets = PRODUCTS.filter(p => ids.includes(p.id));
-  await runGeneration(targets, 'selection');
-};
-
-async function runGeneration(targets, mode) {
-  const provider = document.getElementById('ia-provider').value;
-  const key = document.getElementById('gemini-key').value.trim();
-  if ((provider === 'recraft' || provider === 'gemini') && !key) {
-    return alert('Saisis ta clé API ' + provider + ' ou choisis Pollinations (sans clé).');
-  }
-  stopGen = false;
-  const btn = document.getElementById('btn-gen-all');
-  if (btn) btn.disabled = true;
-  document.getElementById('btn-stop').style.display = '';
-  const log = document.getElementById('gen-log');
-  const prog = document.getElementById('gen-progress');
-  const status = document.getElementById('gen-status');
-  log.style.display = 'block';
-  log.innerHTML = '';
-  addLog('gen-log', 'ℹ ' + targets.length + ' produits à générer (style: ' + selectedStyle + ', mode: ' + mode + ')', 'inf');
-  if (targets.length === 0) {
-    addLog('gen-log', '✓ Rien à générer.', 'ok');
-    if (btn) btn.disabled = false;
-    document.getElementById('btn-stop').style.display = 'none';
-    return;
-  }
-  let done = 0, errors = 0;
-  for (const prod of targets) {
-    if (stopGen) { addLog('gen-log', '⏹ Génération arrêtée', 'warn'); break; }
-    status.textContent = '🎨 Génération: ' + prod.name + ' (' + (done+1) + '/' + targets.length + ')';
-    addLog('gen-log', '⏳ ' + prod.name + '...', 'inf');
-    try {
-      const isCold = prod.cat === 'desserts';
-      const isDrink = DRINK_CATS.includes(prod.cat);
-      const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
-      const prompt = isDrink ? stylePrompts.drink(prod.name) : stylePrompts.food(prod.name, isCold);
-      let imgDataUrl = null;
-      if (provider === 'pollinations') imgDataUrl = await genViaPollinations(prompt);
-      else if (provider === 'recraft') imgDataUrl = await genViaRecraft(prompt, key);
-      if (imgDataUrl) {
-        importedImages[prod.id] = imgDataUrl;
-        addLog('gen-log', '✓ ' + prod.name + ' (' + provider + ')', 'ok');
-        renderGrid();
-      } else {
-        errors++;
-        addLog('gen-log', '✗ ' + prod.name + ': pas d\'image', 'err');
-      }
-    } catch (err) {
-      errors++;
-      addLog('gen-log', '✗ ' + prod.name + ': ' + (err.message || 'erreur reseau'), 'err');
-    }
-    done++;
-    prog.style.width = Math.round(done / targets.length * 100) + '%';
-    await new Promise(r => setTimeout(r, 1500));
-  }
-  status.textContent = (done - errors) + '/' + targets.length + ' images générées' + (errors ? ' (' + errors + ' erreurs)' : '');
-  if (btn) btn.disabled = false;
-  document.getElementById('btn-stop').style.display = 'none';
-  renderGrid();
-}
-
-window.generateAllFood = async function() {
-  const provider = document.getElementById('ia-provider').value;
-  const key = document.getElementById('gemini-key').value.trim();
-  if ((provider === 'recraft' || provider === 'gemini') && !key) {
-    return alert('Saisis ta clé API ' + provider + ' ou choisis Pollinations (sans clé).');
-  }
-
-  const genFood = document.getElementById('gen-food').checked;
-  const genDrinks = document.getElementById('gen-drinks').checked;
-  if (!genFood && !genDrinks) return alert('Sélectionne au moins une catégorie à générer');
-
-  const allowedCats = [];
-  if (genFood) allowedCats.push(...FOOD_CATS);
-  if (genDrinks) allowedCats.push(...DRINK_CATS);
-
-  const filtered = PRODUCTS.filter(p => allowedCats.includes(p.cat) && p.id !== 'p52');
-  // Auto-filter manquants seulement
-  const missingOnly = filtered.filter(p => !p.imgUrl && !getImg(p.id) && !getImg(p.name) && !importedImages[p.id]);
-  return runGeneration(missingOnly);
-};
-
-async function runGeneration(genProducts) {
-  const provider = document.getElementById('ia-provider').value;
-  const key = document.getElementById('gemini-key').value.trim();
-  if ((provider === 'recraft' || provider === 'gemini') && !key) {
-    return alert('Saisis ta clé API ' + provider + ' ou choisis Pollinations (sans clé).');
-  }
-  if (!genProducts || genProducts.length === 0) {
-    return alert('Aucun produit à générer.');
-  }
-
-  stopGen = false;
-  document.getElementById('btn-gen-all').disabled = true;
-  document.getElementById('btn-stop').style.display = '';
-
-  const log = document.getElementById('gen-log');
-  const prog = document.getElementById('gen-progress');
-  const status = document.getElementById('gen-status');
-  log.style.display = 'block';
-  log.innerHTML = '';
-
-  // Exclude items deja avec image (Firestore Storage p.imgUrl, localStorage, ou buffer)
-  const missing = genProducts.filter(p => !p.imgUrl && !getImg(p.id) && !getImg(p.name) && !importedImages[p.id]);
-  addLog('gen-log', 'ℹ ' + missing.length + ' produits sans image à générer (style: ' + selectedStyle + ')', 'inf');
-  if (missing.length === 0) { alert('Tous les produits ont déjà une image ! Rien à générer.'); document.getElementById('btn-gen-all').disabled = false; document.getElementById('btn-stop').style.display = 'none'; return; }
-
-  let done = 0;
-  for (const prod of missing) {
-    if (stopGen) { addLog('gen-log', '⏹ Génération arrêtée', 'warn'); break; }
-
-    status.textContent = '🎨 Génération: ' + prod.name + ' (' + (done+1) + '/' + missing.length + ')';
-    addLog('gen-log', '⏳ ' + prod.name + '...', 'inf');
-
-    try {
-      const isCold = prod.cat === 'desserts';
-      const isDrink = DRINK_CATS.includes(prod.cat);
-      const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
-      const prompt = isDrink ? stylePrompts.drink(prod.name) : stylePrompts.food(prod.name, isCold);
-
-      let imgDataUrl = null;
-      if (provider === 'pollinations') {
-        imgDataUrl = await genViaPollinations(prompt);
-      } else if (provider === 'recraft') {
-        imgDataUrl = await genViaRecraft(prompt, key);
-      } else {
-        const res = await fetch(
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=' + key,
-          { method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({
-              contents:[{parts:[{text:prompt}]}],
-              generationConfig:{ responseModalities:['TEXT','IMAGE'] }
-            })
-          }
-        );
-        const data = await res.json();
-        const parts = data.candidates?.[0]?.content?.parts || [];
-        const imgPart = parts.find(p => p.inlineData);
-        if (imgPart) imgDataUrl = 'data:' + imgPart.inlineData.mimeType + ';base64,' + imgPart.inlineData.data;
-      }
-
-      if (imgDataUrl) {
-        importedImages[prod.id] = imgDataUrl;
-        addLog('gen-log', '✓ ' + prod.name + ' (' + provider + ')', 'ok');
-        // Update preview card
-        const card = document.getElementById('card-' + prod.id);
-        if (card) {
-          const old = card.querySelector('.img-ph');
-          if (old) { const img = document.createElement('img'); img.src = importedImages[prod.id]; img.style.cssText = 'width:100%;height:90px;object-fit:cover;display:block'; old.replaceWith(img); }
-          const s = card.querySelector('.status'); if (s) { s.className='status status-gen'; s.textContent='✨'; }
-        }
-      } else {
-        addLog('gen-log', '✗ ' + prod.name + ': Erreur lors de la génération. Vérifiez votre clé API.', 'err');
-      }
-    } catch(err) {
-      addLog('gen-log', '✗ ' + prod.name + ': Erreur réseau ou serveur indisponible.', 'err');
-    }
-
-    done++;
-    prog.style.width = Math.round(done/missing.length*100)+'%';
-    document.getElementById('stat-gen').textContent = parseInt(document.getElementById('stat-gen').textContent) + 1;
-
-    // Rate limit: wait 1.5s between requests
-    await new Promise(r => setTimeout(r, 1500));
-  }
-
-  status.textContent = done + ' images générées !';
-  document.getElementById('btn-gen-all').disabled = false;
-  document.getElementById('btn-stop').style.display = 'none';
+  const targets = PRODUCTS.filter(p => selectedIds.has(p.id));
+  await runGenerationLoop(targets, 'sélection');
+  // Auto-clear de la sélection après génération
+  selectedIds.clear();
   renderGrid();
 };
 
 window.stopGeneration = function() { stopGen = true; };
 
-// ── Save to localStorage ──
-window.saveToLS = function() {
-  let saved = 0;
+// ── Force-save (les images sont déjà auto-sauvegardées, mais ce bouton
+// permet de re-sauvegarder tout le buffer au cas où une sauvegarde aurait
+// échoué pendant la génération) ──
+window.forceSaveAll = function() {
+  let saved = 0, failed = 0;
   for (const [id, b64] of Object.entries(importedImages)) {
-    const prod = PRODUCTS.find(p => p.id === id);
-    if (prod && b64) {
+    try {
       setImg(id, b64);
-      setImg(prod.name, b64);
       saved++;
+    } catch (e) {
+      failed++;
     }
   }
-  document.getElementById('save-status').textContent = '✅ ' + saved + ' images sauvegardées ! Ouvrez la Caisse → Admin → Publier la carte pour les publier.';
-  document.getElementById('save-status').style.color = 'var(--green)';
+  const status = document.getElementById('save-status');
+  if (failed > 0) {
+    status.textContent = `⚠ ${saved} images sauvegardées, ${failed} en échec (quota localStorage plein ?). Publie la carte pour libérer de l'espace.`;
+    status.style.color = 'var(--red)';
+  } else {
+    status.textContent = `✅ ${saved} image(s) re-sauvegardée(s). Ouvre la Caisse → "☁️ Publier" pour pousser sur Firebase.`;
+    status.style.color = 'var(--green)';
+  }
   renderGrid();
 };
 
@@ -798,28 +748,21 @@ window.regenImage = async function() {
   if (!prodId) return;
   const p = PRODUCTS.find(x => x.id === prodId);
   if (!p) return;
-  const provider = document.getElementById('ia-provider').value;
-  const key = document.getElementById('gemini-key').value.trim();
-  if ((provider === 'recraft' || provider === 'gemini') && !key) return alert('Saisis ta clé API ' + provider);
+  const cfg = getProviderConfig();
+  if (!cfg) return;
 
   const btn = document.getElementById('btn-regen');
   btn.disabled = true; btn.textContent = '⏳ Régénération...';
 
   try {
-    const isCold = p.cat === 'desserts';
-    const isDrink = DRINK_CATS.includes(p.cat);
-    const stylePrompts = STYLE_PROMPTS[selectedStyle] || STYLE_PROMPTS.brasserie;
-    const prompt = isDrink ? stylePrompts.drink(p.name) : stylePrompts.food(p.name, isCold);
-    let imgDataUrl;
-    if (provider === 'pollinations') imgDataUrl = await genViaPollinations(prompt);
-    else if (provider === 'recraft') imgDataUrl = await genViaRecraft(prompt, key);
-    else throw new Error('Gemini removed');
-    if (imgDataUrl) {
-      importedImages[p.id] = imgDataUrl;
-      document.getElementById('img-preview-img').src = imgDataUrl;
+    const compressed = await genOneImage(p, cfg.provider, cfg.key);
+    if (compressed) {
+      importedImages[p.id] = compressed;
+      autoSaveImage(p.id, compressed); // ★ auto-save aussi sur régénération
+      document.getElementById('img-preview-img').src = compressed;
       document.getElementById('img-preview-img').style.display = 'block';
       document.getElementById('img-preview-ph').style.display = 'none';
-      document.getElementById('img-preview-source').textContent = '✨ Généré IA (non sauvegardé)';
+      document.getElementById('img-preview-source').textContent = '✨ Généré IA (auto-sauvegardé)';
       renderGrid();
     }
   } catch (e) {
