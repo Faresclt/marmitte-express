@@ -3176,14 +3176,17 @@ function applySettingsForm(){
   const lt=document.getElementById('s-legal-tvaintra'); if(lt) lt.value=lg.tvaIntra||'';
   const lp=document.getElementById('s-legal-ape');      if(lp) lp.value=lg.ape||'';
   updateLegalStatus();
-  // Gemini key status
-  const gk=GEMINI_KEY_PDJ;
-  const gkStatus=document.getElementById('gemini-key-status');
-  if(gk&&gk.length>10){
-    document.getElementById('s-gemini-key').value=gk;
-    gkStatus.innerHTML='<span style="color:#22c97a">&#10003; Clé configurée ('+gk.slice(0,8)+'...'+gk.slice(-4)+')</span>';
-  } else {
-    gkStatus.innerHTML='<span style="color:#e84040">&#10007; Aucune clé configurée — les fonctions IA sont désactivées</span>';
+  // Gemini key status (les inputs peuvent ne pas exister dans certaines builds)
+  const gk = (typeof GEMINI_KEY_PDJ !== 'undefined') ? GEMINI_KEY_PDJ : '';
+  const gkStatus = document.getElementById('gemini-key-status');
+  const gkInput  = document.getElementById('s-gemini-key');
+  if(gkStatus){
+    if(gk && gk.length > 10){
+      if(gkInput) gkInput.value = gk;
+      gkStatus.innerHTML = '<span style="color:#22c97a">&#10003; Clé configurée ('+gk.slice(0,8)+'...'+gk.slice(-4)+')</span>';
+    } else {
+      gkStatus.innerHTML = '<span style="color:#e84040">&#10007; Aucune clé configurée — les fonctions IA sont désactivées</span>';
+    }
   }
 }
 function saveSettings(){
