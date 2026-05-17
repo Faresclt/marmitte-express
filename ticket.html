@@ -53,6 +53,13 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 16
 
 .footer { text-align: center; padding: 16px; font-size: 11px; color: var(--muted); }
 
+.tva-block { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); font-size: 11px; color: var(--muted); }
+.tva-block .tva-row { display: flex; justify-content: space-between; padding: 2px 0; }
+.tva-block .tva-row strong { color: var(--text); }
+.legal-block { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border); font-size: 10px; color: var(--muted); text-align: center; line-height: 1.6; }
+.legal-block strong { color: var(--text); display: block; margin-bottom: 4px; }
+.receipt-num { display: inline-block; padding: 4px 12px; background: rgba(255,255,255,.15); border-radius: 20px; font-size: 11px; font-weight: 700; margin-top: 6px; letter-spacing: .5px; }
+
 /* Modale email */
 .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 22px; max-width: 380px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
@@ -192,12 +199,37 @@ function render(t) {
     </div>
   `;
 
+  // Ventilation TVA détaillée
+  const tvaRates = t.tvaRates || {};
+  const tvaRows = Object.keys(tvaRates).sort((a,b)=>parseFloat(a)-parseFloat(b)).map(rate => {
+    const r2 = tvaRates[rate];
+    return `<div class="tva-row"><span>HT ${esc(rate)}%</span><span>${(r2.ht||0).toFixed(2)}€</span></div>
+            <div class="tva-row"><span>TVA ${esc(rate)}%</span><span>${(r2.tva||0).toFixed(2)}€</span></div>`;
+  }).join('');
+  const tvaBlock = tvaRows ? `
+    <div class="tva-block">
+      ${tvaRows}
+      <div class="tva-row" style="margin-top:6px;padding-top:6px;border-top:1px dotted var(--border)"><strong>Total HT</strong><strong>${(t.totalHT || 0).toFixed(2)}€</strong></div>
+      <div class="tva-row"><strong>Total TVA</strong><strong>${(t.totalTVA || 0).toFixed(2)}€</strong></div>
+    </div>` : '';
+
+  // Mentions légales
+  const lg = t.legal || {};
+  const legalParts = [];
+  if (lg.raison)   legalParts.push(`<strong>${esc(lg.raison)}</strong>`);
+  if (lg.adresse)  legalParts.push(esc(lg.adresse));
+  if (lg.siret)    legalParts.push(`SIRET : ${esc(lg.siret)}`);
+  if (lg.tvaIntra) legalParts.push(`N° TVA : ${esc(lg.tvaIntra)}`);
+  if (lg.ape)      legalParts.push(`APE : ${esc(lg.ape)}`);
+  const legalBlock = legalParts.length ? `<div class="legal-block">${legalParts.join('<br>')}</div>` : '';
+
   const html = `
     <div class="card">
       <div class="hdr">
         <div class="logo">${logoHTML}</div>
         <h1>${esc(resto.name || 'Restaurant')}</h1>
         <div class="meta">${esc(resto.tagline || 'Merci de votre visite !')}</div>
+        ${t.number ? `<div class="receipt-num">N° ${esc(t.number)}</div>` : ''}
       </div>
       <div class="body">
         <div class="info-row">
@@ -205,14 +237,15 @@ function render(t) {
           <span>${esc(t.date || '')} · ${esc(t.time || '')}</span>
         </div>
         <div class="items">${itemsHTML}</div>
-        <div class="total"><span>TOTAL</span><span class="amount">${(t.total || 0).toFixed(2)}€</span></div>
-        ${t.tax ? `<div class="tax-row">dont TVA : ${t.tax.toFixed(2)}€</div>` : ''}
+        ${tvaBlock}
+        <div class="total"><span>TOTAL TTC</span><span class="amount">${(t.total || 0).toFixed(2)}€</span></div>
         <div class="info-row" style="border-top:1px solid var(--border);border-bottom:none;padding-top:14px;margin-top:14px;margin-bottom:0">
           <span>Règlement</span>
           <span><strong>${esc(payLabel)}</strong></span>
         </div>
         ${actionsHTML}
         ${reviewsHTML}
+        ${legalBlock}
       </div>
     </div>
     <div class="footer">Ticket généré le ${esc(t.date || '')} · ${esc(resto.name || '')}</div>
@@ -326,20 +359,39 @@ function buildEmailContent(t) {
   const resto = (t.resto || {}).name || 'Restaurant';
   const items = t.items || [];
   const reviews = t.reviews || {};
+  const tvaRates = t.tvaRates || {};
+  const lg = t.legal || {};
   const tableLine = t.tableNum ? 'Table ' + t.tableNum : 'Vente directe';
   const payLabel = t.payType === 'cb' ? 'Carte bancaire' : t.payType === 'cash' ? 'Espèces' : 'Offert';
 
   // Texte simple
   let text = resto + '\n';
-  text += 'Ticket du ' + (t.date || '') + ' à ' + (t.time || '') + '\n';
+  if (t.number) text += 'Ticket N° ' + t.number + '\n';
+  text += (t.date || '') + ' à ' + (t.time || '') + '\n';
   text += tableLine + ' — ' + payLabel + '\n\n';
   items.forEach(i => {
     const opts = [i.cuisson, i.garniture].filter(Boolean).join(', ');
     text += i.qty + 'x ' + i.name + (opts ? ' (' + opts + ')' : '') + ' — ' + (i.qty * i.price).toFixed(2) + '€\n';
   });
-  text += '\nTotal : ' + (t.total || 0).toFixed(2) + '€\n\nMerci de votre visite !';
-  if (reviews.google) text += '\n\nLaissez-nous un avis Google : ' + reviews.google;
-  if (reviews.tripadvisor) text += '\n\nTripAdvisor : ' + reviews.tripadvisor;
+  if (Object.keys(tvaRates).length) {
+    text += '\n— TVA —\n';
+    Object.keys(tvaRates).sort().forEach(rate => {
+      text += 'HT ' + rate + '% : ' + (tvaRates[rate].ht||0).toFixed(2) + '€  |  TVA : ' + (tvaRates[rate].tva||0).toFixed(2) + '€\n';
+    });
+    text += 'Total HT  : ' + (t.totalHT||0).toFixed(2) + '€\n';
+    text += 'Total TVA : ' + (t.totalTVA||0).toFixed(2) + '€\n';
+  }
+  text += 'TOTAL TTC : ' + (t.total || 0).toFixed(2) + '€\n\nMerci de votre visite !';
+  if (reviews.google) text += '\n\nAvis Google : ' + reviews.google;
+  if (reviews.tripadvisor) text += '\nTripAdvisor : ' + reviews.tripadvisor;
+  if (lg.raison || lg.siret) {
+    text += '\n\n— Mentions légales —';
+    if (lg.raison) text += '\n' + lg.raison;
+    if (lg.adresse) text += '\n' + lg.adresse;
+    if (lg.siret) text += '\nSIRET : ' + lg.siret;
+    if (lg.tvaIntra) text += '\nN° TVA : ' + lg.tvaIntra;
+    if (lg.ape) text += '\nAPE : ' + lg.ape;
+  }
 
   // HTML formaté
   const accent = (t.resto || {}).accent || '#f5a623';
@@ -353,21 +405,42 @@ function buildEmailContent(t) {
   if (reviews.google)      reviewLinks += '<a href="' + esc(reviews.google) + '" style="display:inline-block;margin:4px;padding:10px 18px;background:#4285F4;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">⭐ Avis Google</a>';
   if (reviews.tripadvisor) reviewLinks += '<a href="' + esc(reviews.tripadvisor) + '" style="display:inline-block;margin:4px;padding:10px 18px;background:#00aa6c;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">🦉 TripAdvisor</a>';
 
+  // Ventilation TVA
+  const tvaHTMLRows = Object.keys(tvaRates).sort().map(rate =>
+    '<tr><td style="padding:3px 8px;color:#666;font-size:11px">HT ' + esc(rate) + '%</td><td style="padding:3px 8px;text-align:right;color:#666;font-size:11px">' + (tvaRates[rate].ht||0).toFixed(2) + '€</td><td style="padding:3px 8px;color:#666;font-size:11px">TVA ' + esc(rate) + '%</td><td style="padding:3px 8px;text-align:right;color:#666;font-size:11px">' + (tvaRates[rate].tva||0).toFixed(2) + '€</td></tr>'
+  ).join('');
+  const tvaHTML = tvaHTMLRows ? '<table style="width:100%;border-collapse:collapse;margin-top:12px;border-top:1px dashed #ccc;padding-top:8px">' + tvaHTMLRows + '</table>' +
+    '<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;color:#666"><span>Total HT</span><span>' + (t.totalHT||0).toFixed(2) + '€</span></div>' +
+    '<div style="display:flex;justify-content:space-between;font-size:12px;color:#666"><span>Total TVA</span><span>' + (t.totalTVA||0).toFixed(2) + '€</span></div>' : '';
+
+  // Mentions légales
+  const legalParts = [];
+  if (lg.raison)   legalParts.push('<strong>' + esc(lg.raison) + '</strong>');
+  if (lg.adresse)  legalParts.push(esc(lg.adresse));
+  if (lg.siret)    legalParts.push('SIRET : ' + esc(lg.siret));
+  if (lg.tvaIntra) legalParts.push('N° TVA : ' + esc(lg.tvaIntra));
+  if (lg.ape)      legalParts.push('APE : ' + esc(lg.ape));
+  const legalHTML = legalParts.length
+    ? '<div style="margin-top:18px;padding-top:14px;border-top:1px dashed #ccc;font-size:10px;color:#666;text-align:center;line-height:1.6">' + legalParts.join('<br>') + '</div>'
+    : '';
+
   const html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">' +
     '<div style="background:' + accent + ';padding:20px;text-align:center;border-radius:10px 10px 0 0">' +
       '<h1 style="margin:0;color:#1a1100;font-size:22px;letter-spacing:1px">' + esc(resto) + '</h1>' +
-      '<div style="font-size:12px;color:#1a1100;margin-top:4px">Merci de votre visite !</div>' +
+      (t.number ? '<div style="font-size:12px;color:#1a1100;margin-top:4px;font-weight:600">Ticket N° ' + esc(t.number) + '</div>' : '') +
     '</div>' +
     '<div style="padding:20px;border:1px solid #eee;border-top:none">' +
       '<div style="color:#666;font-size:13px;margin-bottom:14px"><strong>' + esc(tableLine) + '</strong> · ' + esc(t.date || '') + ' à ' + esc(t.time || '') + '<br>Règlement : <strong>' + esc(payLabel) + '</strong></div>' +
       '<table style="width:100%;border-collapse:collapse;font-size:13px">' + itemRows + '</table>' +
-      '<div style="margin-top:14px;padding-top:14px;border-top:2px solid #1a1a1a;display:flex;justify-content:space-between;font-size:18px;font-weight:700"><span>TOTAL</span><span>' + (t.total || 0).toFixed(2) + '€</span></div>' +
+      tvaHTML +
+      '<div style="margin-top:8px;padding-top:8px;border-top:2px solid #1a1a1a;display:flex;justify-content:space-between;font-size:18px;font-weight:700"><span>TOTAL TTC</span><span>' + (t.total || 0).toFixed(2) + '€</span></div>' +
       (reviewLinks ? '<div style="margin-top:24px;padding-top:20px;border-top:1px solid #eee;text-align:center"><div style="font-size:13px;color:#666;margin-bottom:10px">Vous avez aimé ? Laissez-nous un avis 💛</div>' + reviewLinks + '</div>' : '') +
+      legalHTML +
     '</div>' +
     '<div style="text-align:center;font-size:11px;color:#999;margin-top:12px">Ticket envoyé automatiquement — ne pas répondre</div>' +
   '</div>';
 
-  return { subject: 'Ticket — ' + resto + ' — ' + (t.date || ''), text, html };
+  return { subject: 'Ticket N° ' + (t.number||'') + ' — ' + resto + ' — ' + (t.date || ''), text, html };
 }
 </script>
 </body>

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v46-ticket-share-email-actions';
+const CACHE_NAME = 'marmite-v47-mentions-legales-numero-ticket';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

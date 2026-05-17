@@ -177,15 +177,19 @@ window.initFirebaseListeners = function(){
         if(typeof applyBranding === 'function') applyBranding();
       }
     }
-    // Sync settings cross-device (avis, worker email) — uniquement si non-vide côté Firebase
+    // Sync settings cross-device (avis, worker email, infos légales)
     if(data && data.settings && typeof settings !== 'undefined'){
       const s = data.settings;
       if(s.googleReviewUrl) settings.googleReviewUrl = s.googleReviewUrl;
       if(s.tripadvisorUrl)  settings.tripadvisorUrl  = s.tripadvisorUrl;
       if(s.mailWorkerUrl)   settings.mailWorkerUrl   = s.mailWorkerUrl;
       if(s.mailSender)      settings.mailSender      = s.mailSender;
+      if(s.legal && typeof s.legal === 'object'){
+        settings.legal = { ...(settings.legal||{}), ...s.legal };
+      }
       LS.set('settings', settings);
       if(typeof updateMailWorkerStatus === 'function') updateMailWorkerStatus();
+      if(typeof updateLegalStatus === 'function') updateLegalStatus();
     }
     // Sync salle layout : Firebase = source de vérité.
     // IMPORTANT : on accède aux globals via window.* car ce script est en
@@ -568,6 +572,23 @@ document.addEventListener('DOMContentLoaded', () => {
             <label class="form-label">Lien TripAdvisor</label>
             <input class="form-input" id="s-tripadvisor" placeholder="https://www.tripadvisor.fr/Restaurant_Review-..." oninput="saveSettings()">
           </div>
+        </div>
+        <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🏢 Informations légales (mentions obligatoires)</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+            Ces informations apparaîtront sur tous les tickets (imprimés, email, QR).
+            <strong>Obligatoires en France</strong> selon l'arrêté du 27 mars 1987 et l'article 290 quater du CGI.
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Raison sociale</label><input class="form-input" id="s-legal-raison" placeholder="SARL Marmite Express" oninput="saveSettings()"></div>
+            <div class="form-group"><label class="form-label">N° SIRET (14 chiffres)</label><input class="form-input" id="s-legal-siret" placeholder="123 456 789 00012" inputmode="numeric" oninput="saveSettings()"></div>
+          </div>
+          <div class="form-group"><label class="form-label">Adresse complète</label><input class="form-input" id="s-legal-adresse" placeholder="12 rue de la Paix, 75001 Paris" oninput="saveSettings()"></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">N° TVA intracommunautaire</label><input class="form-input" id="s-legal-tvaintra" placeholder="FR12345678901" oninput="saveSettings()"></div>
+            <div class="form-group"><label class="form-label">Code APE/NAF</label><input class="form-input" id="s-legal-ape" placeholder="5610A" oninput="saveSettings()"></div>
+          </div>
+          <div id="legal-status" style="font-size:12px;font-weight:600;margin-top:6px"></div>
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
           <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">📧 Envoi des tickets par email</div>
@@ -2231,9 +2252,15 @@ function updateCash(){
 
 function validatePay(){
   // Store receipt data BEFORE clearing ticket
+  const items = ticket.map(r=>({...r}));
+  const tvaDetails = calculateTVADetails(items);
   lastReceipt = {
-    items: ticket.map(r=>({...r})),
-    total: ticket.reduce((s,r)=>s+r.qty*r.price,0),
+    number: nextReceiptNumber(),
+    items,
+    total: tvaDetails.totalTTC,
+    totalHT: tvaDetails.totalHT,
+    totalTVA: tvaDetails.totalTVA,
+    tvaRates: tvaDetails.rates,
     payType: currentPayType,
     tableId: currentTableId,
     time: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),
@@ -2298,7 +2325,11 @@ function printReceipt(){
   </style></head><body>
   <div class="center">
     <h1>${branding.emoji||'🍲'} ${branding.name||'La Marmite Express'}</h1>
-    <h2>TICKET DE CAISSE</h2>
+    ${settings.legal && settings.legal.raison ? `<div style="font-size:10px;color:#666">${settings.legal.raison}</div>` : ''}
+    ${settings.legal && settings.legal.adresse ? `<div style="font-size:10px;color:#666;margin-top:2px">${settings.legal.adresse}</div>` : ''}
+    ${settings.legal && settings.legal.siret ? `<div style="font-size:10px;color:#666;margin-top:2px">SIRET : ${settings.legal.siret}</div>` : ''}
+    ${settings.legal && settings.legal.tvaIntra ? `<div style="font-size:10px;color:#666">N° TVA : ${settings.legal.tvaIntra}</div>` : ''}
+    <h2 style="margin-top:8px">TICKET N° ${r.number || '—'}</h2>
   </div>
   <div class="line"></div>
   <div class="row"><span>${r.date}</span><span>${r.time}</span></div>
@@ -2338,53 +2369,122 @@ function printReceipt(){
 }
 window.printReceipt = printReceipt;
 
+// ── Numéro de note séquentiel (NF525 partiel) ──
+// Format : YYYY-NNNNNN (réinitialisé chaque année, jamais réutilisé)
+// Stocké en local + Firebase pour résistance multi-device
+function nextReceiptNumber(){
+  const year = new Date().getFullYear();
+  const key = 'receiptCounter_' + year;
+  let n = parseInt(localStorage.getItem(key) || '0', 10);
+  n += 1;
+  localStorage.setItem(key, String(n));
+  return year + '-' + String(n).padStart(6, '0');
+}
+
+// ── Status des infos légales (affichage admin) ──
+function updateLegalStatus(){
+  const el = document.getElementById('legal-status');
+  if(!el) return;
+  const lg = settings.legal || {};
+  const missing = [];
+  if(!lg.raison)   missing.push('raison sociale');
+  if(!lg.siret || lg.siret.length !== 14) missing.push('SIRET (14 chiffres)');
+  if(!lg.adresse)  missing.push('adresse');
+  if(!lg.tvaIntra) missing.push('TVA intra');
+  if(missing.length === 0){
+    el.innerHTML = '<span style="color:#22c97a">✓ Mentions légales complètes</span>';
+  } else {
+    el.innerHTML = '<span style="color:#f5c23c">⚠ Mentions manquantes : '+missing.join(', ')+'</span>';
+  }
+}
+window.updateLegalStatus = updateLegalStatus;
+
+// ── Bloc HTML mentions légales (pour email + ticket.html) ──
+function legalFooterHTML(){
+  const lg = settings.legal || {};
+  if(!lg.raison && !lg.siret && !lg.adresse) return '';
+  const parts = [];
+  if(lg.raison)   parts.push('<strong>'+esc(lg.raison)+'</strong>');
+  if(lg.adresse)  parts.push(esc(lg.adresse));
+  if(lg.siret)    parts.push('SIRET : '+esc(lg.siret));
+  if(lg.tvaIntra) parts.push('N° TVA : '+esc(lg.tvaIntra));
+  if(lg.ape)      parts.push('APE : '+esc(lg.ape));
+  return '<div style="margin-top:18px;padding-top:14px;border-top:1px dashed #ccc;font-size:10px;color:#666;text-align:center;line-height:1.6">'+parts.join('<br>')+'</div>';
+}
+// Version texte brut
+function legalFooterText(){
+  const lg = settings.legal || {};
+  if(!lg.raison && !lg.siret && !lg.adresse) return '';
+  const parts = [];
+  if(lg.raison)   parts.push(lg.raison);
+  if(lg.adresse)  parts.push(lg.adresse);
+  if(lg.siret)    parts.push('SIRET : '+lg.siret);
+  if(lg.tvaIntra) parts.push('N° TVA : '+lg.tvaIntra);
+  if(lg.ape)      parts.push('APE : '+lg.ape);
+  return '\n\n— Mentions légales —\n'+parts.join('\n');
+}
+
 // ── Génération du contenu du ticket (texte + HTML) — partagé entre canaux ──
 function buildReceiptContent(r){
   const tbl = r.tableId ? salleElements.find(e=>e.id===r.tableId) : null;
   const tableName = tbl ? 'Table '+(tbl.number||'') : 'Vente directe';
   const payLabel = r.payType==='cb'?'Carte bancaire':r.payType==='cash'?'Espèces':'Offert';
   const restoName = branding.name || 'La Marmite Express';
+  const tvaDetails = r.tvaRates ? { rates: r.tvaRates, totalHT: r.totalHT, totalTVA: r.totalTVA } : calculateTVADetails(r.items);
   // Texte (pour SMS et fallback mailto:)
   let text = restoName+'\n';
-  text += 'Ticket du '+r.date+' à '+r.time+'\n';
+  if(r.number) text += 'Ticket N° '+r.number+'\n';
+  text += r.date+' à '+r.time+'\n';
   text += tableName+' — '+payLabel+'\n\n';
   r.items.forEach(i=>{
     const opts=[i.cuisson,i.garniture].filter(Boolean).join(', ');
     text += i.qty+'x '+i.name+(opts?' ('+opts+')':'')+' — '+(i.qty*i.price).toFixed(2)+'€\n';
   });
-  text += '\nTotal : '+r.total.toFixed(2)+'€\n\nMerci de votre visite !';
+  text += '\n— TVA —\n';
+  Object.keys(tvaDetails.rates).sort().forEach(rate => {
+    text += 'HT '+rate+'% : '+tvaDetails.rates[rate].ht.toFixed(2)+'€  |  TVA : '+tvaDetails.rates[rate].tva.toFixed(2)+'€\n';
+  });
+  text += '\nTotal HT  : '+tvaDetails.totalHT.toFixed(2)+'€\n';
+  text += 'Total TVA : '+tvaDetails.totalTVA.toFixed(2)+'€\n';
+  text += 'TOTAL TTC : '+r.total.toFixed(2)+'€\n\nMerci de votre visite !';
   if(settings.googleReviewUrl) text += '\n\nLaissez-nous un avis Google : '+settings.googleReviewUrl;
-  if(settings.tripadvisorUrl) text += '\n\nTripAdvisor : '+settings.tripadvisorUrl;
-  // HTML (pour email EmailJS)
+  if(settings.tripadvisorUrl) text += '\nTripAdvisor : '+settings.tripadvisorUrl;
+  text += legalFooterText();
+
+  // HTML
   const itemRows = r.items.map(i=>{
     const opts=[i.cuisson,i.garniture].filter(Boolean).join(', ');
     return '<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">'+i.qty+'x '+esc(i.name)+(opts?' <span style="color:#888;font-size:11px">('+esc(opts)+')</span>':'')+'</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">'+(i.qty*i.price).toFixed(2)+'€</td></tr>';
   }).join('');
+  const tvaRows = Object.keys(tvaDetails.rates).sort().map(rate => (
+    '<tr><td style="padding:3px 8px;color:#666">HT '+rate+'%</td><td style="padding:3px 8px;text-align:right;color:#666">'+tvaDetails.rates[rate].ht.toFixed(2)+'€</td><td style="padding:3px 8px;color:#666">TVA '+rate+'%</td><td style="padding:3px 8px;text-align:right;color:#666">'+tvaDetails.rates[rate].tva.toFixed(2)+'€</td></tr>'
+  )).join('');
   let reviewLinks = '';
-  if(settings.googleReviewUrl){
-    reviewLinks += '<a href="'+settings.googleReviewUrl+'" style="display:inline-block;margin:4px;padding:10px 18px;background:#4285F4;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">⭐ Avis Google</a>';
-  }
-  if(settings.tripadvisorUrl){
-    reviewLinks += '<a href="'+settings.tripadvisorUrl+'" style="display:inline-block;margin:4px;padding:10px 18px;background:#00aa6c;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">🦉 TripAdvisor</a>';
-  }
+  if(settings.googleReviewUrl) reviewLinks += '<a href="'+esc(settings.googleReviewUrl)+'" style="display:inline-block;margin:4px;padding:10px 18px;background:#4285F4;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">⭐ Avis Google</a>';
+  if(settings.tripadvisorUrl)  reviewLinks += '<a href="'+esc(settings.tripadvisorUrl)+'" style="display:inline-block;margin:4px;padding:10px 18px;background:#00aa6c;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">🦉 TripAdvisor</a>';
+
   const html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">'+
-    '<div style="background:#f5a623;padding:20px;text-align:center;border-radius:10px 10px 0 0">'+
+    '<div style="background:'+(branding.accent||'#f5a623')+';padding:20px;text-align:center;border-radius:10px 10px 0 0">'+
       '<h1 style="margin:0;color:#1a1100;font-size:22px;letter-spacing:1px">'+esc(restoName)+'</h1>'+
-      '<div style="font-size:12px;color:#1a1100;margin-top:4px">Merci de votre visite !</div>'+
+      (r.number ? '<div style="font-size:12px;color:#1a1100;margin-top:4px;font-weight:600">Ticket N° '+esc(r.number)+'</div>' : '')+
     '</div>'+
     '<div style="padding:20px;border:1px solid #eee;border-top:none">'+
       '<div style="color:#666;font-size:13px;margin-bottom:14px">'+
-        '<strong>'+esc(tableName)+'</strong> · '+r.date+' à '+r.time+'<br>'+
-        'Règlement : <strong>'+payLabel+'</strong>'+
+        '<strong>'+esc(tableName)+'</strong> · '+esc(r.date)+' à '+esc(r.time)+'<br>'+
+        'Règlement : <strong>'+esc(payLabel)+'</strong>'+
       '</div>'+
       '<table style="width:100%;border-collapse:collapse;font-size:13px">'+itemRows+'</table>'+
-      '<div style="margin-top:14px;padding-top:14px;border-top:2px solid #1a1a1a;display:flex;justify-content:space-between;font-size:18px;font-weight:700"><span>TOTAL</span><span>'+r.total.toFixed(2)+'€</span></div>'+
+      '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:12px;border-top:1px dashed #ccc;padding-top:8px">'+tvaRows+'</table>'+
+      '<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;color:#666"><span>Total HT</span><span>'+tvaDetails.totalHT.toFixed(2)+'€</span></div>'+
+      '<div style="display:flex;justify-content:space-between;font-size:12px;color:#666"><span>Total TVA</span><span>'+tvaDetails.totalTVA.toFixed(2)+'€</span></div>'+
+      '<div style="margin-top:8px;padding-top:8px;border-top:2px solid #1a1a1a;display:flex;justify-content:space-between;font-size:18px;font-weight:700"><span>TOTAL TTC</span><span>'+r.total.toFixed(2)+'€</span></div>'+
       (reviewLinks ? '<div style="margin-top:24px;padding-top:20px;border-top:1px solid #eee;text-align:center">'+
         '<div style="font-size:13px;color:#666;margin-bottom:10px">Vous avez aimé ? Laissez-nous un avis 💛</div>'+reviewLinks+'</div>' : '')+
+      legalFooterHTML()+
     '</div>'+
     '<div style="text-align:center;font-size:11px;color:#999;margin-top:12px">Ticket envoyé automatiquement — ne pas répondre</div>'+
   '</div>';
-  return { text, html, subject: 'Ticket — '+restoName+' — '+r.date, tableName, restoName };
+  return { text, html, subject: 'Ticket N° '+(r.number||'')+' — '+restoName+' — '+r.date, tableName, restoName };
 }
 
 // ── Envoi par EMAIL : modale + Worker Cloudflare (Brevo) ──
@@ -2487,14 +2587,19 @@ async function shareReceiptByQR(){
   const tbl = r.tableId ? salleElements.find(e=>e.id===r.tableId) : null;
   const tableNum = tbl ? (tbl.number||tbl.id) : null;
   const id = generateShortId();
+  const tvaDetails = r.tvaRates ? { rates: r.tvaRates, totalHT: r.totalHT, totalTVA: r.totalTVA } : calculateTVADetails(r.items);
   const payload = {
+    ...(r.number && { number: r.number }),
     items: r.items.map(i => ({
       qty: i.qty, name: i.name, price: i.price,
+      ...(typeof i.tva === 'number' && { tva: i.tva }),
       ...(i.cuisson && { cuisson: i.cuisson }),
       ...(i.garniture && { garniture: i.garniture })
     })),
     total: r.total,
-    tax: calculateTVATotal(r.items),
+    totalHT: tvaDetails.totalHT,
+    totalTVA: tvaDetails.totalTVA,
+    tvaRates: tvaDetails.rates,
     date: r.date,
     time: r.time,
     payType: r.payType,
@@ -2510,12 +2615,11 @@ async function shareReceiptByQR(){
       ...(settings.googleReviewUrl && { google: settings.googleReviewUrl }),
       ...(settings.tripadvisorUrl && { tripadvisor: settings.tripadvisorUrl })
     },
-    // Permet à la page ticket scannée de proposer "Recevoir par email"
-    // (le client tape son adresse → POST vers le worker du resto)
     mail: {
       ...(settings.mailWorkerUrl && { workerUrl: settings.mailWorkerUrl }),
       ...(settings.mailSender && { sender: settings.mailSender })
     },
+    legal: settings.legal || {},
     createdAt: window.FB.ts()
   };
   try{
@@ -3027,6 +3131,14 @@ function applySettingsForm(){
   const mwu=document.getElementById('s-mail-worker-url'); if(mwu) mwu.value=settings.mailWorkerUrl||'';
   const ms =document.getElementById('s-mail-sender');     if(ms)  ms.value =settings.mailSender||'';
   updateMailWorkerStatus();
+  // Infos légales
+  const lg = settings.legal || {};
+  const lr=document.getElementById('s-legal-raison');   if(lr) lr.value=lg.raison||'';
+  const ls=document.getElementById('s-legal-siret');    if(ls) ls.value=lg.siret||'';
+  const la=document.getElementById('s-legal-adresse');  if(la) la.value=lg.adresse||'';
+  const lt=document.getElementById('s-legal-tvaintra'); if(lt) lt.value=lg.tvaIntra||'';
+  const lp=document.getElementById('s-legal-ape');      if(lp) lp.value=lg.ape||'';
+  updateLegalStatus();
   // Gemini key status
   const gk=GEMINI_KEY_PDJ;
   const gkStatus=document.getElementById('gemini-key-status');
@@ -3053,7 +3165,19 @@ function saveSettings(){
   const ms  = document.getElementById('s-mail-sender');
   if(mwu) settings.mailWorkerUrl = mwu.value.trim();
   if(ms)  settings.mailSender    = ms.value.trim();
-  LS.set('settings',settings); updateMailWorkerStatus(); toast('Paramètres sauvegardés');
+  // Infos légales
+  settings.legal = settings.legal || {};
+  const lr = document.getElementById('s-legal-raison');
+  const ls = document.getElementById('s-legal-siret');
+  const la = document.getElementById('s-legal-adresse');
+  const lt = document.getElementById('s-legal-tvaintra');
+  const lp = document.getElementById('s-legal-ape');
+  if(lr) settings.legal.raison   = lr.value.trim();
+  if(ls) settings.legal.siret    = ls.value.replace(/\s/g,'').trim();
+  if(la) settings.legal.adresse  = la.value.trim();
+  if(lt) settings.legal.tvaIntra = lt.value.replace(/\s/g,'').trim().toUpperCase();
+  if(lp) settings.legal.ape      = lp.value.trim().toUpperCase();
+  LS.set('settings',settings); updateMailWorkerStatus(); updateLegalStatus(); toast('Paramètres sauvegardés');
 }
 
 function savePIN(){
@@ -4294,7 +4418,8 @@ function publishMenu(silent){
       googleReviewUrl: settings.googleReviewUrl || '',
       tripadvisorUrl: settings.tripadvisorUrl || '',
       mailWorkerUrl: settings.mailWorkerUrl || '',
-      mailSender: settings.mailSender || ''
+      mailSender: settings.mailSender || '',
+      legal: settings.legal || {}
     },
     salleLayout: salleElements,
     serveurPin: LS.get('serveur_pin','0000'),
