@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v37-rest-poll-standalone';
+const CACHE_NAME = 'marmite-v38-dedup-imports-no-spam';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

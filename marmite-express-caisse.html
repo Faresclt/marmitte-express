@@ -3187,24 +3187,29 @@ function tableStatus(tid){
     if(total > 0) return 'occupied';
   }
   // Filet de sécurité : si une commande Firebase est en attente pour cette
-  // table (pending ou received), on force le statut 'occupied' pour que la
-  // table s'affiche orange MÊME SI l'import dans tableData a échoué.
+  // table ET pas encore importée localement, on force 'occupied'.
+  // Important : on EXCLUT les orders déjà dans _importedOrderIds pour ne
+  // pas garder la table orange après encaissement.
   const orders = window.fbOrders || {};
-  const hasPendingOrder = Object.values(orders).some(o =>
-    o && o.tableId === tid && (o.status === 'pending' || o.status === 'received')
+  const hasUnimportedOrder = Object.values(orders).some(o =>
+    o && o.tableId === tid &&
+    (o.status === 'pending' || o.status === 'received') &&
+    !_importedOrderIds.has(o._id)
   );
-  if(hasPendingOrder) return 'occupied';
+  if(hasUnimportedOrder) return 'occupied';
   return 'free';
 }
 
 // Récupère les items des commandes Firebase pour une table donnée
-// (utilisé comme fallback quand l'import dans tableData a raté)
+// (utilisé comme fallback quand l'import dans tableData a raté).
+// Filtre les orders déjà importées pour ne pas dupliquer.
 function ordersForTable(tid){
   const orders = window.fbOrders || {};
   const out = [];
   Object.values(orders).forEach(o => {
     if(!o || o.tableId !== tid) return;
     if(o.status !== 'pending' && o.status !== 'received') return;
+    if(_importedOrderIds.has(o._id)) return; // déjà importé, skip
     (o.items || []).forEach(item => {
       out.push({
         rid: 'fb_'+o._id+'_'+(out.length),
@@ -3220,7 +3225,10 @@ function ordersForTable(tid){
         _orderId: o._id
       });
     });
+    // L'utilisateur va voir ces items, donc on marque l'order comme importé
+    _importedOrderIds.add(o._id);
   });
+  if(out.length) _saveImportedIds();
   return out;
 }
 window.ordersForTable = ordersForTable;
@@ -3607,10 +3615,39 @@ function syncTableToFirebase(tableId){
 }
 
 // Import an incoming order (from waiter/client app) into a table
+// Set des order IDs déjà importés sur ce device.
+// Persisté en localStorage pour survivre aux reloads.
+// Cleared au boot d'un nouveau jour (ou via window.clearImportedOrders()).
+var _importedOrderIds = (function(){
+  try {
+    var raw = localStorage.getItem('_imported_order_ids');
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch(e) { return new Set(); }
+})();
+function _saveImportedIds(){
+  try {
+    // Cap à 5000 IDs pour éviter d'exploser localStorage
+    var arr = [..._importedOrderIds].slice(-5000);
+    localStorage.setItem('_imported_order_ids', JSON.stringify(arr));
+  } catch(e) {}
+}
+window.clearImportedOrders = function(){
+  _importedOrderIds.clear();
+  _saveImportedIds();
+  console.log('[orders] reset _importedOrderIds');
+};
+
 function importOrderToTable(order){
   let tid = order.tableId;
   if(!tid) return;
-  
+
+  // ── DÉDUP : ne pas réimporter une commande déjà traitée ──
+  // Sans cela, le poll REST réimporte les mêmes orders pending toutes
+  // les 5s, ce qui fait grossir la table à l'infini.
+  if(order._id && _importedOrderIds.has(order._id)){
+    return; // déjà importé, skip
+  }
+
   // ── Resolve real table element ID ──
   // QR codes send tableId='t5' but custom plans have IDs like 'el_xyz'
   let matchEl = salleElements.find(e=>e.id===tid);
@@ -3629,10 +3666,15 @@ function importOrderToTable(order){
   (order.items||[]).forEach(item=>{
     const ex = tkt.find(r=>r.pid===item.pid&&!r.personId);
     if(ex) ex.qty += item.qty;
-    else tkt.push({rid:uid(), pid:item.pid||'ext', name:item.name, price:item.price, tva:item.tva||10, qty:item.qty, personId:null, cuisson:item.cuisson||null, garniture:item.garniture||null});
+    else tkt.push({rid:uid(), pid:item.pid||'ext', name:item.name, price:item.price, tva:item.tva||10, qty:item.qty, personId:null, cuisson:item.cuisson||null, garniture:item.garniture||null, _orderId: order._id});
   });
   LS.set('tableData', tableData);
   syncTableToFirebase(tid);
+  // Marque cette commande comme déjà importée pour ne pas la réimporter
+  if(order._id){
+    _importedOrderIds.add(order._id);
+    _saveImportedIds();
+  }
   if(typeof renderSalle==='function') renderSalle();
   if(currentTableId===tid){
     ticket=[...tableData[tid].ticket];
