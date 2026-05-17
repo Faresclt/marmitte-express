@@ -97,19 +97,19 @@ window.initFirebaseListeners = function(){
 
   function processPendingOrders(data){
     const pending = Object.values(data).filter(o => o && o.status === 'pending');
-    if(!pending.length) return;
+    var importedAny = false;
     pending.forEach(order => {
       if(!order.tableId || !order.items) return;
-      // Importe (function declaration auto-bind sur window, mais on
-      // ressayye via window.* pour être robuste si import accessible
-      // que via une voie)
       var fn = window.importOrderToTable || (typeof importOrderToTable !== 'undefined' ? importOrderToTable : null);
       if(typeof fn === 'function'){
-        try { fn(order); } catch(e){ console.error('[import] error:', e); }
+        try { fn(order); importedAny = true; } catch(e){ console.error('[import] error:', e); }
       }
-      // Marque comme reçue pour ne pas réimporter
       try { window.FB.update('orders', order._id, {status: 'received'}); } catch(e){}
     });
+    // À chaque poll/listener, force aussi le re-render pour que les tables
+    // se colorent orange via le fallback fbOrders dans tableStatus().
+    // Marche même si l'import a échoué.
+    if(typeof window.renderSalle === 'function') window.renderSalle();
   }
 
   // Listen to menu published by caisse (for waiter app)
@@ -2708,7 +2708,7 @@ const DEFAULT_SALLE = [
 ];
 
 var salleElements = LS.get('salleLayout', DEFAULT_SALLE);
-let tableData = LS.get('tableData', {}); // {tableId: {persons, ticket}}
+var tableData = LS.get('tableData', {}); // {tableId: {persons, ticket}}
 let currentTableId = null;
 let salleMode = 'service'; // 'service' | 'edit'
 let selectedEl = null;
@@ -3130,11 +3130,48 @@ if(!window._salleResizeAttached){
 
 function tableStatus(tid){
   const d = tableData[tid];
-  if(!d || (!d.persons?.length && !d.ticket?.length)) return 'free';
-  const total = (d.ticket||[]).reduce((s,r)=>s+r.qty*r.price,0);
-  if(total>0) return 'occupied';
+  if(d && (d.persons?.length || d.ticket?.length)){
+    const total = (d.ticket||[]).reduce((s,r)=>s+r.qty*r.price,0);
+    if(total > 0) return 'occupied';
+  }
+  // Filet de sécurité : si une commande Firebase est en attente pour cette
+  // table (pending ou received), on force le statut 'occupied' pour que la
+  // table s'affiche orange MÊME SI l'import dans tableData a échoué.
+  const orders = window.fbOrders || {};
+  const hasPendingOrder = Object.values(orders).some(o =>
+    o && o.tableId === tid && (o.status === 'pending' || o.status === 'received')
+  );
+  if(hasPendingOrder) return 'occupied';
   return 'free';
 }
+
+// Récupère les items des commandes Firebase pour une table donnée
+// (utilisé comme fallback quand l'import dans tableData a raté)
+function ordersForTable(tid){
+  const orders = window.fbOrders || {};
+  const out = [];
+  Object.values(orders).forEach(o => {
+    if(!o || o.tableId !== tid) return;
+    if(o.status !== 'pending' && o.status !== 'received') return;
+    (o.items || []).forEach(item => {
+      out.push({
+        rid: 'fb_'+o._id+'_'+(out.length),
+        pid: item.pid || 'ext',
+        name: item.name,
+        price: item.price,
+        tva: item.tva || 10,
+        qty: item.qty,
+        personId: null,
+        cuisson: item.cuisson || null,
+        garniture: item.garniture || null,
+        _fromFirebase: true,
+        _orderId: o._id
+      });
+    });
+  });
+  return out;
+}
+window.ordersForTable = ordersForTable;
 
 function makeElDOM(el){
   const div = document.createElement('div');
@@ -3271,6 +3308,29 @@ function openTableService(tid){
   const saved = tableData[tid]||{persons:[],ticket:[]};
   persons = JSON.parse(JSON.stringify(saved.persons||[]));
   ticket  = JSON.parse(JSON.stringify(saved.ticket||[]));
+
+  // Fallback : si tableData est vide mais qu'il y a des commandes Firebase
+  // pour cette table, on les importe à la volée. Couvre le cas où le
+  // listener auto-import a raté.
+  if(!ticket.length && typeof window.ordersForTable === 'function'){
+    const fbItems = window.ordersForTable(tid);
+    if(fbItems.length){
+      ticket = fbItems;
+      // Persiste pour ne pas dépendre de Firebase ensuite
+      if(!tableData[tid]) tableData[tid] = {persons:[],ticket:[]};
+      tableData[tid].ticket = [...fbItems];
+      try { LS.set('tableData', tableData); } catch(e){}
+      // Tente de marquer les orders Firebase correspondants comme reçus
+      const orders = window.fbOrders || {};
+      Object.values(orders).forEach(o => {
+        if(o && o.tableId === tid && o.status === 'pending'){
+          try { window.FB.update('orders', o._id, {status: 'received'}); } catch(e){}
+        }
+      });
+      console.log('[openTable] Fallback import: '+fbItems.length+' items depuis Firebase pour '+tid);
+    }
+  }
+
   activePerson = null;
   currentTableId = tid;
   document.getElementById('tm-table-title').textContent = '👥 Table '+(el.number||tid);

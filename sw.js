@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v34-sales-sync-receipt-share-reviews';
+const CACHE_NAME = 'marmite-v35-fallback-fbOrders-render';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
