@@ -1452,6 +1452,34 @@ let products = LS.get('products', DEFAULT_PRODUCTS);
     if (changed) LS.set('products', products);
   }
 })();
+
+// Migration v57 : libellés allergènes → INCO 2014 stricts
+// "Gluten"/"Œuf"/"Poisson"/"Arachide"/"Sésame" → "Céréales contenant du gluten" etc.
+// Idempotent : appel répété sans effet (les libellés migrés ne sont pas dans le map).
+(function migrateAllergens(){
+  const ALLERGEN_VERSION = 1;
+  const currentVer = LS.get('allergen_version', 0);
+  if(currentVer >= ALLERGEN_VERSION) return;
+  let changed = 0;
+  products.forEach(p => {
+    if(Array.isArray(p.allergens)){
+      const before = p.allergens.join(',');
+      p.allergens = p.allergens.map(a => ({
+        'Gluten': 'Céréales contenant du gluten',
+        'Œuf': 'Œufs',
+        'Poisson': 'Poissons',
+        'Arachide': 'Arachides',
+        'Sésame': 'Graines de sésame'
+      }[a] || a));
+      if(p.allergens.join(',') !== before) changed++;
+    }
+  });
+  if(changed > 0){
+    LS.set('products', products);
+    console.log('[Migration v57] Allergènes INCO stricts : '+changed+' produit(s) mis à jour');
+  }
+  LS.set('allergen_version', ALLERGEN_VERSION);
+})();
 var branding = LS.get('branding', {name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'});
 let settings = LS.get('settings', {showImg:true,tableMode:false,showSub:true,currency:'€',tva:5.5,cuissons:'Bleu,Saignant,À point,Bien cuit',garnitures:'Frites maison,Salade,Pommes de terre sautées,Pâtes'});
 
@@ -3192,7 +3220,23 @@ function renderProdList(){
 }
 
 // Liste des allergènes UE 14 obligatoires + courants
-const ALLERGENS_LIST = ['Gluten','Crustacés','Œuf','Poisson','Arachide','Soja','Lait','Fruits à coque','Céleri','Moutarde','Sésame','Sulfites','Lupin','Mollusques'];
+// Liste officielle des 14 allergènes INCO 2014 (Annexe II Règlement UE 1169/2011)
+// Libellés stricts conformes Code de la consommation, art. R412-14
+const ALLERGENS_LIST = ['Céréales contenant du gluten','Crustacés','Œufs','Poissons','Arachides','Soja','Lait','Fruits à coque','Céleri','Moutarde','Graines de sésame','Sulfites','Lupin','Mollusques'];
+
+// Migration anciens libellés → libellés INCO stricts (v57)
+// Préserve la conformité réglementaire des produits créés avant cette version.
+const ALLERGEN_MIGRATION_MAP = {
+  'Gluten': 'Céréales contenant du gluten',
+  'Œuf': 'Œufs',
+  'Poisson': 'Poissons',
+  'Arachide': 'Arachides',
+  'Sésame': 'Graines de sésame'
+};
+function migrateAllergenLabels(allergens){
+  if(!Array.isArray(allergens)) return allergens;
+  return allergens.map(a => ALLERGEN_MIGRATION_MAP[a] || a);
+}
 
 function buildAllergenCheckboxes(checkedList){
   const checked = new Set(checkedList || []);
@@ -3428,7 +3472,8 @@ async function suggestAllergensViaIA(){
   btn.disabled = true; btn.textContent = '⏳ Analyse…';
   status.textContent = '';
   const ingredients = [sub, desc, garn, sauc].filter(Boolean).join(' · ');
-  const prompt = `Tu es un expert en réglementation alimentaire INCO 2014. Pour le plat français suivant, identifie les allergènes parmi cette liste exacte : Gluten, Crustacés, Œuf, Poisson, Arachide, Soja, Lait, Fruits à coque, Céleri, Moutarde, Sésame, Sulfites, Lupin, Mollusques. Réponds UNIQUEMENT par un JSON array de strings (sans rien d'autre, pas de markdown, pas d'explications), avec uniquement les allergènes présents. Si aucun, réponds [].
+  // Liste passée à l'IA = libellés officiels INCO 2014 (Annexe II Règlement UE 1169/2011)
+  const prompt = `Tu es un expert en réglementation alimentaire INCO 2014 (Annexe II du règlement européen 1169/2011). Pour le plat français suivant, identifie les allergènes parmi cette liste EXACTE (recopie strictement les libellés tels quels) : "Céréales contenant du gluten", "Crustacés", "Œufs", "Poissons", "Arachides", "Soja", "Lait", "Fruits à coque", "Céleri", "Moutarde", "Graines de sésame", "Sulfites", "Lupin", "Mollusques". Réponds UNIQUEMENT par un JSON array de strings (sans rien d'autre, pas de markdown, pas d'explications), avec uniquement les allergènes présents. Si aucun, réponds [].
 
 Nom : ${name}
 ${ingredients ? 'Description/ingrédients : ' + ingredients : ''}
@@ -3447,8 +3492,9 @@ Réponse JSON :`;
     if(!match) throw new Error('Format IA inattendu');
     const arr = JSON.parse(match[0]);
     if(!Array.isArray(arr)) throw new Error('Pas un array');
-    // Valide chaque allergène contre la liste officielle
-    const valid = arr.filter(a => ALLERGENS_LIST.includes(a));
+    // Tolère anciens libellés IA ("Gluten" → "Céréales contenant du gluten") puis valide
+    const normalized = migrateAllergenLabels(arr);
+    const valid = normalized.filter(a => ALLERGENS_LIST.includes(a));
     // Pré-coche
     buildAllergenCheckboxes(valid);
     status.innerHTML = valid.length > 0
@@ -3625,7 +3671,11 @@ function importData(e){
     try{
       const d=JSON.parse(ev.target.result);
       if(d.cats) cats=d.cats;
-      if(d.products) products=d.products;
+      if(d.products){
+        // Migration allergènes INCO sur import (fichier peut contenir anciens libellés)
+        d.products.forEach(p => { if(Array.isArray(p.allergens)) p.allergens = migrateAllergenLabels(p.allergens); });
+        products=d.products;
+      }
       if(d.branding) branding=d.branding;
       if(d.settings) settings=d.settings;
       saveAll(); refreshAdmin(); applyBranding(); toast('✓ Configuration importée');
@@ -3701,7 +3751,11 @@ async function restoreFromFirebase(){
     
     // Restore data
     if(backup.cats) { cats=backup.cats; }
-    if(backup.products) { products=backup.products; }
+    if(backup.products) {
+      // Migration allergènes INCO sur restore cloud
+      backup.products.forEach(p => { if(Array.isArray(p.allergens)) p.allergens = migrateAllergenLabels(p.allergens); });
+      products=backup.products;
+    }
     if(backup.branding) { branding=backup.branding; }
     if(backup.settings) { settings=backup.settings; }
     if(backup.salleLayout) { LS.set('salleLayout', backup.salleLayout); }
@@ -4934,7 +4988,24 @@ function publishMenu(silent){
   const activeProducts = products.filter(p=>p.active);
   const menuData = {
     cats: cats.filter(c=>activeProducts.some(p=>p.cat===c.id)),
-    products: activeProducts.map(p=>({id:p.id,cat:p.cat,name:p.name,sub:p.sub||'',price:p.price,section:p.section||'',pdj:!!p.pdj,hasCuisson:!!p.hasCuisson,hasGarniture:!!p.hasGarniture,hasVariant:!!p.hasVariant,hasSirop:!!p.hasSirop,variants:p.variants||null,tva:p.tva||10,stock:p.stock===undefined?-1:p.stock,imgUrl:p.imgUrl||null})),
+    products: activeProducts.map(p=>({
+      id:p.id, cat:p.cat, name:p.name, sub:p.sub||'', price:p.price,
+      section:p.section||'', pdj:!!p.pdj,
+      hasCuisson:!!p.hasCuisson, hasGarniture:!!p.hasGarniture,
+      hasVariant:!!p.hasVariant, hasSirop:!!p.hasSirop,
+      variants:p.variants||null, tva:p.tva||10,
+      stock:p.stock===undefined?-1:p.stock, imgUrl:p.imgUrl||null,
+      // Fiche détaillée client (affichage modal QR)
+      description: p.description || '',
+      garniture: p.garniture || '',
+      sauces: p.sauces || '',
+      allergens: Array.isArray(p.allergens) ? p.allergens : [],
+      vegetarian: !!p.vegetarian,
+      vegan: !!p.vegan,
+      glutenFree: !!p.glutenFree,
+      spicy: !!p.spicy,
+      alcohol: !!p.alcohol
+    })),
     branding: {
       name: branding.name,
       tagline: branding.tagline || '',

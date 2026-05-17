@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v56-prod-modal-ux-collapsibles-ia';
+const CACHE_NAME = 'marmite-v57-allergens-inco-strict';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
