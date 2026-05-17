@@ -90,10 +90,60 @@ window.initFirebaseListeners = function(){
     } catch(e) {
       console.warn('[orders poll] error:', e?.message || e);
       window.__lastOrdersPollError = e?.message || String(e);
+      // Fallback ultime : REST API direct sans Firebase SDK
+      pollOrdersViaREST();
     }
   }
   setInterval(pollOrdersFallback, 3000);
   setTimeout(pollOrdersFallback, 800);
+  // Aussi un poll REST direct toutes les 5s en parallèle (filet de sécurité
+  // si le Firebase SDK est bloqué par un addon, firewall, etc.)
+  setInterval(pollOrdersViaREST, 5000);
+  setTimeout(pollOrdersViaREST, 1500);
+
+  // Parse une valeur Firestore REST en valeur JS
+  function _parseFsValue(v){
+    if(!v) return null;
+    if(v.stringValue !== undefined) return v.stringValue;
+    if(v.integerValue !== undefined) return parseInt(v.integerValue);
+    if(v.doubleValue !== undefined) return v.doubleValue;
+    if(v.booleanValue !== undefined) return v.booleanValue;
+    if(v.nullValue !== undefined) return null;
+    if(v.timestampValue !== undefined) return v.timestampValue;
+    if(v.arrayValue) return (v.arrayValue.values || []).map(_parseFsValue);
+    if(v.mapValue){
+      const out = {};
+      Object.entries(v.mapValue.fields || {}).forEach(([k, val]) => { out[k] = _parseFsValue(val); });
+      return out;
+    }
+    return null;
+  }
+
+  // Poll via REST API direct (no Firebase SDK) — fallback ultime
+  async function pollOrdersViaREST(){
+    try {
+      const res = await fetch('https://firestore.googleapis.com/v1/projects/la-marmitte-express/databases/(default)/documents/orders?pageSize=200');
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const json = await res.json();
+      const data = {};
+      (json.documents || []).forEach(doc => {
+        const id = doc.name.split('/').pop();
+        const fields = {};
+        Object.entries(doc.fields || {}).forEach(([k, v]) => { fields[k] = _parseFsValue(v); });
+        data[id] = {...fields, _id: id};
+      });
+      // Merge avec les orders existants (sans écraser si SDK marche)
+      const current = window.fbOrders || {};
+      Object.assign(current, data);
+      window.fbOrders = current;
+      window.__lastRestPoll = Date.now();
+      if(!window.__lastOrdersPoll) window.__lastOrdersPoll = Date.now();
+      processPendingOrders(current);
+    } catch(e){
+      console.warn('[REST poll] error:', e?.message || e);
+      window.__lastRestPollError = e?.message || String(e);
+    }
+  }
 
   function processPendingOrders(data){
     const pending = Object.values(data).filter(o => o && o.status === 'pending');
@@ -3605,6 +3655,60 @@ function importOrderToTable(order){
 // Expose explicitement à window pour que le listener Firebase (module scope)
 // puisse appeler la fonction de manière robuste.
 window.importOrderToTable = importOrderToTable;
+
+// Diagnostic complet — l'utilisateur tape `diagOrders()` dans la console pour
+// voir d'un coup l'état de Firebase, les orders, le plan de salle, etc.
+window.diagOrders = function(){
+  const orders = window.fbOrders || {};
+  const pending = Object.values(orders).filter(o => o && o.status === 'pending');
+  const received = Object.values(orders).filter(o => o && o.status === 'received');
+  const lastPoll = window.__lastOrdersPoll;
+  const lastRest = window.__lastRestPoll;
+  const info = {
+    '⚡ Firebase SDK ready': !!(window.FB && window.FB.getOnce),
+    '📊 Orders en mémoire': Object.keys(orders).length,
+    '⏳ Orders pending': pending.length,
+    '✓ Orders received': received.length,
+    '🕐 Dernier poll SDK': lastPoll ? Math.round((Date.now()-lastPoll)/1000)+'s ago' : 'JAMAIS ❌',
+    '🌐 Dernier poll REST': lastRest ? Math.round((Date.now()-lastRest)/1000)+'s ago' : 'JAMAIS ❌',
+    '⚠️ Erreur poll SDK': window.__lastOrdersPollError || 'aucune',
+    '⚠️ Erreur poll REST': window.__lastRestPollError || 'aucune',
+    '🗺️ Tables dans le plan': (window.salleElements||[]).length,
+    '🍽️ Tables avec data': Object.keys(window.tableData||{}),
+    '📋 Pending tables': [...new Set(pending.map(o => o.tableId))],
+  };
+  console.log('═══ DIAG ORDERS ═══');
+  console.table(info);
+  if(pending.length){
+    console.log('═══ DÉTAIL ORDERS PENDING ═══');
+    console.table(pending.map(o => ({id: o._id, tableId: o.tableId, items: (o.items||[]).map(i=>i.qty+'x '+i.name).join(', '), status: o.status})));
+  }
+  return info;
+};
+
+// Force un re-poll immédiat (utile pour debug)
+window.forceRepoll = async function(){
+  console.log('Force repoll...');
+  // Tente SDK
+  try {
+    if(window.FB && window.FB.db){
+      const { collection: col, getDocs: gd } = await import('./assets/js/firebase-sync.js');
+      const snap = await gd(col(window.FB.db, 'orders'));
+      const data = {};
+      snap.forEach(d => { data[d.id] = {...d.data(), _id: d.id}; });
+      window.fbOrders = data;
+      console.log('✓ SDK fetch OK :', Object.keys(data).length, 'orders');
+    }
+  } catch(e){ console.warn('SDK fetch failed:', e?.message); }
+  // Tente REST
+  try {
+    const res = await fetch('https://firestore.googleapis.com/v1/projects/la-marmitte-express/databases/(default)/documents/orders?pageSize=200');
+    const json = await res.json();
+    console.log('✓ REST fetch OK :', (json.documents||[]).length, 'docs');
+  } catch(e){ console.warn('REST fetch failed:', e?.message); }
+  if(typeof window.renderSalle === 'function') window.renderSalle();
+  return window.diagOrders();
+};
 
 function showOrderNotif(order){
   // Notification now handled inside importOrderToTable

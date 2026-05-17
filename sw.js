@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v35-fallback-fbOrders-render';
+const CACHE_NAME = 'marmite-v36-rest-fallback-diag';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
