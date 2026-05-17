@@ -303,6 +303,9 @@ window.showFirebaseStatus = function(s){
 
 document.addEventListener('DOMContentLoaded', () => {
   try { window.initFirebaseListeners(); } catch(e){ window.showFirebaseStatus('error'); console.error(e); }
+  // Audit stats #2 : sync compteur receipt depuis Firebase au boot
+  // pour éviter doublons de numéros entre devices.
+  try { if(typeof window.syncReceiptCounterAtBoot === 'function') window.syncReceiptCounterAtBoot(); } catch(e){ console.warn('[Receipt] sync boot fail:', e); }
 });
 </script>
 <link rel="stylesheet" href="./assets/css/design-system.css">
@@ -719,7 +722,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <button onclick="openCashFundModal()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(245,166,35,.12);color:var(--accent);border:1px solid rgba(245,166,35,.3);font-weight:700;font-size:12px">💰 Fond de caisse</button>
           <button onclick="closeRegisterZ()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(34,201,122,.12);color:var(--green);border:1px solid rgba(34,201,122,.3);font-weight:700;font-size:12px">📋 Clôture Z du jour</button>
           <button onclick="exportHistory()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(74,158,255,.1);color:var(--blue);border:1px solid rgba(74,158,255,.2);font-weight:700;font-size:12px">⬇️ Exporter CSV</button>
-          <button onclick="if(confirm('Effacer tout l\'historique du jour ?\\n\\n⚠ Cette action est irréversible et perdra le CA du jour pour ce device.')){clearHistory();renderHistorique();}" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(232,64,64,.08);color:var(--red);border:1px solid rgba(232,64,64,.15);font-weight:700;font-size:12px;margin-left:auto">🗑️ Effacer</button>
+          <button onclick="if(confirm('Effacer tout l\'historique du jour ?\\n\\n⚠ Action sensible — PIN admin requis ensuite.\\nLes données sont archivées en LS (récupérables via DevTools sous sales_cleared_*).')){clearHistory();renderHistorique();}" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(232,64,64,.08);color:var(--red);border:1px solid rgba(232,64,64,.15);font-weight:700;font-size:12px;margin-left:auto">🗑️ Effacer</button>
         </div>
       </div>
 
@@ -2800,14 +2803,54 @@ window.printReceipt = printReceipt;
 // ── Numéro de note séquentiel (NF525 partiel) ──
 // Format : YYYY-NNNNNN (réinitialisé chaque année, jamais réutilisé)
 // Stocké en local + Firebase pour résistance multi-device
+// Audit stats #2 : compteur ticket NF525 — refacto léger (cf. AskUserQuestion).
+// Avant : compteur purement local → device A à 45, device B redémarre à 1
+// → doublons + trous garantis en multi-device.
+// Maintenant :
+//  - Sync au boot via syncReceiptCounterAtBoot() : prend le MAX(local, Firebase)
+//    pour ne jamais régresser. Si Firebase indispo → on garde local + flag offline.
+//  - À chaque encaissement, on push le compteur dans Firebase (best-effort).
+//  - Sales générées en mode offline marquées `offlineCounter:true` pour audit.
+//  - UI warning si window._counterOfflineMode (cf. updateCounterStatusBadge).
 function nextReceiptNumber(){
   const year = new Date().getFullYear();
   const key = 'receiptCounter_' + year;
   let n = parseInt(localStorage.getItem(key) || '0', 10);
   n += 1;
   localStorage.setItem(key, String(n));
+  // Best-effort push Firebase (fire-and-forget). Ne bloque pas l'encaissement.
+  if(window.FB && window.FB.setMerge && !window._counterOfflineMode){
+    window.FB.setMerge('counters', String(year), { receipts: n, updatedAt: Date.now() })
+      .catch(e => { console.warn('[Receipt] FB push fail:', e); });
+  }
   return year + '-' + String(n).padStart(6, '0');
 }
+
+// Appelé une fois au boot pour aligner le compteur local sur le max remote.
+// Évite que device B (offline depuis un moment) ré-émette des numéros déjà
+// utilisés par device A.
+async function syncReceiptCounterAtBoot(){
+  const year = new Date().getFullYear();
+  const key = 'receiptCounter_' + year;
+  const localN = parseInt(localStorage.getItem(key) || '0', 10);
+  if(!window.FB || !window.FB.getOnce){
+    window._counterOfflineMode = true;
+    return;
+  }
+  try {
+    const remote = await window.FB.getOnce('counters', String(year));
+    const remoteN = remote && typeof remote.receipts === 'number' ? remote.receipts : 0;
+    if(remoteN > localN){
+      localStorage.setItem(key, String(remoteN));
+      console.log(`[Receipt] Compteur synchronisé depuis Firebase : ${localN} → ${remoteN}`);
+    }
+    window._counterOfflineMode = false;
+  } catch(e){
+    console.warn('[Receipt] Boot sync fail, mode offline:', e);
+    window._counterOfflineMode = true;
+  }
+}
+window.syncReceiptCounterAtBoot = syncReceiptCounterAtBoot;
 
 // ── Status des infos légales (affichage admin) ──
 function updateLegalStatus(){
@@ -5408,6 +5451,27 @@ let pinLockTimer = null;
 
 function getPin(){ return LS.get('caisse_pin', DEFAULT_PIN); }
 
+// Audit stats #1/#4/#7 : helper réutilisable pour gate les actions destructives
+// (clearHistory, cancelSale, futur closeRegisterZ). Réutilise le PIN caisse
+// existant (choix produit, cf. AskUserQuestion). Une fois validé, cache 5 min
+// pour ne pas re-prompter à chaque action successive.
+// Retourne true si autorisé, false sinon.
+function requireAdminPin(actionLabel){
+  if(window._adminUnlocked && Date.now() < (window._adminUnlockedUntil || 0)){
+    return true; // déjà validé récemment
+  }
+  const pin = prompt(`🔒 ${actionLabel}\n\nAction sensible — code PIN admin requis :`);
+  if(pin === null) return false; // annulé
+  if(pin !== getPin()){
+    toast('Code PIN incorrect — action refusée', 'r');
+    return false;
+  }
+  window._adminUnlocked = true;
+  window._adminUnlockedUntil = Date.now() + 5*60*1000;
+  return true;
+}
+window.requireAdminPin = requireAdminPin;
+
 function pinPress(v){
   if(Date.now() < pinLockUntil) return;
   if(v==='del'){ pinEntry=pinEntry.slice(0,-1); }
@@ -5481,7 +5545,19 @@ function lockCaisse(){
 // ═══════════════════════════════════════════════════════════════
 //  HISTORIQUE DES VENTES
 // ═══════════════════════════════════════════════════════════════
-function getTodayKey(){ return 'sales_'+new Date().toISOString().slice(0,10); }
+function getTodayKey(){ return 'sales_'+localDateKey(new Date()); }
+
+// Audit stats #10 : helper timezone-safe pour clé de jour.
+// Avant : toISOString().slice(0,10) renvoyait l'UTC. À Paris (UTC+1/+2),
+// un encaissement à 23h50 local était classé dans le jour suivant UTC
+// → CA "du jour" et Z divergeaient. Maintenant : getFullYear/Month/Date
+// renvoient toujours la date LOCALE du device.
+function localDateKey(date){
+  const y = date.getFullYear();
+  const m = String(date.getMonth()+1).padStart(2,'0');
+  const d = String(date.getDate()).padStart(2,'0');
+  return `${y}-${m}-${d}`;
+}
 
 function saveToHistory(entry){
   if(!entry.total || entry.total===0) return;
@@ -5513,7 +5589,7 @@ function saveToHistory(entry){
   // L'utilisateur peut voir le CA depuis n'importe quel device sans manip.
   if(window.FB && window.FB.setMerge){
     try {
-      const today = new Date().toISOString().slice(0,10);
+      const today = localDateKey(new Date()); // #10 timezone-safe
       // On utilise un timestamp comme clé d'item pour permettre des écritures
       // concurrentes depuis plusieurs devices sans collisions.
       const saleKey = 't'+sale.ts+'_'+Math.random().toString(36).slice(2,6);
@@ -5525,22 +5601,50 @@ function saveToHistory(entry){
   if(typeof scheduleAutoBackup==='function') scheduleAutoBackup();
 }
 
-function clearHistory(){ LS.set(getTodayKey(),[]); }
+// Audit stats #1 : "Effacer" doit être derrière PIN admin (avant : n'importe
+// quel serveur pouvait wipe le CA du jour). On archive sous une clé
+// `sales_cleared_YYYY-MM-DD_HHMMSS` plutôt que de detruire, pour
+// conformité NF525 (art. 286-I-3 bis CGI : inaltérabilité des données).
+function clearHistory(){
+  if(!requireAdminPin('Effacer historique du jour')) return;
+  const key = getTodayKey();
+  const current = LS.get(key, []);
+  if(current.length){
+    // Archive sous une clé horodatée — récupérable via DevTools en cas d'erreur
+    const archiveKey = 'sales_cleared_' + localDateKey(new Date()) + '_' + Date.now();
+    LS.set(archiveKey, current);
+    console.log('[clearHistory] Archived '+current.length+' sales to LS key:', archiveKey);
+  }
+  LS.set(key, []);
+  toast('✓ Historique effacé (archivé en LS sous sales_cleared_*)', 'o');
+}
 
 // Fusionne deux listes de ventes en dédupliquant via ts + tableLabel
+// Audit stats #3 : dédup par receiptNumber en PRIORITÉ (clé NF525 stable),
+// puis fallback ts+tableLabel+total pour les vieux sales sans receiptNumber.
+// Avant : dédup uniquement par ts+tableLabel+total → 2 ventes simultanées
+// au même montant fusionnées (perte d'encaissement), ou même receiptNumber
+// avec ts différents conservés en double (double comptabilisation).
+// Local prioritaire sur remote (l'annulation locale survit à un push remote stale).
 function mergeSales(local, remote){
-  const seen = new Set();
+  const seenReceipts = new Set();
+  const seenComposite = new Set();
   const out = [];
   function add(s){
     if(!s || !s.total) return;
-    const k = (s.ts||'') + '|' + (s.tableLabel||'') + '|' + s.total;
-    if(seen.has(k)) return;
-    seen.add(k);
+    if(s.receiptNumber){
+      if(seenReceipts.has(s.receiptNumber)) return;
+      seenReceipts.add(s.receiptNumber);
+    } else {
+      // Sales legacy sans receiptNumber : fallback ancienne clé composite
+      const k = (s.ts||'') + '|' + (s.tableLabel||'') + '|' + s.total;
+      if(seenComposite.has(k)) return;
+      seenComposite.add(k);
+    }
     out.push(s);
   }
-  (local||[]).forEach(add);
+  (local||[]).forEach(add);  // local en premier → cancellations locales gagnent
   (remote||[]).forEach(add);
-  // Trie par timestamp si dispo
   out.sort((a,b) => (a.ts||0) - (b.ts||0));
   return out;
 }
@@ -5550,7 +5654,7 @@ function mergeSales(local, remote){
 async function fetchSalesFromFirebase(dateKey){
   if(!window.FB || !window.FB.getOnce) return null;
   try {
-    const today = dateKey || new Date().toISOString().slice(0,10);
+    const today = dateKey || localDateKey(new Date()); // #10 timezone-safe
     const data = await window.FB.getOnce('sales', today);
     if(!data) return [];
     // Convertit l'objet {key1: sale1, key2: sale2} en array
@@ -5661,7 +5765,7 @@ function renderHistorique(){
               ${isCancelled
                 ? '<span style="font-size:10px;color:var(--red);font-weight:700">ANNULÉE</span>'
                 : `<button onclick="reprintFromHistory(${realIdx})" title="Réimprimer le ticket" style="height:28px;width:28px;padding:0;border-radius:6px;background:rgba(74,158,255,.1);border:1px solid rgba(74,158,255,.2);color:var(--blue);cursor:pointer;font-size:13px;margin-right:4px">🖨️</button>
-                   <button onclick="cancelSale(${realIdx})" title="Annuler cette vente" style="height:28px;width:28px;padding:0;border-radius:6px;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.2);color:var(--red);cursor:pointer;font-size:13px">↶</button>`}
+                   <button onclick="cancelSale('${esc(e.receiptNumber||e.ts||realIdx)}')" title="Annuler cette vente" style="height:28px;width:28px;padding:0;border-radius:6px;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.2);color:var(--red);cursor:pointer;font-size:13px">↶</button>`}
             </td>
           </tr>`;
         }).join('')}
@@ -5670,11 +5774,22 @@ function renderHistorique(){
 }
 
 // ── A1 : Annuler une vente (avec trace, jamais supprimer pour la traçabilité) ──
-function cancelSale(idx){
+// Audit stats #4 : PIN admin requis.
+// Audit stats #8 : `id` peut être un receiptNumber, un ts (number), ou en
+// fallback un realIdx numérique (ancien comportement). On retrouve la vente
+// par identifiant STABLE (et non par index, qui devient invalide si un
+// snapshot Firebase arrive entre le render et le clic).
+function cancelSale(id){
+  if(!requireAdminPin('Annuler une vente')) return;
   const key = getTodayKey();
   const history = LS.get(key, []);
+  // Cherche par receiptNumber (priorité NF525), puis ts (cross-device stable),
+  // puis fallback ancien comportement (index numérique).
+  let idx = history.findIndex(s => s && s.receiptNumber && String(s.receiptNumber) === String(id));
+  if(idx < 0) idx = history.findIndex(s => s && s.ts && String(s.ts) === String(id));
+  if(idx < 0 && !isNaN(parseInt(id))) idx = parseInt(id); // fallback legacy
   const sale = history[idx];
-  if(!sale){ toast('Vente introuvable','r'); return; }
+  if(!sale){ toast('Vente introuvable (peut-être déjà modifiée sur un autre device)','r'); return; }
   if(sale.cancelled){ toast('Déjà annulée','o'); return; }
   if(!confirm(`Annuler cette vente de ${fmt(sale.total)} (${sale.tableLabel}) ?\n\nLa vente reste visible dans l'historique mais ne compte plus dans le CA.`)) return;
   // On marque comme annulée plutôt que supprimer → traçabilité (NF525)
@@ -5684,10 +5799,13 @@ function cancelSale(idx){
   history[idx] = sale;
   LS.set(key, history);
   // Sync Firebase (la vente reste mais avec flag cancelled)
+  // Audit stats : structure FLAT pour être compatible avec fetchSalesFromFirebase
+  // (qui fait Object.values du doc et attend des sales au top-level, pas dans
+  // une sub-clé 'items'). Avant : { items: { [id]: sale } } était jamais relu.
   if(window.FB && window.FB.setMerge){
-    const today = new Date().toISOString().slice(0,10);
+    const today = localDateKey(new Date()); // #10 timezone-safe
     const id = sale.ts ? String(sale.ts) : ('s_'+Date.now());
-    try { window.FB.setMerge('sales', today, { items: { [id]: sale } }); } catch(e){}
+    try { window.FB.setMerge('sales', today, { [id]: sale }); } catch(e){}
   }
   toast('✓ Vente annulée — '+fmt(sale.total)+' retiré du CA','o');
   renderHistorique();
@@ -5697,7 +5815,7 @@ window.cancelSale = cancelSale;
 // ── C1/C2 : Fond de caisse ──
 // Stocke le fond de caisse du jour. Utilisé pour calculer l'écart espèces à la clôture.
 function openCashFundModal(){
-  const todayKey = 'cashFund_'+new Date().toISOString().slice(0,10);
+  const todayKey = 'cashFund_'+localDateKey(new Date()); // #10 timezone-safe
   const current = parseFloat(LS.get(todayKey, 0)) || 0;
   const val = prompt('💰 Fond de caisse du jour (€)\n\nMontant en espèces présent dans le tiroir à l\'ouverture :', current.toFixed(2));
   if(val === null) return;
@@ -5715,7 +5833,7 @@ function closeRegisterZ(){
   if(active.length === 0){
     if(!confirm('Aucune vente aujourd\'hui. Imprimer un Z vide pour archivage ?')) return;
   }
-  const todayISO = new Date().toISOString().slice(0,10);
+  const todayISO = localDateKey(new Date()); // #10 timezone-safe
   const fund = parseFloat(LS.get('cashFund_'+todayISO, 0)) || 0;
   // Calculs
   const totalTTC = active.reduce((s,e)=>s+e.total, 0);
@@ -5857,41 +5975,68 @@ function reprintFromHistory(idx){
 }
 window.reprintFromHistory = reprintFromHistory;
 
+// Audit stats #5/#6 : export CSV conforme attentes expert-comptable FR.
+// Avant : pas de Date, pas de receiptNumber, pas de tip séparé, sales annulées
+// comptées dans TOTAUX (divergence avec UI), séparateur "," au lieu de ";"
+// standard Excel FR, pas d'échappement des " dans noms d'articles.
+// Maintenant :
+//  - Séparateur ";" + échappement \" → \"\" (RFC 4180)
+//  - Colonnes : Date;Heure;N° ticket;Table;Articles;Mode;TTC;HT;Pourboire;Annulée
+//  - Ligne TOTAUX = SOMME des actives uniquement
+//  - Ligne TOTAL ANNULÉES (info SAV) séparée
 function exportHistory(){
   const key=getTodayKey();
   const history=LS.get(key,[]);
   if(!history.length){ toast('Aucun historique à exporter','o'); return; }
-  const date=new Date().toLocaleDateString('fr-FR');
-  // Collect all TVA rates used
+  const dateLabel=new Date().toLocaleDateString('fr-FR');
+  const dateISO=localDateKey(new Date());
+  // Échappe les champs CSV : remplace " par "" et entoure de " (RFC 4180)
+  const esc = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
   const allRates=new Set();
   history.forEach(e=>{ if(e.tvaRates) Object.keys(e.tvaRates).forEach(r=>allRates.add(r)); });
   const rates=[...allRates].sort((a,b)=>parseFloat(a)-parseFloat(b));
-  const tvaHeaders=rates.map(r=>`TVA ${r}%,HT ${r}%`).join(',');
-  let csv=`Heure,Table,Articles,Mode,Total TTC,Total HT${rates.length?','+tvaHeaders:''}\n`;
+  const tvaHeaders=rates.map(r=>`TVA ${r}%;HT ${r}%`).join(';');
+  let csv = `Date;Heure;N° ticket;Table;Articles;Mode;Total TTC;Total HT;Pourboire;Annulée${rates.length?';'+tvaHeaders:''}\n`;
   history.forEach(e=>{
-    const arts=(e.items||[]).map(i=>i.qty+'x '+i.name).join(' | ');
-    const mode=e.payType==='cb'?'CB':e.payType==='cash'?'Espèces':'Offert';
-    const ht=(e.totalHT||0).toFixed(2);
+    const arts=(e.items||[]).map(i=>(Number(i.qty)||0)+'x '+(i.name||'')).join(' | ');
+    const mode=e.payType==='cb'?'CB':e.payType==='cash'?'Espèces':e.payType==='off'?'Offert':(e.payType||'');
+    const ht=(Number(e.totalHT)||0).toFixed(2);
+    const ttc=(Number(e.total)||0).toFixed(2);
+    const tip=(Number(e.tip)||0).toFixed(2);
+    const cancelledLbl = e.cancelled ? 'OUI' : 'non';
     const tvaCols=rates.map(r=>{
       const rd=e.tvaRates&&e.tvaRates[r];
-      return rd?`"${rd.tva.toFixed(2)}","${rd.ht.toFixed(2)}"`:'"0.00","0.00"';
-    }).join(',');
-    csv+=`"${e.time}","${e.tableLabel}","${arts}","${mode}","${e.total.toFixed(2)}","${ht}"${rates.length?','+tvaCols:''}\n`;
+      return rd ? `${esc((Number(rd.tva)||0).toFixed(2))};${esc((Number(rd.ht)||0).toFixed(2))}`
+                : '"0.00";"0.00"';
+    }).join(';');
+    csv += [
+      esc(dateLabel), esc(e.time||''), esc(e.receiptNumber||''), esc(e.tableLabel||''),
+      esc(arts), esc(mode), esc(ttc), esc(ht), esc(tip), esc(cancelledLbl)
+    ].join(';') + (rates.length?';'+tvaCols:'') + '\n';
   });
-  // Add totals row
-  const totTTC=history.reduce((s,e)=>s+e.total,0);
-  const totHT=history.reduce((s,e)=>s+(e.totalHT||0),0);
+  // #6 : totaux SUR LES NON-ANNULÉES uniquement (cohérent avec renderHistorique)
+  const active = history.filter(e => !e.cancelled);
+  const cancelledArr = history.filter(e =>  e.cancelled);
+  const totTTC=active.reduce((s,e)=>s+(Number(e.total)||0),0);
+  const totHT =active.reduce((s,e)=>s+(Number(e.totalHT)||0),0);
+  const totTip=active.reduce((s,e)=>s+(Number(e.tip)||0),0);
   const totTvaCols=rates.map(r=>{
-    const tot=history.reduce((s,e)=>s+((e.tvaRates&&e.tvaRates[r])?e.tvaRates[r].tva:0),0);
-    const totH=history.reduce((s,e)=>s+((e.tvaRates&&e.tvaRates[r])?e.tvaRates[r].ht:0),0);
-    return `"${tot.toFixed(2)}","${totH.toFixed(2)}"`;
-  }).join(',');
-  csv+=`\n"TOTAUX","","","","${totTTC.toFixed(2)}","${totHT.toFixed(2)}"${rates.length?','+totTvaCols:''}\n`;
+    const tot =active.reduce((s,e)=>s+((e.tvaRates&&e.tvaRates[r])?(Number(e.tvaRates[r].tva)||0):0),0);
+    const totH=active.reduce((s,e)=>s+((e.tvaRates&&e.tvaRates[r])?(Number(e.tvaRates[r].ht) ||0):0),0);
+    return `${esc(tot.toFixed(2))};${esc(totH.toFixed(2))}`;
+  }).join(';');
+  csv += '\n' + [
+    esc('TOTAUX'),'','','','','',esc(totTTC.toFixed(2)),esc(totHT.toFixed(2)),esc(totTip.toFixed(2)),''
+  ].join(';') + (rates.length?';'+totTvaCols:'') + '\n';
+  if(cancelledArr.length){
+    const cTTC=cancelledArr.reduce((s,e)=>s+(Number(e.total)||0),0);
+    csv += [esc('TOTAL ANNULÉES (info)'),'','','','','',esc(cTTC.toFixed(2)),'','',esc('OUI')].join(';')+'\n';
+  }
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
-  a.download=`ventes_${date.replace(/\//g,'-')}.csv`;
+  a.download=`ventes_${dateISO}.csv`;
   a.click();
-  toast('✓ Export CSV avec ventilation TVA');
+  toast('✓ Export CSV conforme expert-comptable');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -5907,31 +6052,53 @@ function setStatPeriod(period, btn){
 }
 window.setStatPeriod = setStatPeriod;
 
-function getAllSalesData(period){
+// Audit stats #11 : version async qui merge LS + Firebase pour chaque jour.
+// Avant : lecture LS uniquement → un device qui n'a pas encaissé affichait
+// CA = 0 même si un autre device avait pushé. Maintenant : pour chaque jour
+// de la période, on merge LS (instantané) + Firebase (cross-device).
+// L'appelant doit await ; renderStats() est désormais async.
+async function getAllSalesData(period){
   const now = new Date();
   const days = period==='day' ? 1 : period==='week' ? 7 : 30;
   let allSales = [];
   for(let d=0; d<days; d++){
     const date = new Date(now);
     date.setDate(date.getDate()-d);
-    const key = 'sales_'+date.toISOString().slice(0,10);
-    const sales = LS.get(key,[]);
-    sales.forEach(s=>{ s._date = date.toISOString().slice(0,10); s._dayLabel = date.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'}); });
-    allSales = allSales.concat(sales);
+    const dateKey = localDateKey(date); // #10 timezone-safe
+    const lsKey = 'sales_'+dateKey;
+    const localSales = LS.get(lsKey,[]);
+    let remoteSales = [];
+    // Firebase fetch (skip si offline / pas de SDK)
+    try {
+      const remote = await fetchSalesFromFirebase(dateKey);
+      remoteSales = remote || [];
+    } catch(e){ /* offline OK, on garde le local */ }
+    // Dédup via mergeSales (priorité receiptNumber stable, cf. fix #3)
+    const merged = mergeSales(localSales, remoteSales);
+    const dayLabel = date.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+    merged.forEach(s=>{ s._date = dateKey; s._dayLabel = dayLabel; });
+    allSales = allSales.concat(merged);
   }
   return allSales;
 }
 
-function renderStats(){
-  const sales = getAllSalesData(statPeriod);
+// Audit stats #11/#12 : async + filtre annulés.
+// Avant : sync sur LS only + comptait les sales cancelled dans CA/KPI/Top
+// → chiffres faussés. Maintenant : async pour Firebase + .filter(!cancelled)
+// + Number() guards (#15) sur tous les reduce pour ne pas crasher sur sale
+// corrompu (total=undefined).
+async function renderStats(){
+  const allSales = await getAllSalesData(statPeriod);
+  // #12 : exclure les annulées pour CA/KPI/Top — cohérent avec renderHistorique
+  const sales = allSales.filter(e => !e.cancelled);
   const periodLabel = statPeriod==='day'?'aujourd\'hui':statPeriod==='week'?'7 derniers jours':'30 derniers jours';
-  
-  // ── KPI ──
-  const totalCA = sales.reduce((s,e)=>s+e.total,0);
-  const totalHT = sales.reduce((s,e)=>s+(e.totalHT||e.total/1.1),0);
+
+  // ── KPI (avec guards Number() — #15) ──
+  const totalCA = sales.reduce((s,e)=>s+(Number(e.total)||0),0);
+  const totalHT = sales.reduce((s,e)=>s+(Number(e.totalHT)||Number(e.total)/1.1||0),0);
   const nbTransac = sales.length;
   const panierMoyen = nbTransac ? totalCA/nbTransac : 0;
-  const totalItems = sales.reduce((s,e)=>s+(e.items||[]).reduce((ss,i)=>ss+i.qty,0),0);
+  const totalItems = sales.reduce((s,e)=>s+(e.items||[]).reduce((ss,i)=>ss+(Number(i.qty)||0),0),0);
   // Unique days with sales
   const uniqueDays = new Set(sales.map(s=>s._date)).size || 1;
   const caMoyenJour = totalCA / uniqueDays;
@@ -5995,9 +6162,9 @@ function renderStats(){
   const hourMap = {};
   for(let h=10;h<=23;h++) hourMap[h]=0;
   sales.forEach(e=>{
-    if(e.time){
+    if(e.time && typeof e.time === 'string'){
       const hour = parseInt(e.time.split(':')[0]);
-      if(!isNaN(hour)) hourMap[hour] = (hourMap[hour]||0) + e.total;
+      if(!isNaN(hour) && hour>=0 && hour<=23) hourMap[hour] = (hourMap[hour]||0) + (Number(e.total)||0);
     }
   });
   const maxHourCA = Math.max(...Object.values(hourMap),1);
@@ -6021,7 +6188,7 @@ function renderStats(){
   sales.forEach(e=>{
     const t = e.tableLabel||'Direct';
     if(!tableMap[t]) tableMap[t]={ca:0,count:0};
-    tableMap[t].ca+=e.total;
+    tableMap[t].ca+=(Number(e.total)||0);
     tableMap[t].count++;
   });
   const topTables = Object.entries(tableMap).sort((a,b)=>b[1].ca-a[1].ca).slice(0,10);
@@ -6040,7 +6207,7 @@ function renderStats(){
   
   // ── RÉPARTITION PAIEMENTS ──
   const payMap = {cb:0,cash:0,off:0};
-  sales.forEach(e=>{ if(payMap[e.payType]!==undefined) payMap[e.payType]+=e.total; });
+  sales.forEach(e=>{ if(payMap[e.payType]!==undefined) payMap[e.payType]+=(Number(e.total)||0); });
   const payTotal = Object.values(payMap).reduce((s,v)=>s+v,0)||1;
   document.getElementById('stats-payments').innerHTML = `
     <div style="display:flex;height:24px;border-radius:12px;overflow:hidden;margin-bottom:12px">
@@ -6059,11 +6226,11 @@ function renderStats(){
   const dailyCA = {};
   for(let d=days-1;d>=0;d--){
     const date=new Date(); date.setDate(date.getDate()-d);
-    const key=date.toISOString().slice(0,10);
+    const key=localDateKey(date); // #10 timezone-safe
     const label=date.toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
     dailyCA[key]={label,ca:0};
   }
-  sales.forEach(s=>{ if(dailyCA[s._date]) dailyCA[s._date].ca+=s.total; });
+  sales.forEach(s=>{ if(dailyCA[s._date]) dailyCA[s._date].ca+=(Number(s.total)||0); });
   const dailyArr = Object.values(dailyCA);
   const maxDailyCA = Math.max(...dailyArr.map(d=>d.ca),1);
   

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v62-salle-yellows-confirm-note-collision-relock-touch-empty';
+const CACHE_NAME = 'marmite-v63-stats-nf525-pin-counter-csv-timezone-merge';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
