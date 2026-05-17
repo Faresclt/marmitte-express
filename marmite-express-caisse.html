@@ -430,6 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
       </a>
       <div id="pos-clock" style="margin-left:auto"><div class="t">--:--</div><div class="d">--</div></div>
       <button class="hbtn hbtn-table" onclick="openSalle()" style="margin-left:8px">🗺️ Salle</button>
+      <button class="hbtn" onclick="quickShowCA()" style="margin-left:6px;background:rgba(34,201,122,.12);border:1px solid rgba(34,201,122,.3);color:var(--green)" title="Chiffre d'affaires du jour">💰 CA</button>
       <button class="hbtn" onclick="publishMenu()" style="margin-left:6px;background:rgba(155,107,255,.12);border:1px solid rgba(155,107,255,.3);color:#9b6bff" title="Publier la carte sur Firebase pour les serveurs">☁️ Publier</button>
       <div id="fb-status" style="display:none;align-items:center;gap:5px;height:30px;padding:0 10px;border-radius:20px;border:1px solid;font-size:10px;font-weight:700;margin-left:4px;flex-shrink:0">
         <div class="fs-dot" style="width:7px;height:7px;border-radius:50%;background:var(--muted)"></div>
@@ -706,9 +707,11 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="apanel-sub">Toutes les ventes encaissées depuis minuit</div>
         <div id="histo-summary" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px"></div>
         <div id="histo-list"></div>
-        <div style="margin-top:16px;display:flex;gap:10px">
-          <button onclick="if(confirm('Effacer tout l\'historique du jour ?')){clearHistory();renderHistorique();}" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(232,64,64,.08);color:var(--red);border:1px solid rgba(232,64,64,.15);font-weight:700;font-size:12px">🗑️ Effacer l'historique</button>
+        <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+          <button onclick="openCashFundModal()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(245,166,35,.12);color:var(--accent);border:1px solid rgba(245,166,35,.3);font-weight:700;font-size:12px">💰 Fond de caisse</button>
+          <button onclick="closeRegisterZ()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(34,201,122,.12);color:var(--green);border:1px solid rgba(34,201,122,.3);font-weight:700;font-size:12px">📋 Clôture Z du jour</button>
           <button onclick="exportHistory()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(74,158,255,.1);color:var(--blue);border:1px solid rgba(74,158,255,.2);font-weight:700;font-size:12px">⬇️ Exporter CSV</button>
+          <button onclick="if(confirm('Effacer tout l\'historique du jour ?\\n\\n⚠ Cette action est irréversible et perdra le CA du jour pour ce device.')){clearHistory();renderHistorique();}" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(232,64,64,.08);color:var(--red);border:1px solid rgba(232,64,64,.15);font-weight:700;font-size:12px;margin-left:auto">🗑️ Effacer</button>
         </div>
       </div>
 
@@ -771,6 +774,9 @@ document.addEventListener('DOMContentLoaded', () => {
     <div class="mni">🧾</div><div>Ticket</div>
     <div class="mob-nav-badge" id="mob-tkt-badge">0</div>
   </button>
+  <button class="mob-nav-btn" id="mobnav-ca" onclick="quickShowCA()">
+    <div class="mni">💰</div><div>CA</div>
+  </button>
   <button class="mob-nav-btn" id="mobnav-admin" onclick="showAdmin()">
     <div class="mni">⚙️</div><div>Admin</div>
   </button>
@@ -793,6 +799,24 @@ document.addEventListener('DOMContentLoaded', () => {
       <button class="ptypebtn off" id="ptype-off" onclick="selectPayType('off')">
         <div class="pti">🎁</div><div>Offert</div>
       </button>
+    </div>
+
+    <!-- B1 : Pourboire (affiché uniquement pour CB) -->
+    <div id="tip-section" style="display:none;margin:0 16px 14px;padding:12px;background:rgba(255,107,170,.06);border:1px solid rgba(255,107,170,.2);border-radius:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:12px;font-weight:700;color:#ff6baa;letter-spacing:.3px">🎁 POURBOIRE</span>
+        <span id="tip-amount" style="font-size:16px;font-weight:800;color:#ff6baa;font-family:'Bebas Neue',sans-serif">0,00 €</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+        <button class="tip-chip" data-tip="0"  onclick="selectTip(0)" style="height:38px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text);font-weight:700;font-size:12px;cursor:pointer">Aucun</button>
+        <button class="tip-chip" data-tip="5"  onclick="selectTip(5)" style="height:38px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text);font-weight:700;font-size:12px;cursor:pointer">+5%</button>
+        <button class="tip-chip" data-tip="10" onclick="selectTip(10)" style="height:38px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text);font-weight:700;font-size:12px;cursor:pointer">+10%</button>
+        <button class="tip-chip" data-tip="15" onclick="selectTip(15)" style="height:38px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text);font-weight:700;font-size:12px;cursor:pointer">+15%</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <span style="font-size:11px;color:var(--muted);font-weight:600">Montant libre :</span>
+        <input type="number" id="tip-custom" placeholder="€" inputmode="decimal" min="0" step="0.50" oninput="selectTipCustom(this.value)" style="flex:1;height:34px;padding:0 10px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text);font-size:13px">
+      </div>
     </div>
 
     <!-- Zone split (diviser l'addition) -->
@@ -936,6 +960,11 @@ document.addEventListener('DOMContentLoaded', () => {
       <button class="tm-close" onclick="closeTableModal()">✕</button>
     </div>
     <div class="tm-body">
+      <!-- B4 : Note libre sur la table (allergies, anniv, infos diverses) -->
+      <div class="tm-section">
+        <h4>📝 Note (allergie, anniversaire, infos…)</h4>
+        <textarea id="tm-note" placeholder="Ex: allergie noix, anniversaire client, sans gluten…" oninput="saveTableNote(this.value)" style="width:100%;min-height:50px;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit;resize:vertical"></textarea>
+      </div>
       <div class="tm-section">
         <h4>Convives à la table</h4>
         <div class="person-grid" id="person-grid"></div>
@@ -1441,6 +1470,17 @@ tick(); setInterval(tick,15000);
 //  SCREEN SWITCH
 // ═══════════════════════════════════════════════════════════════
 function showAdmin(){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('admin-screen').classList.add('active'); refreshAdmin(); }
+// A3 : Raccourci direct vers le CA du jour (1 clic au lieu de 3)
+function quickShowCA(){
+  showAdmin();
+  // Clique le bouton "Historique" dans la sidebar admin
+  setTimeout(()=>{
+    const btns = document.querySelectorAll('.aside-btn');
+    btns.forEach(b => { if (b.textContent.includes('Historique')) b.click(); });
+    if(typeof renderHistorique === 'function') renderHistorique();
+  }, 50);
+}
+window.quickShowCA = quickShowCA;
 function showPOS(){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('pos-screen').classList.add('active'); applyBranding(); renderTabs(); renderMenu(); }
 function openSalle(){ if(currentTableId){tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};LS.set('tableData',tableData);syncTableToFirebase(currentTableId);} document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('salle-screen').classList.add('active'); initSalle(); }
 function closeSalle(){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('pos-screen').classList.add('active'); }
@@ -1704,12 +1744,33 @@ function cardHTML(p){
     ${p.pdj?'<span class="pdj-tag">Aujourd\'hui</span>':''}
     ${stockBadge}
     ${imgZone}
+    <button class="mcard-86" onclick="event.stopPropagation();toggle86('${p.id}')" title="${isOutOfStock?'Remettre disponible':'Marquer épuisé (86)'}" style="position:absolute;top:6px;left:6px;width:28px;height:28px;border-radius:50%;background:${isOutOfStock?'rgba(34,201,122,.95)':'rgba(0,0,0,.6)'};border:1px solid ${isOutOfStock?'var(--green)':'rgba(255,255,255,.2)'};color:#fff;font-size:13px;font-weight:800;cursor:pointer;z-index:3;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)">${isOutOfStock?'✓':'86'}</button>
     <div class="mcard-body">
       <div class="mcard-name">${esc(p.name)}</div>${sub}
       <div class="mcard-foot"><div class="mcard-price">${fmt(p.price)}</div>${isOutOfStock?'':'<div class="mcard-add">+</div>'}</div>
     </div>
   </div>`;
 }
+
+// B2 : Toggle "épuisé" (terme resto US "86") en un tap depuis le POS
+function toggle86(pid){
+  const p = products.find(x => x.id === pid);
+  if(!p) return;
+  const isOut = p.stock !== undefined && p.stock >= 0 && p.stock === 0;
+  if(isOut){
+    // Remet dispo (stock = undefined = illimité)
+    p.stock = undefined;
+    toast('✓ '+p.name+' — Remis en stock','g');
+  } else {
+    // Marque épuisé
+    p.stock = 0;
+    toast('🚫 '+p.name+' — Marqué ÉPUISÉ','o');
+  }
+  saveAll();
+  if(typeof publishMenu === 'function') publishMenu(true); // silent : publie pour autres caisses + page client
+  renderMenu();
+}
+window.toggle86 = toggle86;
 
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -1835,7 +1896,15 @@ function undoLast(){
   renderTicket();
   autoSaveTable();
 }
-function clearTicket(){ ticket=[]; renderTicket(); autoSaveTable(); }
+function clearTicket(){
+  if(!ticket.length) return; // déjà vide → rien à faire
+  // Confirmation pour éviter les pertes accidentelles en plein service
+  const count = ticket.length;
+  const total = ticket.reduce((s,r)=>s+r.qty*r.price,0);
+  if(!confirm(`Vider le ticket en cours ?\n\n${count} article(s) — ${fmt(total)}\n\nCette action est irréversible.`)) return;
+  ticket=[]; renderTicket(); autoSaveTable();
+  toast('Ticket vidé','o');
+}
 
 // Auto-save ticket to tableData when a table is linked
 function autoSaveTable(){
@@ -1933,11 +2002,26 @@ function openTableModal(tableId){
     // Load existing persons/ticket for this table if stored
     const saved=tableData[tableId];
     if(saved){ persons=saved.persons||[]; ticket=saved.ticket||[]; activePerson=null; }
+    // B4 : Load table note
+    const noteEl = document.getElementById('tm-note');
+    if(noteEl) noteEl.value = (saved && saved.note) || '';
   }
   renderPersonBar();
   renderTableModal();
   document.getElementById('table-overlay').classList.add('show');
 }
+
+// B4 : Persist note on table (auto-save sur input)
+function saveTableNote(value){
+  if(!currentTableId) return;
+  if(!tableData[currentTableId]) tableData[currentTableId] = {persons:[],ticket:[]};
+  tableData[currentTableId].note = value || '';
+  LS.set('tableData', tableData);
+  // Sync vers Firebase pour que tous les serveurs voient la note
+  if(typeof syncTableToFirebase === 'function') syncTableToFirebase(currentTableId);
+  if(typeof renderSalle === 'function') renderSalle();
+}
+window.saveTableNote = saveTableNote;
 function closeTableModal(){
   // Save state back to tableData
   if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); }
@@ -2094,7 +2178,8 @@ function payPerson(pid){
   const total=items.reduce((s,r)=>s+r.qty*r.price,0);
   if(total===0){ toast('Aucun article pour '+p.name,'o'); return; }
   openPayFor(total, ()=>{
-    saveToHistory({tableId: currentTableId, label: p.name, items:[...items], total, payType: currentPayType});
+    const tip = (window.lastReceipt && window.lastReceipt.tip) || 0;
+    saveToHistory({tableId: currentTableId, label: p.name, items:[...items], total: total + tip, payType: currentPayType, tip});
     p.paid=true;
     ticket=ticket.filter(r=>r.personId!==pid);
     if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); }
@@ -2110,7 +2195,8 @@ function payUnassigned(){
   const total=items.reduce((s,r)=>s+r.qty*r.price,0);
   if(!total){ toast('Rien à encaisser','o'); return; }
   openPayFor(total,()=>{
-    saveToHistory({tableId: currentTableId, label:'Non attribués', items:[...items], total, payType: currentPayType});
+    const tip = (window.lastReceipt && window.lastReceipt.tip) || 0;
+    saveToHistory({tableId: currentTableId, label:'Non attribués', items:[...items], total: total + tip, payType: currentPayType, tip});
     ticket=ticket.filter(r=>r.personId);
     if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); }
     renderTicket();
@@ -2124,7 +2210,8 @@ function payAllAndClose(){
   const total=ticket.reduce((s,r)=>s+r.qty*r.price,0);
   if(!total){ toast('Rien à encaisser','o'); return; }
   openPayFor(total,()=>{
-    saveToHistory({tableId: currentTableId, items:[...ticket], total, payType: currentPayType});
+    const tip = (window.lastReceipt && window.lastReceipt.tip) || 0;
+    saveToHistory({tableId: currentTableId, items:[...ticket], total: total + tip, payType: currentPayType, tip});
     ticket=[]; persons=[]; activePerson=null;
     if(currentTableId){
       tableData[currentTableId]={persons:[],ticket:[]};
@@ -2133,7 +2220,7 @@ function payAllAndClose(){
     }
     document.getElementById('table-overlay').classList.remove('show');
     renderSalle(); renderPersonBar(); renderTicket();
-    toast('✅ Table '+currentTableId+' encaissée — '+fmt(total),'g');
+    toast('✅ Table '+currentTableId+' encaissée — '+fmt(total + tip),'g');
   });
 }
 
@@ -2146,8 +2233,9 @@ function openPay(){
   if(!ticket.length) return;
   const total=ticket.reduce((s,r)=>s+r.qty*r.price,0);
   openPayFor(total, ()=>{
-    // Enregistrer dans l'historique
-    saveToHistory({tableId: currentTableId||'direct', items:[...ticket], total, payType: currentPayType});
+    // Enregistrer dans l'historique — total inclut le pourboire si CB
+    const tip = (window.lastReceipt && window.lastReceipt.tip) || 0;
+    saveToHistory({tableId: currentTableId||'direct', items:[...ticket], total: total + tip, payType: currentPayType, tip});
     ticket=[]; persons=[]; activePerson=null;
     if(currentTableId){
       tableData[currentTableId]={persons:[],ticket:[]};
@@ -2161,6 +2249,8 @@ function openPay(){
 }
 function openPayFor(amount, cb){
   payCallback=cb; cashStr='0'; hasDot=false; currentPayType=''; splitN=1;
+  window._currentTip = 0;
+  window._baseAmount = amount; // sans pourboire
   document.getElementById('pay-total-lbl').textContent=fmt(amount);
   document.getElementById('pay-overlay').dataset.amount=amount;
   document.getElementById('cash-section').style.display='none';
@@ -2171,6 +2261,14 @@ function openPayFor(amount, cb){
   // Reset split display
   document.getElementById('split-val').textContent='1';
   document.getElementById('split-result').style.display='none';
+  // Reset tip
+  const tipSec = document.getElementById('tip-section');
+  if(tipSec) tipSec.style.display = 'none';
+  const tipAmount = document.getElementById('tip-amount');
+  if(tipAmount) tipAmount.textContent = '0,00 €';
+  const tipCustom = document.getElementById('tip-custom');
+  if(tipCustom) tipCustom.value = '';
+  document.querySelectorAll('.tip-chip').forEach(c => { c.style.background='var(--card)'; c.style.color='var(--text)'; });
   // Désélectionner tous les boutons
   ['ptype-cb','ptype-cash','ptype-off'].forEach(id=>{
     const b=document.getElementById(id); if(b){ b.classList.remove('sel'); }
@@ -2257,6 +2355,11 @@ function selectPayType(type){
   });
   const cashSec=document.getElementById('cash-section');
   const ok=document.getElementById('btn-pay-ok');
+  // Pourboire : visible uniquement pour CB (cash → on tape directement le montant
+  // donné, c'est le client qui décide ; offert → pas de tip)
+  const tipSec = document.getElementById('tip-section');
+  if(tipSec) tipSec.style.display = (type === 'cb') ? 'block' : 'none';
+  if(type !== 'cb') selectTip(0); // reset le tip si on change de mode
   if(type==='cash'){
     cashSec.style.display='block';
     ok.disabled=true; // attendre saisie montant
@@ -2265,6 +2368,48 @@ function selectPayType(type){
     ok.disabled=false; // CB ou Offert → valider direct
     ok.textContent = type==='off' ? '🎁 Offrir' : '✓ Valider CB';
   }
+}
+
+// B1 : Pourboire ──────────────────────────────────────────────────────
+function selectTip(percent){
+  const base = window._baseAmount || 0;
+  const tip = percent === 0 ? 0 : Math.round((base * percent/100) * 100) / 100;
+  applyTip(tip);
+  // Reset chips state
+  document.querySelectorAll('.tip-chip').forEach(c => {
+    const isSel = parseFloat(c.dataset.tip) === percent;
+    c.style.background = isSel ? 'rgba(255,107,170,.2)' : 'var(--card)';
+    c.style.color = isSel ? '#ff6baa' : 'var(--text)';
+    c.style.borderColor = isSel ? '#ff6baa' : 'var(--border)';
+  });
+  // Reset custom input
+  const tc = document.getElementById('tip-custom');
+  if(tc) tc.value = '';
+}
+window.selectTip = selectTip;
+
+function selectTipCustom(val){
+  const tip = Math.max(0, parseFloat(val) || 0);
+  applyTip(tip);
+  // Reset chips state
+  document.querySelectorAll('.tip-chip').forEach(c => {
+    c.style.background = 'var(--card)';
+    c.style.color = 'var(--text)';
+    c.style.borderColor = 'var(--border)';
+  });
+}
+window.selectTipCustom = selectTipCustom;
+
+function applyTip(tipEuros){
+  window._currentTip = tipEuros;
+  const base = window._baseAmount || 0;
+  const totalAvecTip = base + tipEuros;
+  document.getElementById('pay-total-lbl').textContent = fmt(totalAvecTip);
+  document.getElementById('pay-overlay').dataset.amount = totalAvecTip;
+  const tipAmountEl = document.getElementById('tip-amount');
+  if(tipAmountEl) tipAmountEl.textContent = fmt(tipEuros);
+  // Si en mode espèces, recalculer la monnaie à rendre
+  if(currentPayType === 'cash' && typeof updateCash === 'function') updateCash();
 }
 
 function numIn(v){
@@ -2289,10 +2434,13 @@ function validatePay(){
   // Store receipt data BEFORE clearing ticket
   const items = ticket.map(r=>({...r}));
   const tvaDetails = calculateTVADetails(items);
+  const tip = (currentPayType === 'cb') ? (parseFloat(window._currentTip) || 0) : 0;
   lastReceipt = {
     number: nextReceiptNumber(),
     items,
-    total: tvaDetails.totalTTC,
+    total: tvaDetails.totalTTC + tip, // total facturé incluant le pourboire
+    subtotal: tvaDetails.totalTTC,    // sous-total HORS pourboire
+    tip,
     totalHT: tvaDetails.totalHT,
     totalTVA: tvaDetails.totalTVA,
     tvaRates: tvaDetails.rates,
@@ -2301,6 +2449,8 @@ function validatePay(){
     time: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),
     date: new Date().toLocaleDateString('fr-FR')
   };
+  // Reset tip pour la prochaine vente
+  window._currentTip = 0;
   closePay();
   if(payCallback){ payCallback(); payCallback=null; }
   // Show print option
@@ -3646,6 +3796,20 @@ async function resyncSalleFromFirebase(){
 window.resyncSalleFromFirebase = resyncSalleFromFirebase;
 
 function setSalleMode(m){
+  // A4 : Protection édition — passage en mode "edit" requiert le PIN
+  // pour éviter qu'un serveur ne déplace/supprime les tables par erreur
+  // en plein service.
+  if(m === 'edit' && !window._editUnlocked){
+    const pin = prompt('Code PIN pour éditer le plan :');
+    if(pin === null) return; // annulé
+    if(pin !== getPin()){
+      toast('Code incorrect — édition refusée','r');
+      return;
+    }
+    window._editUnlocked = true;
+    // Re-lock après 5 min d'inactivité (sécurité service)
+    setTimeout(()=>{ window._editUnlocked = false; }, 5*60*1000);
+  }
   salleMode=m;
   applySalleMode();
   deselectAll();
@@ -3958,7 +4122,9 @@ function makeElDOM(el){
     div.style.justifyContent = 'center';
     div.style.cursor = salleMode==='edit' ? 'grab' : 'pointer';
     div.style.boxShadow = isSelected ? '0 0 0 3px rgba(255,255,255,.3)' : status==='occupied'?'0 4px 20px rgba(245,166,35,.25)':'0 4px 16px rgba(34,201,122,.15)';
+    const noteRound = (tableData[el.id] && tableData[el.id].note) || '';
     div.innerHTML = `
+      ${noteRound ? `<div style="position:absolute;top:6px;right:6px;font-size:14px;cursor:help;z-index:2" title="${esc(noteRound)}">📝</div>` : ''}
       <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;letter-spacing:1px;color:${color};line-height:1">${el.number||''}</div>
       <div style="font-size:10px;color:var(--muted);font-weight:600">${el.seats||0} cvts</div>
       ${status==='occupied'?`<div style="font-size:9px;font-weight:800;color:var(--accent);margin-top:2px">EN COURS</div>`:''}
@@ -3984,7 +4150,9 @@ function makeElDOM(el){
     div.style.justifyContent = 'center';
     div.style.cursor = salleMode==='edit' ? 'grab' : 'pointer';
     div.style.boxShadow = isSelected ? '0 0 0 3px rgba(255,255,255,.3)' : status==='occupied'?'0 4px 20px rgba(245,166,35,.25)':'0 4px 16px rgba(34,201,122,.15)';
+    const noteRect = (tableData[el.id] && tableData[el.id].note) || '';
     div.innerHTML = `
+      ${noteRect ? `<div style="position:absolute;top:6px;right:6px;font-size:14px;cursor:help;z-index:2" title="${esc(noteRect)}">📝</div>` : ''}
       <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:${color};line-height:1">${el.number||''}</div>
       <div style="font-size:10px;color:var(--muted);font-weight:600">${el.seats||0} couverts</div>
       ${status==='occupied'?`<div style="font-size:9px;font-weight:800;color:var(--accent);margin-top:2px">EN COURS</div>`:''}
@@ -4326,6 +4494,7 @@ function syncTableToFirebase(tableId){
     seats: el.seats || 0,
     persons: d.persons || [],
     ticket: cleanTicket,
+    note: d.note || '',
     total,
     status: total>0 ? 'occupied' : 'free',
     updatedAt: window.FB.ts()
@@ -4764,6 +4933,10 @@ function saveToHistory(entry){
     totalTVA: tvaDetails.totalTVA,
     tvaRates: tvaDetails.rates,
     payType: entry.payType||'cb',
+    // Numéro de note (NF525 partiel) — récupéré depuis lastReceipt si dispo
+    receiptNumber: entry.receiptNumber || (window.lastReceipt && window.lastReceipt.number) || null,
+    tip: entry.tip || 0,
+    cancelled: false,
     ts: Date.now()
   };
   history.push(sale);
@@ -4836,12 +5009,17 @@ function renderHistorique(){
       }
     }
   });
-  const totalJour=history.reduce((s,e)=>s+e.total,0);
-  const totalHT=history.reduce((s,e)=>s+(e.totalHT||e.total/(1.1)),0);
-  const nbTransac=history.length;
+  // Filtre : on EXCLUT les ventes annulées du calcul du CA (mais on les garde
+  // visibles dans le tableau pour traçabilité).
+  const active = history.filter(e => !e.cancelled);
+  const totalJour=active.reduce((s,e)=>s+e.total,0);
+  const totalHT=active.reduce((s,e)=>s+(e.totalHT||e.total/(1.1)),0);
+  const totalTips=active.reduce((s,e)=>s+(e.tip||0),0);
+  const nbTransac=active.length;
+  const nbCancelled=history.length - active.length;
   const payTypes={cb:0,cash:0,off:0};
   const tvaGlobal={};
-  history.forEach(e=>{
+  active.forEach(e=>{
     if(payTypes[e.payType]!==undefined) payTypes[e.payType]+=e.total;
     if(e.tvaRates){ Object.entries(e.tvaRates).forEach(([rate,v])=>{ if(!tvaGlobal[rate]) tvaGlobal[rate]={tva:0,ht:0,ttc:0}; tvaGlobal[rate].tva+=v.tva; tvaGlobal[rate].ht+=v.ht; tvaGlobal[rate].ttc+=v.ttc; }); }
   });
@@ -4864,7 +5042,12 @@ function renderHistorique(){
     <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;min-width:120px">
       <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🧾 Encaissements</div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:var(--accent)">${nbTransac}</div>
+      ${nbCancelled>0?`<div style="font-size:10px;color:var(--red);margin-top:2px">⚠ ${nbCancelled} annulée${nbCancelled>1?'s':''}</div>`:''}
     </div>
+    ${totalTips>0?`<div style="background:rgba(255,107,170,.08);border:1px solid rgba(255,107,170,.2);border-radius:var(--radius);padding:14px 20px;min-width:120px">
+      <div style="font-size:10px;font-weight:700;color:#ff6baa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🎁 Pourboires</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:#ff6baa">${fmt(totalTips)}</div>
+    </div>`:''}
     ${tvaCards}
     <div style="background:rgba(74,158,255,.08);border:1px solid rgba(74,158,255,.2);border-radius:var(--radius);padding:14px 20px;min-width:120px">
       <div style="font-size:10px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">💳 CB</div>
@@ -4891,20 +5074,220 @@ function renderHistorique(){
           <th style="text-align:left;padding:8px 6px;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--muted);text-transform:uppercase">Articles</th>
           <th style="text-align:right;padding:8px 6px;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--muted);text-transform:uppercase">Mode</th>
           <th style="text-align:right;padding:8px 6px;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--muted);text-transform:uppercase">Total</th>
+          <th style="text-align:right;padding:8px 6px;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--muted);text-transform:uppercase">Actions</th>
         </tr>
       </thead>
       <tbody>
-        ${sorted.map(e=>`
-          <tr style="border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s" onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background=''">
-            <td style="padding:10px 6px;color:var(--muted);font-size:12px;white-space:nowrap">${e.time}</td>
-            <td style="padding:10px 6px;font-weight:700;color:var(--accent)">${e.tableLabel}</td>
-            <td style="padding:10px 6px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(e.items||[]).map(i=>i.qty+'× '+i.name).join(', ')}</td>
-            <td style="padding:10px 6px;text-align:right">${e.payType==='cb'?'💳':e.payType==='cash'?'💵':'🎁'}</td>
-            <td style="padding:10px 6px;text-align:right;font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--green)">${fmt(e.total)}</td>
-          </tr>`).join('')}
+        ${sorted.map((e,idx)=>{
+          // idx visuel inversé → vrai index dans history
+          const realIdx = history.length - 1 - idx;
+          const isCancelled = e.cancelled === true;
+          return `
+          <tr style="border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s;${isCancelled?'opacity:.45;text-decoration:line-through':''}" onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background=''">
+            <td style="padding:10px 6px;color:var(--muted);font-size:12px;white-space:nowrap">${e.time}${e.receiptNumber?'<br><span style="font-size:9px;color:var(--muted)">N° '+esc(e.receiptNumber)+'</span>':''}</td>
+            <td style="padding:10px 6px;font-weight:700;color:var(--accent)">${esc(e.tableLabel)}</td>
+            <td style="padding:10px 6px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(e.items||[]).map(i=>i.qty+'× '+esc(i.name)).join(', ')}</td>
+            <td style="padding:10px 6px;text-align:right">${e.payType==='cb'?'💳':e.payType==='cash'?'💵':'🎁'}${e.tip?` <span title="Pourboire" style="color:var(--accent);font-size:10px">+${fmt(e.tip)}</span>`:''}</td>
+            <td style="padding:10px 6px;text-align:right;font-family:'Bebas Neue',sans-serif;font-size:18px;color:${isCancelled?'var(--muted)':'var(--green)'}">${fmt(e.total)}</td>
+            <td style="padding:10px 6px;text-align:right;white-space:nowrap">
+              ${isCancelled
+                ? '<span style="font-size:10px;color:var(--red);font-weight:700">ANNULÉE</span>'
+                : `<button onclick="reprintFromHistory(${realIdx})" title="Réimprimer le ticket" style="height:28px;width:28px;padding:0;border-radius:6px;background:rgba(74,158,255,.1);border:1px solid rgba(74,158,255,.2);color:var(--blue);cursor:pointer;font-size:13px;margin-right:4px">🖨️</button>
+                   <button onclick="cancelSale(${realIdx})" title="Annuler cette vente" style="height:28px;width:28px;padding:0;border-radius:6px;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.2);color:var(--red);cursor:pointer;font-size:13px">↶</button>`}
+            </td>
+          </tr>`;
+        }).join('')}
       </tbody>
     </table>`;
 }
+
+// ── A1 : Annuler une vente (avec trace, jamais supprimer pour la traçabilité) ──
+function cancelSale(idx){
+  const key = getTodayKey();
+  const history = LS.get(key, []);
+  const sale = history[idx];
+  if(!sale){ toast('Vente introuvable','r'); return; }
+  if(sale.cancelled){ toast('Déjà annulée','o'); return; }
+  if(!confirm(`Annuler cette vente de ${fmt(sale.total)} (${sale.tableLabel}) ?\n\nLa vente reste visible dans l'historique mais ne compte plus dans le CA.`)) return;
+  // On marque comme annulée plutôt que supprimer → traçabilité (NF525)
+  sale.cancelled = true;
+  sale.cancelledAt = Date.now();
+  sale.cancelledTime = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  history[idx] = sale;
+  LS.set(key, history);
+  // Sync Firebase (la vente reste mais avec flag cancelled)
+  if(window.FB && window.FB.setMerge){
+    const today = new Date().toISOString().slice(0,10);
+    const id = sale.ts ? String(sale.ts) : ('s_'+Date.now());
+    try { window.FB.setMerge('sales', today, { items: { [id]: sale } }); } catch(e){}
+  }
+  toast('✓ Vente annulée — '+fmt(sale.total)+' retiré du CA','o');
+  renderHistorique();
+}
+window.cancelSale = cancelSale;
+
+// ── C1/C2 : Fond de caisse ──
+// Stocke le fond de caisse du jour. Utilisé pour calculer l'écart espèces à la clôture.
+function openCashFundModal(){
+  const todayKey = 'cashFund_'+new Date().toISOString().slice(0,10);
+  const current = parseFloat(LS.get(todayKey, 0)) || 0;
+  const val = prompt('💰 Fond de caisse du jour (€)\n\nMontant en espèces présent dans le tiroir à l\'ouverture :', current.toFixed(2));
+  if(val === null) return;
+  const amount = Math.max(0, parseFloat(val.replace(',','.')) || 0);
+  LS.set(todayKey, amount);
+  toast('✓ Fond de caisse : '+fmt(amount), 'g');
+}
+window.openCashFundModal = openCashFundModal;
+
+// ── C1 : Clôture Z journalière (récap imprimable + verrouillage du jour) ──
+function closeRegisterZ(){
+  const key = getTodayKey();
+  const history = LS.get(key, []) || [];
+  const active = history.filter(e => !e.cancelled);
+  if(active.length === 0){
+    if(!confirm('Aucune vente aujourd\'hui. Imprimer un Z vide pour archivage ?')) return;
+  }
+  const todayISO = new Date().toISOString().slice(0,10);
+  const fund = parseFloat(LS.get('cashFund_'+todayISO, 0)) || 0;
+  // Calculs
+  const totalTTC = active.reduce((s,e)=>s+e.total, 0);
+  const totalHT  = active.reduce((s,e)=>s+(e.totalHT||e.total/1.1), 0);
+  const totalTVA = active.reduce((s,e)=>s+(e.totalTVA||e.total*0.1), 0);
+  const totalTips= active.reduce((s,e)=>s+(e.tip||0), 0);
+  const byPay = {cb:0, cash:0, off:0};
+  const tvaByRate = {};
+  active.forEach(e => {
+    if(byPay[e.payType] !== undefined) byPay[e.payType] += e.total;
+    if(e.tvaRates) Object.entries(e.tvaRates).forEach(([r,v])=>{
+      if(!tvaByRate[r]) tvaByRate[r] = {ht:0,tva:0,ttc:0};
+      tvaByRate[r].ht += v.ht; tvaByRate[r].tva += v.tva; tvaByRate[r].ttc += v.ttc;
+    });
+  });
+  const cancelledCount = history.length - active.length;
+  const cancelledAmount = history.filter(e=>e.cancelled).reduce((s,e)=>s+e.total, 0);
+  const firstTime = active.length ? active[0].time : '—';
+  const lastTime  = active.length ? active[active.length-1].time : '—';
+  const firstNum  = active.length ? (active[0].receiptNumber||'—') : '—';
+  const lastNum   = active.length ? (active[active.length-1].receiptNumber||'—') : '—';
+  // Demande contrôle espèces
+  const expectedCash = fund + byPay.cash;
+  let countedCashStr = prompt(`💵 Comptage du tiroir-caisse en fin de service\n\n` +
+    `Fond de caisse :         ${fund.toFixed(2)} €\n` +
+    `+ Ventes en espèces :    ${byPay.cash.toFixed(2)} €\n` +
+    `─────────────────────\n` +
+    `= Espèces attendues :    ${expectedCash.toFixed(2)} €\n\n` +
+    `Compte le tiroir et saisis le montant réel (€) :`, expectedCash.toFixed(2));
+  if(countedCashStr === null) return;
+  const countedCash = Math.max(0, parseFloat(countedCashStr.replace(',','.')) || 0);
+  const ecart = countedCash - expectedCash;
+  // Génère le ticket Z imprimable
+  const dateStr = new Date().toLocaleDateString('fr-FR');
+  const timeStr = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  const lg = settings.legal || {};
+  const w = window.open('','_blank','width=380,height=700');
+  if(!w){ toast('Pop-up bloqué — autorise les pop-ups pour imprimer le Z','r'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Clôture Z — ${dateStr}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Courier New',monospace;font-size:12px;padding:18px;max-width:340px;margin:0 auto;color:#000;background:#fff}
+  .center{text-align:center}
+  .bold{font-weight:700}
+  .big{font-size:18px;font-weight:800}
+  .huge{font-size:22px;font-weight:800}
+  .line{border-top:1px dashed #000;margin:8px 0}
+  .dline{border-top:2px solid #000;margin:8px 0}
+  .row{display:flex;justify-content:space-between;padding:3px 0}
+  h1{font-size:16px;font-weight:800;margin-bottom:4px}
+  h2{font-size:11px;color:#666;letter-spacing:1px}
+  .lbl{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.5px}
+  .ecart-pos{color:#0a7;}
+  .ecart-neg{color:#c33;}
+</style></head><body>
+<div class="center">
+  <h1>${esc(branding.name||'La Marmite Express')}</h1>
+  ${lg.raison?`<div style="font-size:10px;color:#666">${esc(lg.raison)}</div>`:''}
+  ${lg.siret?`<div style="font-size:9px;color:#666">SIRET ${esc(lg.siret)}</div>`:''}
+  <h2 style="margin-top:8px">═══ CLÔTURE Z ═══</h2>
+  <div style="font-size:11px;margin-top:4px">${dateStr} · ${timeStr}</div>
+</div>
+<div class="dline"></div>
+<div class="row"><span class="lbl">Période</span><span>${firstTime} → ${lastTime}</span></div>
+<div class="row"><span class="lbl">N° de notes</span><span>${esc(firstNum)} → ${esc(lastNum)}</span></div>
+<div class="row"><span class="lbl">Encaissements</span><span class="bold">${active.length}</span></div>
+${cancelledCount>0?`<div class="row" style="color:#c33"><span class="lbl">Annulés</span><span class="bold">${cancelledCount} (${cancelledAmount.toFixed(2)}€)</span></div>`:''}
+<div class="dline"></div>
+<div class="center" style="margin:10px 0">
+  <div class="lbl">CHIFFRE D'AFFAIRES TTC</div>
+  <div class="huge">${totalTTC.toFixed(2)} €</div>
+</div>
+<div class="dline"></div>
+<div class="row"><span>Total HT</span><span class="bold">${totalHT.toFixed(2)} €</span></div>
+${Object.keys(tvaByRate).sort().map(r=>`
+  <div class="row"><span class="lbl">  HT ${r}%</span><span>${tvaByRate[r].ht.toFixed(2)} €</span></div>
+  <div class="row"><span class="lbl">  TVA ${r}%</span><span>${tvaByRate[r].tva.toFixed(2)} €</span></div>
+`).join('')}
+<div class="row" style="border-top:1px dotted #999;margin-top:4px;padding-top:4px"><span class="bold">Total TVA</span><span class="bold">${totalTVA.toFixed(2)} €</span></div>
+<div class="dline"></div>
+<div class="lbl center" style="margin:6px 0">Détail par mode de règlement</div>
+<div class="row"><span>💳 Carte bancaire</span><span class="bold">${byPay.cb.toFixed(2)} €</span></div>
+<div class="row"><span>💵 Espèces</span><span class="bold">${byPay.cash.toFixed(2)} €</span></div>
+<div class="row"><span>🎁 Offerts</span><span class="bold">${byPay.off.toFixed(2)} €</span></div>
+${totalTips>0?`<div class="row" style="color:#a48"><span>+ Pourboires CB</span><span class="bold">${totalTips.toFixed(2)} €</span></div>`:''}
+<div class="dline"></div>
+<div class="lbl center" style="margin:6px 0">CONTRÔLE TIROIR-CAISSE</div>
+<div class="row"><span>Fond de caisse</span><span>${fund.toFixed(2)} €</span></div>
+<div class="row"><span>+ Ventes espèces</span><span>${byPay.cash.toFixed(2)} €</span></div>
+<div class="row" style="border-top:1px dotted #999;margin-top:2px;padding-top:2px"><span class="bold">= Attendu</span><span class="bold">${expectedCash.toFixed(2)} €</span></div>
+<div class="row"><span>Compté</span><span class="bold">${countedCash.toFixed(2)} €</span></div>
+<div class="row ${ecart>=0?'ecart-pos':'ecart-neg'}" style="margin-top:6px"><span class="big">ÉCART</span><span class="big">${ecart>=0?'+':''}${ecart.toFixed(2)} €</span></div>
+<div class="dline"></div>
+<div class="center" style="margin-top:10px;font-size:10px;color:#666">
+  Document généré le ${dateStr} à ${timeStr}<br>
+  Conservez pour la comptabilité
+</div>
+<script>window.onload=()=>setTimeout(()=>window.print(),300);<\/script>
+</body></html>`);
+  w.document.close();
+  // Marque le jour comme clôturé (Firebase + LS)
+  const closeRecord = {
+    date: todayISO,
+    closedAt: Date.now(),
+    fund, expectedCash, countedCash, ecart,
+    totalTTC, totalHT, totalTVA, totalTips,
+    byPay, tvaByRate,
+    nbSales: active.length, nbCancelled: cancelledCount
+  };
+  LS.set('closure_'+todayISO, closeRecord);
+  if(window.FB && window.FB.set){
+    try { window.FB.set('closures', todayISO, closeRecord); } catch(e){}
+  }
+  toast('✅ Clôture Z imprimée — ' + (ecart === 0 ? 'tiroir équilibré' : (ecart > 0 ? 'écart positif +'+ecart.toFixed(2)+'€' : 'écart NÉGATIF '+ecart.toFixed(2)+'€')), ecart === 0 ? 'g' : 'o');
+}
+window.closeRegisterZ = closeRegisterZ;
+
+// ── B3 : Réimprimer un ticket depuis l'historique ──
+function reprintFromHistory(idx){
+  const history = LS.get(getTodayKey(), []);
+  const sale = history[idx];
+  if(!sale){ toast('Vente introuvable','r'); return; }
+  // Reconstruit lastReceipt depuis l'entrée historique
+  window.lastReceipt = {
+    number: sale.receiptNumber || '—',
+    items: sale.items || [],
+    total: sale.total,
+    totalHT: sale.totalHT || sale.total/1.1,
+    totalTVA: sale.totalTVA || (sale.total - sale.total/1.1),
+    tvaRates: sale.tvaRates || {},
+    payType: sale.payType || 'cb',
+    tableId: sale.tableId || null,
+    time: sale.time,
+    date: new Date(sale.ts || Date.now()).toLocaleDateString('fr-FR'),
+    tip: sale.tip || 0,
+    _reprint: true
+  };
+  if(typeof printReceipt === 'function') printReceipt();
+}
+window.reprintFromHistory = reprintFromHistory;
 
 function exportHistory(){
   const key=getTodayKey();

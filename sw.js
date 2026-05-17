@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v49-tablestatus-local-priority';
+const CACHE_NAME = 'marmite-v50-cancel-tip-note-86-cloture-z';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
