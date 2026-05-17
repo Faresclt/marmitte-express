@@ -208,8 +208,13 @@ function pickTable(id, num){
   renderMenu();
 }
 
-// Change table button
+// Change table button — confirme si la commande en cours sera perdue
 function changeTable(){
+  if(cart.length > 0){
+    const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
+    const msg = `⚠ Changer de table maintenant ?\n\n${cart.length} article(s) — ${total.toFixed(2).replace('.',',')}€\nLa commande en cours sera PERDUE.\n\nPour conserver, confirme d'abord la commande.`;
+    if(!confirm(msg)) return;
+  }
   cart = [];
   updateCartBar();
   document.getElementById('app').style.display='none';
@@ -427,6 +432,16 @@ let pendingOptProduct = null;
 
 function addProduct(pid, price, name){
   const p = (menu.products||[]).find(x=>x.id===pid);
+  // Bloque l'ajout si produit épuisé (stock = 0)
+  // Pollution évitée côté cuisine : on ne fait pas attendre un client pour rien
+  if(p && p.stock !== undefined && p.stock <= 0){
+    if(window.showServeurNotif) {
+      showServeurNotif('🚫 ' + name + ' est épuisé — informe le client');
+    } else {
+      alert('🚫 Produit épuisé : ' + name);
+    }
+    return;
+  }
   if(p && (p.hasCuisson || p.hasGarniture)){
     openOptionsModal(p);
     return;
@@ -555,6 +570,12 @@ async function sendOrder(){
     });
     clearTimeout(timeoutId);
     cart=[];
+    // Vide la note pour éviter qu'elle ne "fuite" sur la commande suivante
+    // (ex: "sans oignon" écrit pour la table 5 ne doit pas rester pour la 12)
+    const noteEl = document.getElementById('cp-note');
+    if(noteEl) noteEl.value = '';
+    const errEl = document.getElementById('cp-error');
+    if(errEl) errEl.style.display = 'none';
     updateCartBar();
     closeCartPanel();
     showConfirmation();

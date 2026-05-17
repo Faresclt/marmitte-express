@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v52-fix-pay-callback-reset-confirm';
+const CACHE_NAME = 'marmite-v53-serveur-audit-3-bugs';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
