@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v47-mentions-legales-numero-ticket';
+const CACHE_NAME = 'marmite-v48-sync-tables-anti-doublons';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

@@ -61,9 +61,42 @@ window.FB = {
 
 // ── Real-time listeners setup (called after DOM ready) ──
 window.initFirebaseListeners = function(){
-  // Listen to all tables state
+  // Listen to all tables state (source de vérité cross-device)
   window.FB.listenCol('tables', (data) => {
     window.fbTables = data;
+    // Hydratation tableData ← fbTables pour les tables PAS en cours d'édition
+    // sur ce device (currentTableId), afin que tous les appareils voient le
+    // même état sans avoir à attendre un reload.
+    if(typeof tableData !== 'undefined' && typeof window.LS !== 'undefined'){
+      let changed = false;
+      Object.keys(data).forEach(tid => {
+        const fbT = data[tid];
+        if(!fbT) return;
+        // Skip la table actuellement éditée par CE device (pour ne pas écraser
+        // les saisies non encore sync).
+        if(tid === window.currentTableId) return;
+        const localT = tableData[tid];
+        const fbTicket = fbT.ticket || [];
+        const localTicket = (localT && localT.ticket) || [];
+        // Si Firebase a un état différent (par contenu), on l'adopte localement.
+        if(JSON.stringify(fbTicket) !== JSON.stringify(localTicket)){
+          tableData[tid] = { persons: fbT.persons || [], ticket: fbTicket };
+          changed = true;
+        }
+      });
+      // Tables présentes localement mais ABSENTES de Firebase = nettoyées →
+      // on les vide aussi localement pour ne pas garder un état fantôme.
+      Object.keys(tableData).forEach(tid => {
+        if(tid === window.currentTableId) return;
+        if(!data[tid] && tableData[tid] && (tableData[tid].ticket||[]).length){
+          tableData[tid] = { persons: [], ticket: [] };
+          changed = true;
+        }
+      });
+      if(changed){
+        try { window.LS.set('tableData', tableData); } catch(e){}
+      }
+    }
     if(typeof renderSalle === 'function') renderSalle();
     if(typeof renderSalleRegister === 'function') renderSalleRegister();
     showFirebaseStatus('connected');
@@ -1119,6 +1152,8 @@ const LS = {
   get(k,def){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):def; }catch(e){return def;} },
   set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){ toast('Stockage plein','r'); } },
 };
+// Expose à window pour que les listeners Firebase (script type=module) puissent y accéder
+window.LS = LS;
 
 function imgKey(n){ return 'img_'+n.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,40); }
 function getImg(n){ return LS.get(imgKey(n),null); }
@@ -3363,7 +3398,50 @@ const DEFAULT_SALLE = [
 
 var salleElements = LS.get('salleLayout', DEFAULT_SALLE);
 var tableData = LS.get('tableData', {}); // {tableId: {persons, ticket}}
-let currentTableId = null;
+// ── Nettoyage au boot : élimine la pollution historique ──
+// - tables avec qty>100 sur un item → cap à 100 (anti-explosion 2120 mojitos)
+// - tables avec un ID fantôme (t?, undefined, null) → suppression
+// - tables non présentes dans salleElements → suppression silencieuse
+(function cleanupLocalTableData(){
+  let cleaned = false;
+  Object.keys(tableData).forEach(tid => {
+    if(/^(t\?|undefined|null|NaN|\?)$/.test(String(tid))){
+      console.warn('[boot] suppression table fantôme:', tid);
+      delete tableData[tid];
+      cleaned = true;
+      return;
+    }
+    const inLayout = salleElements.some(e => e.id === tid);
+    if(!inLayout){
+      console.warn('[boot] suppression table inconnue du plan:', tid);
+      delete tableData[tid];
+      cleaned = true;
+      return;
+    }
+    const d = tableData[tid];
+    if(d && d.ticket && Array.isArray(d.ticket)){
+      d.ticket = d.ticket.map(item => {
+        const qty = parseInt(item.qty) || 0;
+        if(qty > 100){
+          console.warn('[boot] cap qty '+qty+'→100 pour '+tid, item.name);
+          cleaned = true;
+          return { ...item, qty: 100 };
+        }
+        return item;
+      });
+    }
+  });
+  if(cleaned){
+    LS.set('tableData', tableData);
+    console.log('[boot] tableData nettoyé');
+  }
+})();
+// `var` au top-level d'un script classic crée automatiquement la propriété
+// sur window — le listener Firebase (module scope) peut lire window.currentTableId.
+// IMPORTANT : aucune autre déclaration `let currentTableId` ailleurs, sinon
+// cela créerait une variable séparée.
+var currentTableId = null;
+window.tableData = tableData;
 let salleMode = 'service'; // 'service' | 'edit'
 let selectedEl = null;
 let dragState = null; // {id, startX, startY, origX, origY}
@@ -3783,15 +3861,20 @@ if(!window._salleResizeAttached){
 }
 
 function tableStatus(tid){
+  // 1) État local (le plus récent sur ce device)
   const d = tableData[tid];
-  if(d && (d.persons?.length || d.ticket?.length)){
+  if(d && (d.ticket?.length)){
     const total = (d.ticket||[]).reduce((s,r)=>s+r.qty*r.price,0);
     if(total > 0) return 'occupied';
   }
-  // Filet de sécurité : si une commande Firebase est en attente pour cette
-  // table ET pas encore importée localement, on force 'occupied'.
-  // Important : on EXCLUT les orders déjà dans _importedOrderIds pour ne
-  // pas garder la table orange après encaissement.
+  // 2) État Firebase (autres devices peuvent avoir occupé cette table)
+  //    Source de vérité cross-device : si un autre iPhone/iPad a ouvert la
+  //    table, elle apparaît occupée chez tout le monde.
+  const fbT = (window.fbTables || {})[tid];
+  if(fbT && fbT.status === 'occupied' && (fbT.total || 0) > 0 && (fbT.ticket||[]).length){
+    return 'occupied';
+  }
+  // 3) Filet : commande en attente non encore importée
   const orders = window.fbOrders || {};
   const hasUnimportedOrder = Object.values(orders).some(o =>
     o && o.tableId === tid &&
@@ -4201,15 +4284,36 @@ window.addEventListener('resize',()=>{ drawGrid(); });
 // Save table state to Firebase after every change
 function syncTableToFirebase(tableId){
   if(!window.FB || !tableId) return;
+  // Validation : tableId doit être un ID réel du plan de salle.
+  // Bloque les fantômes du type "t?", "undefined", "null" ou IDs orphelins
+  // (qui ont déjà créé des docs corrompus en Firebase par le passé).
+  const el = (typeof salleElements !== 'undefined' ? salleElements : []).find(e=>e.id===tableId);
+  if(!el){
+    console.warn('[syncTable] tableId inconnu, sync skippé:', tableId);
+    return;
+  }
+  if(/^(t\?|undefined|null|NaN)$/.test(String(tableId))){
+    console.warn('[syncTable] tableId fantôme refusé:', tableId);
+    return;
+  }
   const d = tableData[tableId]||{};
-  const el = salleElements.find(e=>e.id===tableId);
-  const total = (d.ticket||[]).reduce((s,r)=>s+r.qty*r.price,0);
+  // Sanity check : cap qty à 100 par item (anti-doublons à répétition).
+  // Si un item dépasse, on log et on cap (préserve les ventes légitimes).
+  const cleanTicket = (d.ticket||[]).map(item => {
+    const qty = parseInt(item.qty) || 0;
+    if(qty > 100){
+      console.warn('[syncTable] qty>100 détecté sur '+tableId+', cap à 100:', item.name, qty);
+      return { ...item, qty: 100, _capped: true };
+    }
+    return item;
+  });
+  const total = cleanTicket.reduce((s,r)=>s+r.qty*r.price,0);
   window.FB.set('tables', tableId, {
     tableId,
-    number: el?.number||tableId,
-    seats: el?.seats||0,
-    persons: d.persons||[],
-    ticket: d.ticket||[],
+    number: el.number || tableId,
+    seats: el.seats || 0,
+    persons: d.persons || [],
+    ticket: cleanTicket,
     total,
     status: total>0 ? 'occupied' : 'free',
     updatedAt: window.FB.ts()
@@ -4226,6 +4330,7 @@ var _importedOrderIds = (function(){
     return new Set(raw ? JSON.parse(raw) : []);
   } catch(e) { return new Set(); }
 })();
+window._importedOrderIds = _importedOrderIds; // expo pour tests + diagnostic console
 function _saveImportedIds(){
   try {
     // Cap à 5000 IDs pour éviter d'exploser localStorage
@@ -4296,10 +4401,38 @@ function importOrderToTable(order){
   
   if(!tableData[tid]) tableData[tid]={persons:[],ticket:[]};
   const tkt = tableData[tid].ticket;
+  // ── DÉDUP DE SECOURS AU NIVEAU ITEM ──
+  // Si la table contient déjà au moins un item portant le même _orderId,
+  // c'est que cette commande a déjà été importée (le Set _importedOrderIds
+  // a peut-être été perdu). On skip pour éviter les doublons à répétition
+  // qui ont historiquement fait grimper qty à 2120.
+  if(order._id && tkt.some(r => r._orderId === order._id)){
+    console.warn('[import] order '+order._id+' déjà présente dans tableData, skip');
+    _importedOrderIds.add(order._id);
+    _saveImportedIds();
+    return;
+  }
   (order.items||[]).forEach(item=>{
-    const ex = tkt.find(r=>r.pid===item.pid&&!r.personId);
-    if(ex) ex.qty += item.qty;
-    else tkt.push({rid:uid(), pid:item.pid||'ext', name:item.name, price:item.price, tva:item.tva||10, qty:item.qty, personId:null, cuisson:item.cuisson||null, garniture:item.garniture||null, _orderId: order._id});
+    const incomingQty = Math.min(parseInt(item.qty) || 0, 50); // cap import à 50/item
+    if(incomingQty <= 0) return;
+    const ex = tkt.find(r=>r.pid===item.pid && !r.personId && !r._orderId);
+    if(ex){
+      // Cap qty totale à 100 par item (anti-explosion)
+      ex.qty = Math.min((ex.qty||0) + incomingQty, 100);
+    } else {
+      tkt.push({
+        rid: uid(),
+        pid: item.pid || 'ext',
+        name: item.name,
+        price: item.price,
+        tva: item.tva || 10,
+        qty: incomingQty,
+        personId: null,
+        cuisson: item.cuisson || null,
+        garniture: item.garniture || null,
+        _orderId: order._id
+      });
+    }
   });
   LS.set('tableData', tableData);
   syncTableToFirebase(tid);
