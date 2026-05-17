@@ -75,18 +75,23 @@ try {
 document.getElementById('table-display').textContent = tableNum;
 document.title = `Table ${tableNum} — Commander`;
 
-// Load images from Firebase (batched)
+// Fix #10 : batches d'images chargés en parallèle (Promise.all) au lieu d'await
+// séquentiel. Sur 5 batches × 800ms en 4G restaurant ça passe de 4s à ~1s.
 async function loadImages(batchCount){
+  const tasks = [];
   for(let i=0; i<batchCount; i++){
-    try{
-      const snap = await getDoc(doc(db, 'config', 'images_'+i));
-      if(snap.exists()){
-        const data = snap.data();
-        if(data.images) Object.assign(productImages, data.images);
-      }
-    }catch(e){ console.warn('Image batch '+i+' load error:', e); }
+    tasks.push(
+      getDoc(doc(db, 'config', 'images_'+i))
+        .then(snap => {
+          if(snap.exists()){
+            const data = snap.data();
+            if(data.images) Object.assign(productImages, data.images);
+          }
+        })
+        .catch(e => console.warn('Image batch '+i+' load error:', e))
+    );
   }
-  // Re-render with images
+  await Promise.all(tasks);
   renderMenu();
 }
 
@@ -270,6 +275,23 @@ function onSearch(value){
 window.clearFilters = clearFilters;
 window.toggleFilter = toggleFilter;
 window.onSearch = onSearch;
+
+// ── Fix #6 : Escape ferme le modal du dessus (a11y / mobile-friendly) ──
+// L'ordre suit le z-index : confirm-order > allergies > opt > detail > cart-panel.
+// Permet aussi de bouclier le scroll de l'<html> quand un modal est ouvert.
+document.addEventListener('keydown', (e) => {
+  if(e.key !== 'Escape') return;
+  const confirmModal = document.getElementById('confirm-order-modal');
+  const allergiesModal = document.getElementById('allergies-modal');
+  const optModal = document.getElementById('opt-modal');
+  const detailModal = document.getElementById('detail-modal');
+  const cartPanel = document.getElementById('cart-panel');
+  if(confirmModal && confirmModal.style.display === 'flex'){ closeConfirmOrderModal(); return; }
+  if(allergiesModal && allergiesModal.style.display === 'flex'){ closeAllergiesModal(); return; }
+  if(optModal && optModal.style.display === 'flex'){ closeOptModal(); return; }
+  if(detailModal && detailModal.classList.contains('show')){ closeDetail(); return; }
+  if(cartPanel && cartPanel.style.display === 'flex'){ closeCartPanel(); return; }
+});
 
 // ── Modal "Mes allergies" ──
 function openAllergiesModal(){
@@ -564,13 +586,52 @@ document.getElementById('cp-items').addEventListener('click', (e) => {
   renderCartPanel();
 });
 
-async function sendOrder(){
+// Étape 1 : ouvre un modal de confirmation avec récap du panier.
+// Empêche les double-clics accidentels (le bouton "Confirmer la commande" est dans
+// la sticky cart-bar, facile à toucher par mégarde sur mobile).
+function sendOrder(){
   if(!cart.length) return;
-  const btn = document.getElementById('cp-send');
-  btn.disabled=true; btn.textContent='Envoi en cours...';
+  const count = cart.reduce((s,r) => s+r.qty, 0);
+  const total = cart.reduce((s,r) => s+r.qty*r.price, 0);
+  const itemsList = cart.map(r => {
+    const opts = [r.cuisson, r.garniture].filter(Boolean).join(' · ');
+    return `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px">
+      <div style="flex:1;min-width:0"><span style="font-weight:700">${r.qty}× ${escHtml(r.name)}</span>${opts?`<div style="color:var(--accent);font-size:11px">${escHtml(opts)}</div>`:''}</div>
+      <div style="font-family:'Bebas Neue',sans-serif;color:var(--green);white-space:nowrap">${(r.qty*r.price).toFixed(2).replace('.',',')}€</div>
+    </div>`;
+  }).join('');
+  document.getElementById('confirm-order-body').innerHTML = `
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px;margin-bottom:4px">Confirmer la commande ?</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Table ${escHtml(String(tableNum))} · ${count} article${count>1?'s':''}</div>
+    <div style="max-height:40vh;overflow-y:auto;margin-bottom:14px">${itemsList}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid var(--border);margin-bottom:16px">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Total TTC</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--green)">${total.toFixed(2).replace('.',',')}€</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="closeConfirmOrderModal()" style="flex:1;height:48px;border-radius:12px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-weight:700;font-size:14px;cursor:pointer">← Modifier</button>
+      <button onclick="confirmAndSendOrder()" id="confirm-send-btn" style="flex:2;height:48px;border-radius:12px;background:var(--accent);border:none;color:#000;font-weight:800;font-size:15px;cursor:pointer">✓ Envoyer</button>
+    </div>
+  `;
+  document.getElementById('confirm-order-modal').style.display = 'flex';
+}
+
+function closeConfirmOrderModal(){
+  document.getElementById('confirm-order-modal').style.display = 'none';
+}
+window.closeConfirmOrderModal = closeConfirmOrderModal;
+
+// Étape 2 : envoi réel à Firestore après confirmation explicite.
+async function confirmAndSendOrder(){
+  if(!cart.length) return;
+  const confirmBtn = document.getElementById('confirm-send-btn');
+  const cpBtn = document.getElementById('cp-send');
+  if(confirmBtn){ confirmBtn.disabled=true; confirmBtn.textContent='⏳ Envoi...'; }
+  if(cpBtn){ cpBtn.disabled=true; cpBtn.textContent='Envoi en cours...'; }
   try{
     let note = document.getElementById('cp-note')?.value||'';
-    note = note.slice(0, 500).replace(/[<>]/g, '');
+    // Sanitization de la note : strip HTML/JS/contrôles, normalise espaces, max 500
+    note = sanitizeOrderNote(note);
     await addDoc(collection(db,'orders'),{
       tableId,
       tableNum: tableNum,
@@ -583,12 +644,37 @@ async function sendOrder(){
     cart=[];
     updateCartBar();
     closeCartPanel();
+    closeConfirmOrderModal();
     showConfirmation();
   }catch(e){
-    btn.disabled=false; btn.textContent='✅ Confirmer la commande';
+    if(confirmBtn){ confirmBtn.disabled=false; confirmBtn.textContent='✓ Envoyer'; }
+    if(cpBtn){ cpBtn.disabled=false; cpBtn.textContent='✅ Confirmer la commande'; }
     alert('Erreur de connexion. Réessayez ou appelez un serveur.');
   }
 }
+window.confirmAndSendOrder = confirmAndSendOrder;
+
+// ── Fix #8 : Sanitization de la note client (envoyée au resto) ──
+// Avant : replace(/[<>]/g,'') laissait passer "javascript:", entités HTML,
+// retours à la ligne abusifs. Maintenant : strip toutes balises, contrôles,
+// limite multi-newlines, max 500 caractères.
+function sanitizeOrderNote(raw){
+  let s = String(raw || '');
+  // Tronque d'abord pour limiter le coût des regex
+  s = s.slice(0, 500);
+  // Retire toutes balises HTML/XML
+  s = s.replace(/<[^>]*>/g, '');
+  // Retire les protocoles dangereux (javascript:, data:, vbscript:)
+  s = s.replace(/(javascript|data|vbscript):/gi, '');
+  // Caractères de contrôle (sauf \n \t) → espace
+  s = s.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, ' ');
+  // Max 3 newlines consécutifs
+  s = s.replace(/\n{4,}/g, '\n\n\n');
+  // Trim et normalise espaces multiples internes
+  s = s.trim().replace(/[ \t]{3,}/g, '  ');
+  return s.slice(0, 500);
+}
+window.sanitizeOrderNote = sanitizeOrderNote;
 
 function showConfirmation(){
   document.getElementById('confirm-screen').style.display='flex';
@@ -704,6 +790,14 @@ body{display:flex;flex-direction:column}
 #allergies-modal{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:160;display:none;align-items:center;justify-content:center;padding:16px}
 #allergies-modal-inner{background:var(--surface);border-radius:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;padding:24px 20px 20px;border:1px solid var(--border);position:relative}
 #allergies-modal-close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:14px;cursor:pointer;z-index:1}
+
+/* Confirmation order modal */
+#confirm-order-modal{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:170;display:none;align-items:flex-end;justify-content:center;padding:0}
+#confirm-order-inner{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:520px;padding:24px 20px 24px calc(20px);border:1px solid var(--border);border-bottom:none;animation:slideUp .25s cubic-bezier(.34,1.56,.64,1)}
+@keyframes slideUp{from{transform:translateY(40px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* Mention TVA dans le panier */
+#cp-tva-mention{font-size:10px;color:var(--muted);text-align:center;margin-bottom:10px;letter-spacing:.3px;font-weight:600;text-transform:uppercase}
 #allergies-checkboxes label:has(input:checked){border-color:var(--accent) !important;background:rgba(245,166,35,.08) !important}
 .chip-allergies[aria-pressed="true"]{background:rgba(232,64,64,.15) !important;border-color:rgba(232,64,64,.5) !important;color:#ff7878 !important}
 
@@ -797,37 +891,45 @@ body{display:flex;flex-direction:column}
 </div>
 
 <!-- Cart panel -->
-<div id="cart-panel" onclick="if(event.target===this)closeCartPanel()">
+<div id="cart-panel" role="dialog" aria-modal="true" aria-labelledby="cart-panel-title" onclick="if(event.target===this)closeCartPanel()">
   <div class="cart-inner">
     <div class="cp-handle"></div>
     <div class="cp-header">
-      <h3>🛒 Votre commande</h3>
-      <button class="cp-close" onclick="closeCartPanel()">✕</button>
+      <h3 id="cart-panel-title">🛒 Votre commande</h3>
+      <button class="cp-close" onclick="closeCartPanel()" aria-label="Fermer le panier">✕</button>
     </div>
     <div id="cp-items"></div>
     <div class="cp-footer">
-      <textarea id="cp-note" placeholder="Note pour la cuisine (allergies, cuisson…)" maxlength="500"></textarea>
+      <textarea id="cp-note" placeholder="Note pour la cuisine (allergies, cuisson…)" maxlength="500" aria-label="Note pour la cuisine"></textarea>
       <div class="cp-total-row">
         <div class="cp-total-lbl">Total</div>
         <div id="cp-total">0,00€</div>
       </div>
+      <div id="cp-tva-mention">Prix TTC, TVA incluse — service compris</div>
       <button id="cp-send" onclick="sendOrder()" disabled>✅ Confirmer la commande</button>
     </div>
   </div>
 </div>
 
 <!-- Options modal -->
-<div id="opt-modal" onclick="if(event.target===this)closeOptModal()">
+<div id="opt-modal" role="dialog" aria-modal="true" aria-label="Options du plat" onclick="if(event.target===this)closeOptModal()">
   <div id="opt-modal-inner">
     <div id="opt-modal-body"></div>
   </div>
 </div>
 
 <!-- "Mes allergies" modal -->
-<div id="allergies-modal" onclick="if(event.target===this)closeAllergiesModal()">
+<div id="allergies-modal" role="dialog" aria-modal="true" aria-labelledby="allergies-modal-title" onclick="if(event.target===this)closeAllergiesModal()">
   <div id="allergies-modal-inner">
     <button id="allergies-modal-close" onclick="closeAllergiesModal()" aria-label="Fermer">✕</button>
     <div id="allergies-modal-body"></div>
+  </div>
+</div>
+
+<!-- Modal confirmation commande -->
+<div id="confirm-order-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-order-title" onclick="if(event.target===this)closeConfirmOrderModal()">
+  <div id="confirm-order-inner">
+    <div id="confirm-order-body"></div>
   </div>
 </div>
 
@@ -839,10 +941,10 @@ body{display:flex;flex-direction:column}
 </div>
 
 <!-- Product detail modal (clic sur plat) -->
-<div id="detail-modal" onclick="if(event.target===this)closeDetail()">
+<div id="detail-modal" role="dialog" aria-modal="true" aria-labelledby="detail-name" onclick="if(event.target===this)closeDetail()">
   <div id="detail-inner">
     <div class="detail-img" id="detail-img-wrap">
-      <button id="detail-close" onclick="closeDetail()">✕</button>
+      <button id="detail-close" onclick="closeDetail()" aria-label="Fermer la fiche détaillée">✕</button>
       <img id="detail-img" alt="" decoding="async" style="display:none">
       <div id="detail-img-ph" style="display:flex;align-items:center;justify-content:center;font-size:80px;width:100%;height:100%">🍽️</div>
     </div>

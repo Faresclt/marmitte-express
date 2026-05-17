@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v58-client-blockers-xss-stock-allergies';
+const CACHE_NAME = 'marmite-v59-client-yellows-confirm-a11y-tva';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
