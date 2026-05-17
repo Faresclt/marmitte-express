@@ -1141,11 +1141,11 @@ document.addEventListener('DOMContentLoaded', () => {
 </div>
 
 <!-- ═══════════════ CATEGORY EDIT MODAL ═══════════════ -->
-<div class="modal-overlay" id="cat-modal">
+<div class="modal-overlay" id="cat-modal" role="dialog" aria-modal="true" aria-labelledby="cm-title" onclick="if(event.target===this)closeCatModal()">
   <div class="modal-box">
-    <div class="modal-head"><h3 id="cm-title">Nouvelle catégorie</h3><div class="modal-close" onclick="closeCatModal()">✕</div></div>
+    <div class="modal-head"><h3 id="cm-title">Nouvelle catégorie</h3><div class="modal-close" role="button" aria-label="Fermer" onclick="closeCatModal()">✕</div></div>
     <div class="modal-body">
-      <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="cm-name" placeholder="Ex: Boissons"></div>
+      <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="cm-name" placeholder="Ex: Boissons" maxlength="40" aria-label="Nom de la catégorie"></div>
       <div class="form-group"><label class="form-label">Emoji</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap" id="cm-emoji-picker"></div>
       </div>
@@ -2430,7 +2430,8 @@ function closePay(){
 
 // Fix #10 : Escape ferme le modal d'encaissement (a11y desktop + clavier)
 // + audit salle #7 : Escape ferme aussi le modal table-overlay
-// Ordre de priorité : modal le plus haut Z-index d'abord (pay > table)
+// + audit cats #9 : Escape ferme aussi le modal cat-modal
+// Ordre de priorité : modal le plus haut Z-index d'abord (pay > table > cat)
 document.addEventListener('keydown', (e) => {
   if(e.key !== 'Escape') return;
   const payOverlay = document.getElementById('pay-overlay');
@@ -2438,6 +2439,11 @@ document.addEventListener('keydown', (e) => {
   const tableOverlay = document.getElementById('table-overlay');
   if(tableOverlay && tableOverlay.classList.contains('show')){
     if(typeof closeTableModal === 'function') closeTableModal();
+    return;
+  }
+  const catModal = document.getElementById('cat-modal');
+  if(catModal && catModal.classList.contains('show')){
+    if(typeof closeCatModal === 'function') closeCatModal();
     return;
   }
 });
@@ -3358,13 +3364,29 @@ function saveBranding(){
 // ── CATEGORIES ──
 function renderCatList(){
   const el=document.getElementById('cat-list'); el.innerHTML='';
+  // Audit cats #12 : empty state au lieu d'écran blanc
+  if(!cats.length){
+    el.innerHTML = `<div style="text-align:center;padding:32px 16px;color:var(--muted)">
+      <div style="font-size:40px;margin-bottom:8px;opacity:.5">📂</div>
+      <div style="font-size:14px;margin-bottom:14px">Aucune catégorie dans la carte</div>
+      <button class="hbtn" onclick="openAddCat()" style="background:var(--accent);color:#000;border:none">+ Créer ma première catégorie</button>
+    </div>`;
+    return;
+  }
   cats.forEach(c=>{
-    const count=products.filter(p=>p.cat===c.id).length;
+    // Audit cats #8 : badge "vide — non publiée" sur cats sans produits actifs.
+    // publishMenu (L5316) filtre `cats.filter(c=>activeProducts.some(p=>p.cat===c.id))`,
+    // donc une cat sans produits actifs n'apparaît PAS chez les clients.
+    // Avant : l'admin créait une cat, ne la voyait pas côté client et croyait à un bug.
+    const total = products.filter(p => p.cat === c.id).length;
+    const active = products.filter(p => p.cat === c.id && p.active).length;
+    const isEmpty = active === 0;
     const div=document.createElement('div'); div.className='sec-card';
-    div.innerHTML=`<span class="sec-card-icon">${c.icon||'📂'}</span><span class="sec-card-name">${esc(c.name)}</span><span class="sec-card-count">${count} produit(s)</span>
+    div.innerHTML=`<span class="sec-card-icon">${c.icon||'📂'}</span><span class="sec-card-name">${esc(c.name)}</span>
+      <span class="sec-card-count">${total} produit(s)${isEmpty?' <span title="Pas de produit actif → la catégorie n\'est PAS publiée côté client" style="color:var(--accent);font-size:10px;font-weight:800;margin-left:6px">• VIDE — NON PUBLIÉE</span>':''}</span>
       <div class="acard-actions">
-        <button class="aact aact-edit" onclick="openEditCat('${c.id}')">✏️</button>
-        <button class="aact aact-del" onclick="confirmDelCat('${c.id}')">🗑️</button>
+        <button class="aact aact-edit" onclick="openEditCat('${c.id}')" aria-label="Modifier ${esc(c.name)}">✏️</button>
+        <button class="aact aact-del" onclick="confirmDelCat('${c.id}')" aria-label="Supprimer ${esc(c.name)}">🗑️</button>
       </div>`;
     el.appendChild(div);
   });
@@ -3376,14 +3398,74 @@ function closeCatModal(){ document.getElementById('cat-modal').classList.remove(
 function buildCatEmojiPicker(sel){ document.getElementById('cm-emoji-picker').innerHTML=EMOJIS.map(e=>`<span style="font-size:24px;cursor:pointer;padding:4px;border-radius:8px;border:2px solid ${e===sel?'var(--accent)':'transparent'}" onclick="this.parentNode.dataset.sel='${e}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='var(--accent)'">${e}</span>`).join('')+'<input type="text" placeholder="🍜" style="width:48px;height:40px;background:var(--card);border:1.5px solid var(--border);border-radius:8px;text-align:center;font-size:22px;color:var(--text)" id="cat-emoji-custom">'; }
 function getCatEmoji(){ const sel=document.querySelector('#cm-emoji-picker [style*="var(--accent)"]'); return sel?sel.textContent.trim():(document.getElementById('cat-emoji-custom').value||'📂'); }
 function saveCat(){
-  const nm=document.getElementById('cm-name').value.trim(); if(!nm) return toast('Nom requis','r');
+  const raw = document.getElementById('cm-name').value;
+  // Audit cats #5 : trim + tronque à 40 chars (sécurité — l'attribut maxlength
+  // HTML peut être contourné). Évite noms qui cassent l'UI des onglets POS.
+  const nm = String(raw || '').trim().slice(0, 40);
+  if(!nm) return toast('Nom requis','r');
+  // #5 : check doublons (case-insensitive, en excluant l'édition de soi-même)
+  const dup = cats.find(c => c.name.toLowerCase() === nm.toLowerCase() && c.id !== editingCatId);
+  if(dup) return toast(`"${nm}" existe déjà — choisis un autre nom`, 'r');
+  // #4 : PIN admin requis (la création/édition impacte la carte de tous les devices)
+  if(!requireAdminPin(editingCatId ? 'Modifier la catégorie' : 'Créer une catégorie')) return;
   const ico=getCatEmoji();
   if(editingCatId){ const c=cats.find(x=>x.id===editingCatId); if(c){c.name=nm;c.icon=ico;} }
   else cats.push({id:'cat_'+uid(),name:nm,icon:ico});
   saveAll(); closeCatModal(); renderCatList(); renderProdCatTabs(); toast('✓ Catégorie sauvegardée');
 }
-function confirmDelCat(id){ if(confirm('Supprimer cette catégorie et tous ses produits ?')){ cats=cats.filter(c=>c.id!==id); products=products.filter(p=>p.cat!==id); saveAll(); renderCatList(); renderProdCatTabs(); renderProdList(); toast('Catégorie supprimée'); } }
-function deleteCat(){ if(editingCatId) confirmDelCat(editingCatId); closeCatModal(); }
+// Audit cats #1/#2/#3/#4 : suppression cascade sécurisée.
+// Avant : confirm() laconique ("Supprimer cette catégorie..."), aucun comptage
+// des produits perdus, pas de PIN admin, pas d'archive (perte définitive),
+// et le ticket actif gardait des refs à des pids inexistants → crashes à
+// la prochaine action sur le ticket.
+function confirmDelCat(id){
+  const c = cats.find(x => x.id === id);
+  if(!c){ toast('Catégorie introuvable','r'); return false; }
+  const deletedProducts = products.filter(p => p.cat === id);
+  const count = deletedProducts.length;
+  if(!requireAdminPin('Supprimer la catégorie "'+c.name+'"')) return false;
+  const msg = count
+    ? `Supprimer "${c.name}" et ses ${count} produit(s) ?\n\nLes produits seront DÉFINITIVEMENT retirés de la carte.\n(Archive automatique en LS sous cats_deleted_*)`
+    : `Supprimer "${c.name}" (aucun produit lié) ?`;
+  if(!confirm(msg)) return false;
+
+  // #2 : archive avant destruction — récupérable via DevTools
+  const archiveKey = 'cats_deleted_' + Date.now();
+  LS.set(archiveKey, { cat: c, products: deletedProducts, deletedAt: Date.now() });
+  console.log('[Cats] Archived to LS:', archiveKey, '— 1 cat + '+count+' products');
+
+  // #3 : purge le ticket actif et les tableData sauvegardées pour
+  // éviter les lignes orphelines (pid → produit inexistant) qui font
+  // crasher renderTicket() au prochain refresh.
+  const deletedPids = new Set(deletedProducts.map(p => p.id));
+  if(typeof ticket !== 'undefined' && Array.isArray(ticket)){
+    const before = ticket.length;
+    ticket = ticket.filter(r => !deletedPids.has(r.pid));
+    if(ticket.length !== before && typeof renderTicket === 'function') renderTicket();
+  }
+  if(typeof tableData !== 'undefined' && tableData){
+    Object.keys(tableData).forEach(tid => {
+      const td = tableData[tid];
+      if(td && Array.isArray(td.ticket)){
+        td.ticket = td.ticket.filter(r => !deletedPids.has(r.pid));
+      }
+    });
+    LS.set('tableData', tableData);
+  }
+
+  cats = cats.filter(x => x.id !== id);
+  products = products.filter(p => p.cat !== id);
+  saveAll();
+  renderCatList(); renderProdCatTabs(); renderProdList();
+  toast(count ? `✓ "${c.name}" + ${count} produit(s) supprimés (archive en LS)` : `✓ "${c.name}" supprimée`, 'o');
+  return true;
+}
+
+// #10 : ne fermer la modale QUE si la suppression a effectivement eu lieu
+function deleteCat(){
+  if(!editingCatId) return;
+  if(confirmDelCat(editingCatId)) closeCatModal();
+}
 
 // ── PRODUCTS ──
 function renderProdCatTabs(){

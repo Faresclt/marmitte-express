@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v63-stats-nf525-pin-counter-csv-timezone-merge';
+const CACHE_NAME = 'marmite-v64-cats-cascade-pin-archive-ticket-purge-empty-state';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
