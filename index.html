@@ -23,6 +23,7 @@
 <link rel="stylesheet" href="assets/css/components.css">
 <script src="assets/js/theme.js"></script>
 <script src="assets/js/pwa-standalone-detect.js"></script>
+<script src="assets/js/sw-register.js"></script>
 <style id="brand-preboot-style">
 /* SVG par défaut caché par défaut. Si pas de logo en cache, le pre-boot
    ci-dessous le révélera. Sinon brand-boot.js révélera l'<img>.
@@ -465,10 +466,8 @@ window.addEventListener('appinstalled', () => {
   document.getElementById('val-pwa').textContent = 'Installee';
 });
 
-// Register service worker
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js').catch(()=>{});
-}
+// Service Worker registration moved to assets/js/sw-register.js (v65 refacto)
+// Ce script gère register + prompt update + retry online + multi-tab coordination.
 </script>
 
 </body>
