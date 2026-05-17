@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v45-brevo-worker-qr-ticket';
+const CACHE_NAME = 'marmite-v46-ticket-share-email-actions';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

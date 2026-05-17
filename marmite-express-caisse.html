@@ -2510,6 +2510,12 @@ async function shareReceiptByQR(){
       ...(settings.googleReviewUrl && { google: settings.googleReviewUrl }),
       ...(settings.tripadvisorUrl && { tripadvisor: settings.tripadvisorUrl })
     },
+    // Permet à la page ticket scannée de proposer "Recevoir par email"
+    // (le client tape son adresse → POST vers le worker du resto)
+    mail: {
+      ...(settings.mailWorkerUrl && { workerUrl: settings.mailWorkerUrl }),
+      ...(settings.mailSender && { sender: settings.mailSender })
+    },
     createdAt: window.FB.ts()
   };
   try{

@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://firestore.googleapis.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://firestore.googleapis.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://firestore.googleapis.com https://*.workers.dev https://*.pages.dev">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Ticket — La Marmite Express</title>
 <meta name="theme-color" content="#f5a623">
@@ -31,25 +31,52 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 16
 .total { display: flex; justify-content: space-between; margin-top: 16px; padding-top: 16px; border-top: 2px solid var(--text); font-family: var(--font-title); font-size: 24px; letter-spacing: 1px; }
 .total .amount { color: var(--accent); }
 .tax-row { font-size: 11px; color: var(--muted); text-align: right; margin-top: 4px; }
-.reviews { margin-top: 24px; padding: 20px; background: var(--card); border-radius: var(--radius); text-align: center; }
-.reviews-title { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; font-weight: 600; }
-.review-btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
-.review-btns a { flex: 1; min-width: 140px; padding: 12px 16px; border-radius: 10px; color: #fff; font-weight: 700; font-size: 13px; text-decoration: none; }
-.review-btns .g { background: #4285F4; }
-.review-btns .t { background: #00aa6c; }
+
+/* Section actions (recevoir / partager) */
+.actions-grid { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.act-btn { height: 56px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-weight: 700; font-size: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer; transition: transform .12s, border-color .12s; }
+.act-btn .ico { font-size: 22px; line-height: 1; }
+.act-btn .lbl { font-size: 11px; font-weight: 600; }
+.act-btn:active { transform: scale(.97); }
+.act-btn:hover { border-color: var(--accent); }
+.act-btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+/* Section avis (mise en valeur) */
+.reviews { margin-top: 20px; padding: 20px; background: linear-gradient(135deg, rgba(245,166,35,.08), rgba(245,166,35,.02)); border: 1px solid rgba(245,166,35,.2); border-radius: 14px; text-align: center; }
+.reviews-title { font-family: var(--font-title); font-size: 18px; letter-spacing: 1px; color: var(--text); margin-bottom: 4px; }
+.reviews-sub { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+.review-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.review-btns a { flex: 1; min-width: 140px; padding: 14px 16px; border-radius: 12px; color: #fff; font-weight: 700; font-size: 14px; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.2); transition: transform .12s; }
+.review-btns a:active { transform: scale(.97); }
+.review-btns .g { background: linear-gradient(135deg, #4285F4, #3367d6); }
+.review-btns .t { background: linear-gradient(135deg, #00aa6c, #008556); }
+
 .footer { text-align: center; padding: 16px; font-size: 11px; color: var(--muted); }
-.actions { margin-top: 16px; display: flex; gap: 10px; }
-.actions button { flex: 1; height: 44px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--border); color: var(--text); font-weight: 700; font-size: 13px; }
+
+/* Modale email */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 22px; max-width: 380px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.modal h3 { font-family: var(--font-title); font-size: 20px; letter-spacing: 1px; margin: 0 0 6px; }
+.modal p { font-size: 12px; color: var(--muted); margin: 0 0 14px; line-height: 1.5; }
+.modal input { width: 100%; height: 44px; padding: 0 14px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--text); font-size: 15px; margin-bottom: 14px; }
+.modal input:focus { outline: none; border-color: var(--accent); }
+.modal-btns { display: flex; gap: 10px; }
+.modal-btns button { flex: 1; height: 44px; border-radius: 10px; font-weight: 700; font-size: 14px; cursor: pointer; border: none; }
+.btn-cancel { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+.btn-send { background: var(--accent); color: var(--on-accent); }
+
 #loading, #error { text-align: center; padding: 60px 20px; }
 #error { color: var(--red); }
 .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; margin: 0 auto 16px; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
 @media print {
   body { background: #fff; color: #000; }
-  .actions, .footer { display: none; }
+  .actions-grid, .footer, .modal-bg { display: none; }
   .card { border: 2px solid #000; box-shadow: none; }
   .hdr { background: none !important; color: #000 !important; border-bottom: 2px solid #000; }
-  .reviews { background: #f5f5f5; }
+  .reviews { background: #fff; border-color: #000; }
+  .review-btns a { background: #fff !important; color: #000 !important; border: 1px solid #000; box-shadow: none; }
 }
 </style>
 </head>
@@ -71,6 +98,7 @@ import { db, doc, getDoc } from './assets/js/firebase-sync.js';
 
 const params = new URLSearchParams(location.search);
 const id = params.get('id');
+let TICKET = null; // sauvegardé en mémoire pour les actions
 
 if (!id) {
   showError('Aucun identifiant de ticket fourni.');
@@ -85,7 +113,8 @@ async function loadTicket(id) {
       showError('Ticket introuvable ou expiré.');
       return;
     }
-    render(snap.data());
+    TICKET = snap.data();
+    render(TICKET);
   } catch (e) {
     console.error(e);
     showError('Erreur de chargement : ' + (e.message || 'inconnue'));
@@ -106,6 +135,7 @@ function render(t) {
   const resto = t.resto || {};
   const items = t.items || [];
   const reviews = t.reviews || {};
+  const mail = t.mail || {};
 
   if (resto.accent) {
     document.documentElement.style.setProperty('--accent', resto.accent);
@@ -135,13 +165,32 @@ function render(t) {
 
   const reviewsHTML = (reviews.google || reviews.tripadvisor) ? `
     <div class="reviews">
-      <div class="reviews-title">Vous avez aimé ? Laissez-nous un avis 💛</div>
+      <div class="reviews-title">💛 Vous avez aimé ?</div>
+      <div class="reviews-sub">Aidez-nous en laissant un avis — ça nous fait toujours plaisir !</div>
       <div class="review-btns">
-        ${reviews.google ? `<a class="g" href="${esc(reviews.google)}" target="_blank">⭐ Avis Google</a>` : ''}
-        ${reviews.tripadvisor ? `<a class="t" href="${esc(reviews.tripadvisor)}" target="_blank">🦉 TripAdvisor</a>` : ''}
+        ${reviews.google ? `<a class="g" href="${esc(reviews.google)}" target="_blank" rel="noopener">⭐ Avis Google</a>` : ''}
+        ${reviews.tripadvisor ? `<a class="t" href="${esc(reviews.tripadvisor)}" target="_blank" rel="noopener">🦉 TripAdvisor</a>` : ''}
       </div>
     </div>
   ` : '';
+
+  const canEmail = !!(mail.workerUrl && mail.sender);
+  const canShare = typeof navigator.share === 'function';
+  // Boutons d'actions selon ce qui est disponible
+  const actionsHTML = `
+    <div class="actions-grid">
+      ${canEmail
+        ? `<button class="act-btn primary" onclick="window.__openEmailModal()"><span class="ico">📧</span><span class="lbl">Recevoir par email</span></button>`
+        : `<button class="act-btn" onclick="window.__mailtoFallback()"><span class="ico">📧</span><span class="lbl">M'envoyer par email</span></button>`
+      }
+      ${canShare
+        ? `<button class="act-btn" onclick="window.__shareTicket()"><span class="ico">📤</span><span class="lbl">Partager (SMS, WhatsApp…)</span></button>`
+        : `<button class="act-btn" onclick="window.__copyLink(this)"><span class="ico">🔗</span><span class="lbl">Copier le lien</span></button>`
+      }
+      <button class="act-btn" onclick="window.print()"><span class="ico">🖨️</span><span class="lbl">Imprimer</span></button>
+      <button class="act-btn" onclick="window.__copyLink(this)"><span class="ico">🔗</span><span class="lbl">Copier le lien</span></button>
+    </div>
+  `;
 
   const html = `
     <div class="card">
@@ -162,10 +211,8 @@ function render(t) {
           <span>Règlement</span>
           <span><strong>${esc(payLabel)}</strong></span>
         </div>
+        ${actionsHTML}
         ${reviewsHTML}
-        <div class="actions">
-          <button onclick="window.print()">🖨️ Imprimer</button>
-        </div>
       </div>
     </div>
     <div class="footer">Ticket généré le ${esc(t.date || '')} · ${esc(resto.name || '')}</div>
@@ -174,6 +221,153 @@ function render(t) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('ticket-content').innerHTML = html;
   document.getElementById('ticket-content').style.display = 'block';
+}
+
+// ── Actions (exposées en global pour les onclick inline) ──
+
+window.__openEmailModal = () => {
+  const m = document.createElement('div');
+  m.className = 'modal-bg';
+  m.innerHTML = `
+    <div class="modal">
+      <h3>📧 Recevoir le ticket par email</h3>
+      <p>Entrez votre adresse — vous recevrez le ticket en quelques secondes.</p>
+      <input id="em-input" type="email" placeholder="vous@exemple.fr" autocomplete="email">
+      <div class="modal-btns">
+        <button class="btn-cancel" id="em-cancel">Annuler</button>
+        <button class="btn-send" id="em-send">Envoyer ✓</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(m);
+  const inp = document.getElementById('em-input');
+  setTimeout(() => inp.focus(), 50);
+  const close = () => m.remove();
+  document.getElementById('em-cancel').onclick = close;
+  m.onclick = (e) => { if (e.target === m) close(); };
+  const send = async () => {
+    const addr = inp.value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) {
+      inp.style.borderColor = 'var(--red)';
+      inp.placeholder = 'Email invalide';
+      inp.value = '';
+      return;
+    }
+    const btn = document.getElementById('em-send');
+    btn.disabled = true;
+    btn.textContent = 'Envoi…';
+    try {
+      const content = buildEmailContent(TICKET);
+      const mail = TICKET.mail || {};
+      const res = await fetch(mail.workerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: addr,
+          subject: content.subject,
+          html: content.html,
+          text: content.text,
+          fromName: (TICKET.resto || {}).name || 'Restaurant',
+          fromEmail: mail.sender
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        const errMsg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || res.statusText;
+        alert('❌ Erreur : ' + errMsg);
+        btn.disabled = false;
+        btn.textContent = 'Envoyer ✓';
+        return;
+      }
+      btn.textContent = '✓ Envoyé !';
+      btn.style.background = '#22c97a';
+      setTimeout(close, 1200);
+    } catch (e) {
+      alert('❌ Erreur réseau : ' + (e.message || 'inconnue'));
+      btn.disabled = false;
+      btn.textContent = 'Envoyer ✓';
+    }
+  };
+  document.getElementById('em-send').onclick = send;
+  inp.onkeydown = (e) => { if (e.key === 'Enter') send(); };
+};
+
+window.__mailtoFallback = () => {
+  const content = buildEmailContent(TICKET);
+  window.location.href = 'mailto:?subject=' + encodeURIComponent(content.subject) +
+    '&body=' + encodeURIComponent(content.text);
+};
+
+window.__shareTicket = async () => {
+  const resto = (TICKET.resto || {}).name || 'Restaurant';
+  try {
+    await navigator.share({
+      title: 'Ticket — ' + resto,
+      text: resto + ' — Total ' + (TICKET.total || 0).toFixed(2) + '€',
+      url: window.location.href
+    });
+  } catch (e) {
+    if (e.name !== 'AbortError') console.warn('share:', e);
+  }
+};
+
+window.__copyLink = async (btn) => {
+  try {
+    await navigator.clipboard.writeText(window.location.href);
+    const orig = btn.querySelector('.lbl').textContent;
+    btn.querySelector('.lbl').textContent = '✓ Lien copié';
+    setTimeout(() => { btn.querySelector('.lbl').textContent = orig; }, 1500);
+  } catch (e) {
+    alert('Lien : ' + window.location.href);
+  }
+};
+
+function buildEmailContent(t) {
+  const resto = (t.resto || {}).name || 'Restaurant';
+  const items = t.items || [];
+  const reviews = t.reviews || {};
+  const tableLine = t.tableNum ? 'Table ' + t.tableNum : 'Vente directe';
+  const payLabel = t.payType === 'cb' ? 'Carte bancaire' : t.payType === 'cash' ? 'Espèces' : 'Offert';
+
+  // Texte simple
+  let text = resto + '\n';
+  text += 'Ticket du ' + (t.date || '') + ' à ' + (t.time || '') + '\n';
+  text += tableLine + ' — ' + payLabel + '\n\n';
+  items.forEach(i => {
+    const opts = [i.cuisson, i.garniture].filter(Boolean).join(', ');
+    text += i.qty + 'x ' + i.name + (opts ? ' (' + opts + ')' : '') + ' — ' + (i.qty * i.price).toFixed(2) + '€\n';
+  });
+  text += '\nTotal : ' + (t.total || 0).toFixed(2) + '€\n\nMerci de votre visite !';
+  if (reviews.google) text += '\n\nLaissez-nous un avis Google : ' + reviews.google;
+  if (reviews.tripadvisor) text += '\n\nTripAdvisor : ' + reviews.tripadvisor;
+
+  // HTML formaté
+  const accent = (t.resto || {}).accent || '#f5a623';
+  const itemRows = items.map(i => {
+    const opts = [i.cuisson, i.garniture].filter(Boolean).join(', ');
+    return '<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">' + i.qty + 'x ' + esc(i.name) +
+      (opts ? ' <span style="color:#888;font-size:11px">(' + esc(opts) + ')</span>' : '') +
+      '</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">' + (i.qty * i.price).toFixed(2) + '€</td></tr>';
+  }).join('');
+  let reviewLinks = '';
+  if (reviews.google)      reviewLinks += '<a href="' + esc(reviews.google) + '" style="display:inline-block;margin:4px;padding:10px 18px;background:#4285F4;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">⭐ Avis Google</a>';
+  if (reviews.tripadvisor) reviewLinks += '<a href="' + esc(reviews.tripadvisor) + '" style="display:inline-block;margin:4px;padding:10px 18px;background:#00aa6c;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">🦉 TripAdvisor</a>';
+
+  const html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">' +
+    '<div style="background:' + accent + ';padding:20px;text-align:center;border-radius:10px 10px 0 0">' +
+      '<h1 style="margin:0;color:#1a1100;font-size:22px;letter-spacing:1px">' + esc(resto) + '</h1>' +
+      '<div style="font-size:12px;color:#1a1100;margin-top:4px">Merci de votre visite !</div>' +
+    '</div>' +
+    '<div style="padding:20px;border:1px solid #eee;border-top:none">' +
+      '<div style="color:#666;font-size:13px;margin-bottom:14px"><strong>' + esc(tableLine) + '</strong> · ' + esc(t.date || '') + ' à ' + esc(t.time || '') + '<br>Règlement : <strong>' + esc(payLabel) + '</strong></div>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:13px">' + itemRows + '</table>' +
+      '<div style="margin-top:14px;padding-top:14px;border-top:2px solid #1a1a1a;display:flex;justify-content:space-between;font-size:18px;font-weight:700"><span>TOTAL</span><span>' + (t.total || 0).toFixed(2) + '€</span></div>' +
+      (reviewLinks ? '<div style="margin-top:24px;padding-top:20px;border-top:1px solid #eee;text-align:center"><div style="font-size:13px;color:#666;margin-bottom:10px">Vous avez aimé ? Laissez-nous un avis 💛</div>' + reviewLinks + '</div>' : '') +
+    '</div>' +
+    '<div style="text-align:center;font-size:11px;color:#999;margin-top:12px">Ticket envoyé automatiquement — ne pas répondre</div>' +
+  '</div>';
+
+  return { subject: 'Ticket — ' + resto + ' — ' + (t.date || ''), text, html };
 }
 </script>
 </body>
