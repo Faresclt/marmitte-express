@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://api.emailjs.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://*.workers.dev https://*.pages.dev">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>CaisseApp — POS</title>
 <meta name="theme-color" content="#f5a623">
@@ -177,16 +177,15 @@ window.initFirebaseListeners = function(){
         if(typeof applyBranding === 'function') applyBranding();
       }
     }
-    // Sync settings cross-device (avis, emailjs config) — uniquement si non-vide côté Firebase
+    // Sync settings cross-device (avis, worker email) — uniquement si non-vide côté Firebase
     if(data && data.settings && typeof settings !== 'undefined'){
       const s = data.settings;
-      if(s.googleReviewUrl)   settings.googleReviewUrl   = s.googleReviewUrl;
-      if(s.tripadvisorUrl)    settings.tripadvisorUrl    = s.tripadvisorUrl;
-      if(s.emailjsServiceId)  settings.emailjsServiceId  = s.emailjsServiceId;
-      if(s.emailjsTemplateId) settings.emailjsTemplateId = s.emailjsTemplateId;
-      if(s.emailjsPublicKey)  settings.emailjsPublicKey  = s.emailjsPublicKey;
+      if(s.googleReviewUrl) settings.googleReviewUrl = s.googleReviewUrl;
+      if(s.tripadvisorUrl)  settings.tripadvisorUrl  = s.tripadvisorUrl;
+      if(s.mailWorkerUrl)   settings.mailWorkerUrl   = s.mailWorkerUrl;
+      if(s.mailSender)      settings.mailSender      = s.mailSender;
       LS.set('settings', settings);
-      if(typeof updateEmailJSStatus === 'function') updateEmailJSStatus();
+      if(typeof updateMailWorkerStatus === 'function') updateMailWorkerStatus();
     }
     // Sync salle layout : Firebase = source de vérité.
     // IMPORTANT : on accède aux globals via window.* car ce script est en
@@ -268,8 +267,8 @@ document.addEventListener('DOMContentLoaded', () => {
 <link rel="stylesheet" href="./assets/css/caisse.css">
 <!-- REST poll des orders - marche MÊME SI Firebase SDK foire (script classic, pas module) -->
 <script src="assets/js/orders-rest-poll.js" defer></script>
-<!-- EmailJS SDK pour envoyer les tickets par email 100% client-side (free tier 200/mois) -->
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js" defer></script>
+<!-- QR code generator pour partage du ticket via QR (zero coût, marche sans SIM) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
 <script>
 /* Pre-boot caisse : si un logo custom est en cache, on précharge l'image
    et on l'injecte dans #pin-logo dès qu'il est parsé. Sinon, on révèle
@@ -571,21 +570,19 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">📧 Envoi des tickets par email (EmailJS)</div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">📧 Envoi des tickets par email</div>
           <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
-            Permet d'envoyer le ticket directement par email au client (gratuit jusqu'à 200/mois).
-            Créez un compte sur <a href="https://www.emailjs.com" target="_blank" style="color:var(--accent);font-weight:700">emailjs.com</a>, connectez votre Gmail/SMTP, créez un template avec la variable <code style="background:var(--card);padding:2px 6px;border-radius:4px">{{message_html}}</code>, puis collez les 3 valeurs ci-dessous.
-            <a href="#" onclick="showEmailJSHelp();return false" style="color:var(--accent);font-weight:700">📖 Guide pas-à-pas</a>
+            <strong style="color:var(--text)">9000 emails/mois gratuits</strong> via Brevo + Cloudflare Worker.
+            Setup unique ~15 min : créez un compte gratuit sur <a href="https://www.brevo.com" target="_blank" style="color:var(--accent);font-weight:700">Brevo</a>
+            + un compte <a href="https://cloudflare.com" target="_blank" style="color:var(--accent);font-weight:700">Cloudflare</a> (zéro CB), déployez le worker.
+            <a href="#" onclick="showEmailHelp();return false" style="color:var(--accent);font-weight:700">📖 Guide complet</a>
           </div>
-          <div class="form-row">
-            <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="s-emailjs-service" placeholder="service_xxxxxxx" oninput="saveSettings()"></div>
-            <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" id="s-emailjs-template" placeholder="template_xxxxxxx" oninput="saveSettings()"></div>
-          </div>
-          <div class="form-group"><label class="form-label">Public Key (User ID)</label><input class="form-input" id="s-emailjs-publickey" placeholder="abcDEF1234..." oninput="saveSettings()"></div>
+          <div class="form-group"><label class="form-label">URL du Worker email</label><input class="form-input" id="s-mail-worker-url" placeholder="https://caisse-mailer.username.workers.dev" oninput="saveSettings()"></div>
+          <div class="form-group"><label class="form-label">Email expéditeur (doit être vérifié sur Brevo)</label><input class="form-input" id="s-mail-sender" type="email" placeholder="contact@votre-resto.fr" oninput="saveSettings()"></div>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <input class="form-input" id="s-emailjs-test" type="email" placeholder="votre@email.fr (test)" style="max-width:240px">
-            <button onclick="testEmailJS()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(74,158,255,.12);color:var(--blue);border:1px solid rgba(74,158,255,.3);font-weight:700;font-size:13px">✉️ Tester l'envoi</button>
-            <div id="emailjs-status" style="font-size:12px;font-weight:600"></div>
+            <input class="form-input" id="s-mail-test" type="email" placeholder="votre@email.fr (test)" style="max-width:240px">
+            <button onclick="testMailWorker()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(74,158,255,.12);color:var(--blue);border:1px solid rgba(74,158,255,.3);font-weight:700;font-size:13px">✉️ Tester l'envoi</button>
+            <div id="mail-worker-status" style="font-size:12px;font-weight:600"></div>
           </div>
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
@@ -2262,6 +2259,7 @@ function showPrintOption(){
     printToast.innerHTML = `<span>🧾 Ticket :</span>
       <button onclick="printReceipt();this.parentElement.remove()" data-primary="1">🖨️ Imprimer</button>
       <button onclick="sendReceiptByEmail();this.parentElement.remove()">📧 Email</button>
+      <button onclick="shareReceiptByQR();this.parentElement.remove()">📱 QR</button>
       <button onclick="sendReceiptBySMS();this.parentElement.remove()">💬 SMS</button>
       <button onclick="this.parentElement.remove()" data-muted="1">✕</button>`;
     printToast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:12px 16px;display:flex;align-items:center;gap:8px;z-index:1001;box-shadow:0 8px 40px rgba(0,0,0,.6);animation:sup .2s ease;flex-wrap:wrap;max-width:90vw';
@@ -2389,23 +2387,20 @@ function buildReceiptContent(r){
   return { text, html, subject: 'Ticket — '+restoName+' — '+r.date, tableName, restoName };
 }
 
-// ── Envoi par EMAIL : modale + EmailJS si configuré, sinon fallback mailto: ──
+// ── Envoi par EMAIL : modale + Worker Cloudflare (Brevo) ──
 function sendReceiptByEmail(){
   if(!lastReceipt) return;
-  const cfg = {
-    serviceId:  settings.emailjsServiceId  || '',
-    templateId: settings.emailjsTemplateId || '',
-    publicKey:  settings.emailjsPublicKey  || ''
-  };
-  const isConfigured = cfg.serviceId && cfg.templateId && cfg.publicKey && typeof emailjs !== 'undefined';
+  const workerUrl = (settings.mailWorkerUrl || '').trim().replace(/\/$/, '');
+  const sender    = (settings.mailSender    || '').trim();
+  const isConfigured = !!(workerUrl && sender);
   openContactModal({
     kind: 'email',
     title: '📧 Envoyer le ticket par email',
     placeholder: 'client@exemple.fr',
     inputType: 'email',
     helpText: isConfigured
-      ? 'Envoi automatique via EmailJS — le client recevra le ticket en quelques secondes.'
-      : '⚠️ EmailJS non configuré → l\'app Mail de votre appareil va s\'ouvrir. Configurez EmailJS dans Paramètres pour un envoi 100% auto.',
+      ? 'Envoi automatique via Brevo — le client recevra le ticket en quelques secondes.'
+      : '⚠️ Worker email non configuré → l\'app Mail de votre appareil va s\'ouvrir. Configurez le Worker dans Paramètres pour un envoi 100% auto.',
     onSubmit: async (addr) => {
       if(!addr || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)){
         toast('Email invalide','r'); return false;
@@ -2414,28 +2409,33 @@ function sendReceiptByEmail(){
       if(isConfigured){
         try{
           toast('📤 Envoi en cours…','o');
-          emailjs.init({ publicKey: cfg.publicKey });
-          await emailjs.send(cfg.serviceId, cfg.templateId, {
-            to_email: addr,
-            to_name: addr.split('@')[0],
-            subject: content.subject,
-            message_html: content.html,
-            message_text: content.text,
-            restaurant_name: content.restoName,
-            table_name: content.tableName,
-            total: lastReceipt.total.toFixed(2)+'€',
-            date: lastReceipt.date,
-            time: lastReceipt.time
+          const res = await fetch(workerUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to: addr,
+              subject: content.subject,
+              html: content.html,
+              text: content.text,
+              fromName: content.restoName,
+              fromEmail: sender
+            })
           });
-          toast('✓ Ticket envoyé à '+addr,'g');
+          const data = await res.json().catch(()=>({}));
+          if(!res.ok || data.ok === false){
+            const errMsg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || res.statusText;
+            console.error('[mail worker]', data);
+            toast('Erreur envoi : '+errMsg, 'r');
+            return false;
+          }
+          toast('✓ Ticket envoyé à '+addr, 'g');
           return true;
         }catch(err){
-          console.error('[emailjs]', err);
-          toast('Erreur envoi : '+(err.text||err.message||'inconnue'),'r');
+          console.error('[mail worker]', err);
+          toast('Erreur réseau : '+(err.message||'inconnue'),'r');
           return false;
         }
       } else {
-        // Fallback : ouvre app Mail native
         window.location.href = 'mailto:'+encodeURIComponent(addr)+
           '?subject='+encodeURIComponent(content.subject)+
           '&body='+encodeURIComponent(content.text);
@@ -2455,7 +2455,7 @@ function sendReceiptBySMS(){
     title: '💬 Envoyer le ticket par SMS',
     placeholder: '06 12 34 56 78',
     inputType: 'tel',
-    helpText: 'L\'app Messages va s\'ouvrir avec le ticket pré-rempli — appuyez sur Envoyer dans Messages pour finaliser.',
+    helpText: 'L\'app Messages va s\'ouvrir avec le ticket pré-rempli — appuyez sur Envoyer dans Messages pour finaliser. (Tablette sans SIM ? Utilisez plutôt le QR code ou l\'email.)',
     onSubmit: (phone) => {
       const cleaned = (phone||'').replace(/[\s.\-()]/g,'');
       if(!cleaned || !/^\+?\d{8,15}$/.test(cleaned)){
@@ -2468,7 +2468,6 @@ function sendReceiptBySMS(){
       body += 'Total : '+r.total.toFixed(2)+'€\n';
       body += r.date+' '+r.time;
       if(settings.googleReviewUrl) body += '\nAvis : '+settings.googleReviewUrl;
-      // iOS : sms:NUMBER&body=…, Android : sms:NUMBER?body=…
       const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
       const sep = isIOS ? '&' : '?';
       window.location.href = 'sms:'+cleaned+sep+'body='+encodeURIComponent(body);
@@ -2477,6 +2476,95 @@ function sendReceiptBySMS(){
   });
 }
 window.sendReceiptBySMS = sendReceiptBySMS;
+
+// ── Partage par QR code : pas de SIM, pas de mail, juste un scan ──
+// Crée un ticket dans Firebase tickets/{shortId}, génère un QR pointant
+// vers ticket.html?id={shortId}. Marche même sur tablette sans SIM.
+async function shareReceiptByQR(){
+  if(!lastReceipt) return;
+  if(!window.FB){ toast('Firebase requis pour le QR code', 'r'); return; }
+  const r = lastReceipt;
+  const tbl = r.tableId ? salleElements.find(e=>e.id===r.tableId) : null;
+  const tableNum = tbl ? (tbl.number||tbl.id) : null;
+  const id = generateShortId();
+  const payload = {
+    items: r.items.map(i => ({
+      qty: i.qty, name: i.name, price: i.price,
+      ...(i.cuisson && { cuisson: i.cuisson }),
+      ...(i.garniture && { garniture: i.garniture })
+    })),
+    total: r.total,
+    tax: calculateTVATotal(r.items),
+    date: r.date,
+    time: r.time,
+    payType: r.payType,
+    ...(tableNum && { tableNum: String(tableNum) }),
+    resto: {
+      name: branding.name || 'Restaurant',
+      tagline: branding.tagline || '',
+      accent: branding.accent || '#f5a623',
+      emoji: branding.emoji || '🍲',
+      ...(branding.logoUrl && { logoUrl: branding.logoUrl })
+    },
+    reviews: {
+      ...(settings.googleReviewUrl && { google: settings.googleReviewUrl }),
+      ...(settings.tripadvisorUrl && { tripadvisor: settings.tripadvisorUrl })
+    },
+    createdAt: window.FB.ts()
+  };
+  try{
+    toast('📤 Création du lien…','o');
+    await window.FB.set('tickets', id, payload);
+    const base = window.location.origin + window.location.pathname.replace(/[^\/]+$/, '');
+    const url = base + 'ticket.html?id=' + id;
+    showQRModal(url);
+  }catch(err){
+    console.error('[qr]', err);
+    toast('Erreur création QR : '+(err.message||'inconnue'),'r');
+  }
+}
+window.shareReceiptByQR = shareReceiptByQR;
+
+function generateShortId(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  let s = '';
+  for(let i=0; i<8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+function calculateTVATotal(items){
+  let t = 0;
+  items.forEach(i => {
+    const tva = (typeof i.tva === 'number') ? i.tva : 10;
+    const ht = i.price * i.qty / (1 + tva/100);
+    t += (i.price * i.qty) - ht;
+  });
+  return Math.round(t * 100) / 100;
+}
+
+function showQRModal(url){
+  const m = document.createElement('div');
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  m.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:24px;max-width:380px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.7)">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px;margin-bottom:6px">📱 Scannez le QR code</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.5">Le client scanne avec l'appareil photo de son téléphone pour récupérer son ticket.</div>
+      <div id="qr-box" style="background:#fff;padding:16px;border-radius:14px;display:inline-block;margin-bottom:16px"></div>
+      <div style="font-size:10px;color:var(--muted);word-break:break-all;margin-bottom:16px;font-family:monospace">${esc(url)}</div>
+      <div style="display:flex;gap:10px">
+        <button onclick="navigator.clipboard.writeText('${esc(url)}').then(()=>{const b=this;b.textContent='✓ Copié';setTimeout(()=>b.textContent='📋 Copier le lien',1500);})" style="flex:1;height:44px;border-radius:var(--radius-sm);background:var(--card);border:1px solid var(--border);color:var(--text);font-weight:700;font-size:13px">📋 Copier le lien</button>
+        <button onclick="this.closest('[style*=fixed]').remove()" style="flex:1;height:44px;border-radius:var(--radius-sm);background:var(--accent);color:#000;font-weight:800;border:none;font-size:13px">Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(m);
+  m.onclick = (e) => { if(e.target === m) m.remove(); };
+  if(typeof QRCode !== 'undefined'){
+    new QRCode(document.getElementById('qr-box'), { text: url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+  } else {
+    document.getElementById('qr-box').innerHTML = '<div style="color:#000;padding:20px">QR generator pas chargé — utilisez le lien ci-dessous.</div>';
+  }
+}
 
 // ── Modale réutilisable pour saisir email/téléphone ──
 function openContactModal(cfg){
@@ -2515,76 +2603,87 @@ function openContactModal(cfg){
 }
 window.openContactModal = openContactModal;
 
-// ── Status & test EmailJS dans admin ──
-function updateEmailJSStatus(){
-  const el = document.getElementById('emailjs-status');
+// ── Status & test Worker email dans admin ──
+function updateMailWorkerStatus(){
+  const el = document.getElementById('mail-worker-status');
   if(!el) return;
-  const ok = settings.emailjsServiceId && settings.emailjsTemplateId && settings.emailjsPublicKey;
+  const ok = settings.mailWorkerUrl && settings.mailSender;
   if(ok){
-    el.innerHTML = '<span style="color:#22c97a">✓ Configuré — envoi 100% auto activé</span>';
+    el.innerHTML = '<span style="color:#22c97a">✓ Configuré — envoi 100% auto activé (9000/mois)</span>';
   } else {
-    el.innerHTML = '<span style="color:var(--muted)">Non configuré — fallback Mail/Messages natif</span>';
+    el.innerHTML = '<span style="color:var(--muted)">Non configuré — fallback Mail natif</span>';
   }
 }
-window.updateEmailJSStatus = updateEmailJSStatus;
+window.updateMailWorkerStatus = updateMailWorkerStatus;
 
-function testEmailJS(){
-  const addr = (document.getElementById('s-emailjs-test')||{}).value || '';
+async function testMailWorker(){
+  const addr = (document.getElementById('s-mail-test')||{}).value || '';
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)){
     toast('Entrez une adresse email valide pour tester','r'); return;
   }
-  if(typeof emailjs === 'undefined'){
-    toast('SDK EmailJS pas encore chargé, réessayez dans 2s','r'); return;
-  }
-  const cfg = {
-    serviceId:  (document.getElementById('s-emailjs-service')||{}).value || settings.emailjsServiceId,
-    templateId: (document.getElementById('s-emailjs-template')||{}).value || settings.emailjsTemplateId,
-    publicKey:  (document.getElementById('s-emailjs-publickey')||{}).value || settings.emailjsPublicKey
-  };
-  if(!cfg.serviceId || !cfg.templateId || !cfg.publicKey){
-    toast('Remplissez les 3 champs avant de tester','r'); return;
+  const workerUrl = ((document.getElementById('s-mail-worker-url')||{}).value || settings.mailWorkerUrl || '').trim().replace(/\/$/, '');
+  const sender    = ((document.getElementById('s-mail-sender')    ||{}).value || settings.mailSender    || '').trim();
+  if(!workerUrl || !sender){
+    toast('Remplissez l\'URL du worker ET l\'email expéditeur','r'); return;
   }
   toast('📤 Test en cours…','o');
-  emailjs.init({ publicKey: cfg.publicKey });
-  emailjs.send(cfg.serviceId, cfg.templateId, {
-    to_email: addr,
-    to_name: addr.split('@')[0],
-    subject: '✅ Test de configuration — '+(branding.name||'La Marmite Express'),
-    message_html: '<div style="font-family:Arial;padding:20px"><h2>✅ Ça marche !</h2><p>Votre compte EmailJS est correctement configuré sur <strong>'+esc(branding.name||'La Marmite Express')+'</strong>. Vos clients recevront leurs tickets de caisse automatiquement.</p></div>',
-    message_text: 'Test EmailJS réussi pour '+(branding.name||'La Marmite Express'),
-    restaurant_name: branding.name||'La Marmite Express',
-    table_name: 'Test',
-    total: '0,00€',
-    date: new Date().toLocaleDateString('fr-FR'),
-    time: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})
-  }).then(()=>{
-    toast('✓ Email de test envoyé à '+addr,'g');
-  }).catch(err=>{
-    console.error('[emailjs test]', err);
-    toast('Échec : '+(err.text||err.message||'vérifiez vos clés'),'r');
-  });
+  try{
+    const res = await fetch(workerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: addr,
+        subject: '✅ Test de configuration — '+(branding.name||'La Marmite Express'),
+        html: '<div style="font-family:Arial;padding:20px"><h2>✅ Ça marche !</h2><p>Votre Worker Brevo est correctement configuré pour <strong>'+esc(branding.name||'La Marmite Express')+'</strong>. Vos clients recevront leurs tickets automatiquement.</p></div>',
+        text: 'Test Worker email réussi pour '+(branding.name||'La Marmite Express'),
+        fromName: branding.name || 'La Marmite Express',
+        fromEmail: sender
+      })
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok || data.ok === false){
+      const errMsg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || res.statusText;
+      console.error('[mail worker test]', data);
+      toast('Échec : '+errMsg, 'r');
+      return;
+    }
+    toast('✓ Email de test envoyé à '+addr, 'g');
+  }catch(err){
+    console.error('[mail worker test]', err);
+    toast('Erreur réseau : '+(err.message||'vérifiez l\'URL du worker'),'r');
+  }
 }
-window.testEmailJS = testEmailJS;
+window.testMailWorker = testMailWorker;
 
-// ── Guide pas-à-pas EmailJS ──
-function showEmailJSHelp(){
+// ── Guide pas-à-pas Worker email ──
+function showEmailHelp(){
   const m = document.createElement('div');
   m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto';
   m.innerHTML = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:24px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:24px;max-width:640px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6)">
       <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px">📖 Configurer EmailJS</div>
-        <button onclick="this.closest('[style*=fixed]').remove()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer">✕</button>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px">📖 Configurer l'envoi email (15 min, gratuit)</div>
+        <button onclick="this.closest('[style*=fixed]').remove()" style="background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1">✕</button>
       </div>
-      <ol style="line-height:1.7;font-size:13px;color:var(--text);padding-left:20px">
-        <li>Allez sur <a href="https://www.emailjs.com" target="_blank" style="color:var(--accent);font-weight:700">emailjs.com</a> et créez un compte gratuit (200 emails/mois).</li>
-        <li>Dans <strong>Email Services</strong>, ajoutez un service (Gmail, Outlook ou SMTP personnalisé) → copiez le <strong>Service ID</strong> (commence par <code>service_</code>).</li>
-        <li>Dans <strong>Email Templates</strong>, créez un nouveau template. Dans le corps, choisissez le mode <strong>HTML</strong> et collez simplement : <code style="display:block;background:var(--card);padding:8px;border-radius:6px;margin:4px 0">{{message_html}}</code> Dans le sujet, mettez : <code style="display:block;background:var(--card);padding:8px;border-radius:6px;margin:4px 0">{{subject}}</code> Dans "To Email" : <code style="display:block;background:var(--card);padding:8px;border-radius:6px;margin:4px 0">{{to_email}}</code> Sauvegardez → copiez le <strong>Template ID</strong>.</li>
-        <li>Dans <strong>Account → General</strong>, copiez votre <strong>Public Key</strong>.</li>
-        <li>Collez les 3 valeurs dans les champs ci-dessous et cliquez sur <strong>Tester l'envoi</strong> avec votre propre email.</li>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Setup unique pour envoyer <strong style="color:var(--text)">9000 emails/mois gratuits</strong> via Brevo + Cloudflare Worker (aucune CB).</div>
+      <ol style="line-height:1.8;font-size:13px;color:var(--text);padding-left:20px">
+        <li><strong>Compte Brevo</strong> (5 min) — <a href="https://www.brevo.com" target="_blank" style="color:var(--accent);font-weight:700">brevo.com</a> → Sign up free → confirmez votre email. Menu : <em>SMTP & API → API Keys → Generate</em> (notez la clé <code style="background:var(--card);padding:1px 6px;border-radius:4px">xkeysib-…</code>).</li>
+        <li><strong>Vérifiez votre email expéditeur</strong> chez Brevo : <em>Senders → Add a sender</em>, entrez l'email d'envoi (ex. contact@votre-resto.fr), confirmez via le lien reçu.</li>
+        <li><strong>Compte Cloudflare</strong> (2 min) — <a href="https://dash.cloudflare.com/sign-up" target="_blank" style="color:var(--accent);font-weight:700">cloudflare.com</a> → créez un compte.</li>
+        <li><strong>Créez un Worker</strong> : Workers &amp; Pages → Create Worker → nom <code>caisse-mailer</code> → Deploy → <em>Edit code</em> → supprimez tout → collez le contenu de <a href="https://github.com/faresclt/marmitte-express/blob/main/worker/brevo-mailer.js" target="_blank" style="color:var(--accent);font-weight:700">brevo-mailer.js</a> → <em>Save and Deploy</em>. Notez l'URL <code>https://caisse-mailer.XXX.workers.dev</code>.</li>
+        <li><strong>Variables du Worker</strong> : Settings → Variables → ajoutez :
+          <div style="background:var(--card);padding:10px;border-radius:8px;margin:6px 0;font-family:monospace;font-size:11px;line-height:1.6">
+            BREVO_API_KEY = xkeysib-…<br>
+            SENDER_EMAIL = contact@votre-resto.fr<br>
+            SENDER_NAME = ${esc(branding.name || 'Votre Restaurant')}<br>
+            ALLOWED_ORIGIN = ${esc(window.location.origin)}
+          </div>
+          Save and Deploy.
+        </li>
+        <li><strong>Collez l'URL du Worker</strong> + l'email expéditeur dans les champs ci-dessous → <em>Tester l'envoi</em>.</li>
       </ol>
-      <div style="margin-top:16px;padding:12px;background:rgba(34,201,122,.1);border:1px solid rgba(34,201,122,.3);border-radius:8px;font-size:12px;color:var(--green)">
-        💡 Variables disponibles dans le template : <code>{{to_email}}</code>, <code>{{subject}}</code>, <code>{{message_html}}</code>, <code>{{message_text}}</code>, <code>{{restaurant_name}}</code>, <code>{{table_name}}</code>, <code>{{total}}</code>, <code>{{date}}</code>, <code>{{time}}</code>.
+      <div style="margin-top:16px;padding:12px;background:rgba(34,201,122,.1);border:1px solid rgba(34,201,122,.3);border-radius:8px;font-size:12px;color:var(--green);line-height:1.5">
+        💡 Plus de détails dans le guide complet : <a href="https://github.com/faresclt/marmitte-express/blob/main/worker/README.md" target="_blank" style="color:var(--green);text-decoration:underline;font-weight:700">worker/README.md</a>
       </div>
       <button onclick="this.closest('[style*=fixed]').remove()" style="margin-top:16px;width:100%;height:44px;border-radius:var(--radius-sm);background:var(--accent);color:#000;font-weight:800;border:none">J'ai compris</button>
     </div>
@@ -2592,7 +2691,7 @@ function showEmailJSHelp(){
   m.onclick = (e) => { if(e.target === m) m.remove(); };
   document.body.appendChild(m);
 }
-window.showEmailJSHelp = showEmailJSHelp;
+window.showEmailHelp = showEmailHelp;
 
 // ═══ MOBILE NAV ═══
 function mobShowMenu(){
@@ -2919,10 +3018,9 @@ function applySettingsForm(){
   document.getElementById('s-serveur-pin').value=LS.get('serveur_pin','0000');
   const gr=document.getElementById('s-google-review'); if(gr) gr.value=settings.googleReviewUrl||'';
   const ta=document.getElementById('s-tripadvisor');   if(ta) ta.value=settings.tripadvisorUrl||'';
-  const ejs=document.getElementById('s-emailjs-service');    if(ejs) ejs.value=settings.emailjsServiceId||'';
-  const ejt=document.getElementById('s-emailjs-template');   if(ejt) ejt.value=settings.emailjsTemplateId||'';
-  const ejp=document.getElementById('s-emailjs-publickey');  if(ejp) ejp.value=settings.emailjsPublicKey||'';
-  updateEmailJSStatus();
+  const mwu=document.getElementById('s-mail-worker-url'); if(mwu) mwu.value=settings.mailWorkerUrl||'';
+  const ms =document.getElementById('s-mail-sender');     if(ms)  ms.value =settings.mailSender||'';
+  updateMailWorkerStatus();
   // Gemini key status
   const gk=GEMINI_KEY_PDJ;
   const gkStatus=document.getElementById('gemini-key-status');
@@ -2945,13 +3043,11 @@ function saveSettings(){
   const ta = document.getElementById('s-tripadvisor');
   if(gr) settings.googleReviewUrl = gr.value.trim();
   if(ta) settings.tripadvisorUrl  = ta.value.trim();
-  const ejs = document.getElementById('s-emailjs-service');
-  const ejt = document.getElementById('s-emailjs-template');
-  const ejp = document.getElementById('s-emailjs-publickey');
-  if(ejs) settings.emailjsServiceId  = ejs.value.trim();
-  if(ejt) settings.emailjsTemplateId = ejt.value.trim();
-  if(ejp) settings.emailjsPublicKey  = ejp.value.trim();
-  LS.set('settings',settings); updateEmailJSStatus(); toast('Paramètres sauvegardés');
+  const mwu = document.getElementById('s-mail-worker-url');
+  const ms  = document.getElementById('s-mail-sender');
+  if(mwu) settings.mailWorkerUrl = mwu.value.trim();
+  if(ms)  settings.mailSender    = ms.value.trim();
+  LS.set('settings',settings); updateMailWorkerStatus(); toast('Paramètres sauvegardés');
 }
 
 function savePIN(){
@@ -4191,9 +4287,8 @@ function publishMenu(silent){
       tva: settings.tva || 5.5,
       googleReviewUrl: settings.googleReviewUrl || '',
       tripadvisorUrl: settings.tripadvisorUrl || '',
-      emailjsServiceId: settings.emailjsServiceId || '',
-      emailjsTemplateId: settings.emailjsTemplateId || '',
-      emailjsPublicKey: settings.emailjsPublicKey || ''
+      mailWorkerUrl: settings.mailWorkerUrl || '',
+      mailSender: settings.mailSender || ''
     },
     salleLayout: salleElements,
     serveurPin: LS.get('serveur_pin','0000'),

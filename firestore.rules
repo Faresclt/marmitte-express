@@ -95,6 +95,14 @@ service cloud.firestore {
       allow read, write: if isAuth();
     }
 
+    // Tickets publics (lien QR partagé au client) :
+    // read public (le client scanne sans auth), write auth uniquement (caisse)
+    match /tickets/{id} {
+      allow read: if true;
+      allow create, update: if isAuth();
+      allow delete: if isAuth();
+    }
+
     // Tout le reste bloqué
     match /{document=**} {
       allow read, write: if false;
