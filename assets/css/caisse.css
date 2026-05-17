@@ -40,6 +40,17 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .hbtn-table{background:rgba(74,158,255,.12);border:1px solid rgba(74,158,255,.3);color:var(--blue)}
 .hbtn-table:hover{background:rgba(74,158,255,.2)}
 
+/* Audit salle #12 : touch targets ≥44px sur tactile (iPad / iPhone)
+   Cible uniquement les devices à pointeur grossier — desktop souris
+   garde sa densité actuelle. Concerne tous les .hbtn (toolbar header,
+   tabs mode Service/Edit, toolbar add elements en salle) + les inputs
+   number du panneau edit-props (ep-seats, ep-size, ep-w, ep-h, ep-number). */
+@media (pointer: coarse){
+  .hbtn{min-height:44px;padding:0 18px;font-size:13px}
+  #edit-props input[type="number"],
+  #edit-props input[type="text"]{min-height:44px !important;min-width:60px}
+}
+
 /* Tabs */
 #pos-tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;scrollbar-width:none;padding:0 6px}
 #pos-tabs::-webkit-scrollbar{display:none}

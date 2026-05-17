@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v61-salle-fixes-sync-status-clamp';
+const CACHE_NAME = 'marmite-v62-salle-yellows-confirm-note-collision-relock-touch-empty';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

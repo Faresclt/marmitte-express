@@ -2312,9 +2312,24 @@ function payUnassigned(){
 function payAllAndClose(){
   const total=ticket.reduce((s,r)=>s+r.qty*r.price,0);
   if(!total){ toast('Rien à encaisser','o'); return; }
+  // Audit salle #8 : si certains convives ont déjà payé (split partiel), alerter
+  // l'utilisateur avant d'encaisser le total — sinon double-encaissement silencieux.
+  const paidCount = Array.isArray(persons) ? persons.filter(p => p.paid).length : 0;
+  if(paidCount > 0){
+    const ok = confirm(
+      `⚠ Attention : ${paidCount} convive(s) ont déjà été encaissés individuellement.\n\n` +
+      `"Tout encaisser" va débiter le TOTAL de la table (${fmt(total)}), ` +
+      `pas seulement la part restante.\n\n` +
+      `Continuer ?`
+    );
+    if(!ok) return;
+  }
+  // Audit salle #8 : remonter la note de table dans le historique pour traçabilité
+  // (allergies, anniversaire, demandes spéciales — utile pour SAV / réclamations).
+  const tableNote = (currentTableId && tableData[currentTableId] && tableData[currentTableId].note) || '';
   openPayFor(total,()=>{
     const tip = (window.lastReceipt && window.lastReceipt.tip) || 0;
-    saveToHistory({tableId: currentTableId, items:[...ticket], total: total + tip, payType: currentPayType, tip});
+    saveToHistory({tableId: currentTableId, items:[...ticket], total: total + tip, payType: currentPayType, tip, note: tableNote});
     ticket=[]; persons=[]; activePerson=null;
     if(currentTableId){
       tableData[currentTableId]={persons:[],ticket:[]};
@@ -4224,8 +4239,23 @@ function setSalleMode(m){
       return;
     }
     window._editUnlocked = true;
-    // Re-lock après 5 min d'inactivité (sécurité service)
-    setTimeout(()=>{ window._editUnlocked = false; }, 5*60*1000);
+    // Audit salle #10 : re-lock après 5 min basculer en Service + toast
+    // Avant : flag flip silencieux ; l'admin croyait sauvegarder mais
+    // ses actions étaient en réalité bloquées au prochain clic.
+    clearTimeout(window._editLockTimer);
+    window._editLockTimer = setTimeout(() => {
+      window._editUnlocked = false;
+      // Bascule visuellement vers service si on est encore en mode edit
+      if(salleMode === 'edit'){
+        if(_salleDirty){
+          // Modifs non sauvées : prévenir avant de basculer
+          toast('⚠ Session édition expirée — modifications non publiées !', 'o');
+        } else {
+          toast('🔒 Session édition expirée — mode Service réactivé');
+        }
+        setSalleMode('service');
+      }
+    }, 5*60*1000);
   }
   salleMode=m;
   applySalleMode();
@@ -4281,6 +4311,21 @@ function drawGrid(){
 function renderSalle(){
   const canvas = document.getElementById('salle-elements');
   canvas.innerHTML = '';
+  // Audit salle #13 : si plan vide, afficher un placeholder + CTA "créer ton plan"
+  // au lieu d'un canvas tout blanc qui laisse l'admin sans repère.
+  if(!salleElements || salleElements.length === 0){
+    const empty = document.createElement('div');
+    empty.id = 'salle-empty-state';
+    empty.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;color:var(--muted);max-width:380px;padding:20px';
+    empty.innerHTML = `
+      <div style="font-size:48px;margin-bottom:12px;opacity:.5">🗺️</div>
+      <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px">Aucune table</div>
+      <div style="font-size:13px;line-height:1.5;margin-bottom:16px">Bascule en mode Édition et clique sur les boutons (Table ronde, Table carrée, Bar…) pour créer ton plan de salle.</div>
+      <button class="hbtn hbtn-admin" onclick="setSalleMode('edit')" style="background:var(--accent);color:#000;border:none">✏️ Créer mon plan</button>
+    `;
+    canvas.appendChild(empty);
+    return;
+  }
   salleElements.forEach(el => canvas.appendChild(makeElDOM(el)));
   applySalleScale();
 }
@@ -4864,6 +4909,17 @@ function copySelected(){
   _salleDirty = true;
 }
 
+// Audit salle #9 : helper collision détection AABB pour éviter de spawn
+// 2 éléments au même endroit (Math.random() pouvait piler des tables).
+// Retourne true si rect1 chevauche rect2.
+function _salleCollide(a, b){
+  const aW = (a.type==='bar'||a.type==='wall') ? (a.w||120) : (a.size||80);
+  const aH = (a.type==='bar'||a.type==='wall') ? (a.h|| 60) : (a.size||80);
+  const bW = (b.type==='bar'||b.type==='wall') ? (b.w||120) : (b.size||80);
+  const bH = (b.type==='bar'||b.type==='wall') ? (b.h|| 60) : (b.size||80);
+  return !(a.x + aW <= b.x || b.x + bW <= a.x || a.y + aH <= b.y || b.y + bH <= a.y);
+}
+
 function addElement(type){
   const tables=salleElements.filter(e=>e.type==='table-round'||e.type==='table-rect');
   const nextNum=tables.length+1;
@@ -4877,6 +4933,19 @@ function addElement(type){
     w:type==='bar'?160:type==='wall'?14:undefined,
     h:type==='bar'?55:type==='wall'?120:undefined,
   };
+  // Audit salle #9 : si la position spawn colle avec un élément existant,
+  // décale en spirale (snap 20px) jusqu'à trouver un slot libre.
+  // Évite empilement invisible en mode tactile (impossible de cliquer dessous).
+  const canvas = document.getElementById('salle-elements');
+  const cW = canvas ? (canvas.clientWidth || 1200) : 1200;
+  const cH = canvas ? (canvas.clientHeight ||  700) :  700;
+  let tries = 0;
+  while(tries < 100 && salleElements.some(other => _salleCollide(el, other))){
+    el.x += 20;
+    if(el.x > cW - 120){ el.x = 60; el.y += 20; }
+    if(el.y > cH - 120){ el.y = 60; break; } // canvas plein, on lâche
+    tries++;
+  }
   salleElements.push(el);
   renderSalle();
   selectEl(el.id);
@@ -5432,6 +5501,9 @@ function saveToHistory(entry){
     // Numéro de note (NF525 partiel) — récupéré depuis lastReceipt si dispo
     receiptNumber: entry.receiptNumber || (window.lastReceipt && window.lastReceipt.number) || null,
     tip: entry.tip || 0,
+    // Audit salle #8 : note de table (allergies, anniversaire, etc.) tracée
+    // pour SAV / réclamations. Vide par défaut, max 500 chars côté saveTableNote.
+    note: entry.note || '',
     cancelled: false,
     ts: Date.now()
   };
