@@ -1024,7 +1024,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap" id="section-chips"></div>
       </div>
-      <div class="toggle-row"><span class="toggle-lbl">⭐ Plat du jour</span><label class="toggle"><input type="checkbox" id="pm-pdj"><div class="toggle-track"></div></label></div>
+      <div class="toggle-row"><span class="toggle-lbl">⭐ Plat du jour <span style="color:var(--muted);font-weight:400;font-size:11px">(un seul à la fois — coche pour remplacer)</span></span><label class="toggle"><input type="checkbox" id="pm-pdj"><div class="toggle-track"></div></label></div>
       <div class="toggle-row"><span class="toggle-lbl">Visible sur la caisse</span><label class="toggle"><input type="checkbox" id="pm-active" checked><div class="toggle-track"></div></label></div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">📦 Gestion du stock</div>
@@ -1039,15 +1039,22 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-        <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Options à proposer</div>
-        <div class="toggle-row"><span class="toggle-lbl">🔥 Choix de cuisson</span><label class="toggle"><input type="checkbox" id="pm-cuisson"><div class="toggle-track"></div></label></div>
-        <div class="toggle-row"><span class="toggle-lbl">🍟 Choix de garniture</span><label class="toggle"><input type="checkbox" id="pm-garniture"><div class="toggle-track"></div></label></div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Options au choix du client</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.4">Active si le client peut <strong>choisir</strong> entre plusieurs options (un modal s'affichera lors de l'ajout au ticket). La liste des choix se configure dans Admin → Paramètres.</div>
+        <div class="toggle-row"><span class="toggle-lbl">🔥 Cuisson au choix <span style="color:var(--muted);font-weight:400;font-size:11px">(bleu, saignant, à point…)</span></span><label class="toggle"><input type="checkbox" id="pm-cuisson"><div class="toggle-track"></div></label></div>
+        <div class="toggle-row"><span class="toggle-lbl">🍟 Garniture au choix <span style="color:var(--muted);font-weight:400;font-size:11px">(frites OU salade OU pâtes…)</span></span><label class="toggle"><input type="checkbox" id="pm-garniture"><div class="toggle-track"></div></label></div>
       </div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">📋 Fiche détaillée client (modal QR)</div>
         <div class="form-group"><label class="form-label">Description complète</label><textarea class="form-textarea" id="pm-description" placeholder="Description longue du plat affichée dans la fiche détail client" style="min-height:60px"></textarea></div>
-        <div class="form-group"><label class="form-label">Garniture incluse</label><input class="form-input" id="pm-garniture-text" placeholder="Ex : Frites maison, salade verte"></div>
-        <div class="form-group"><label class="form-label">Sauce / Accompagnement</label><input class="form-input" id="pm-sauces" placeholder="Ex : Sauce béarnaise"></div>
+        <div class="form-group">
+          <label class="form-label">🍟 Garniture imposée <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(toujours servie avec le plat, pas de choix client)</span></label>
+          <input class="form-input" id="pm-garniture-text" placeholder="Ex : Frites maison + salade verte">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🥄 Sauce / Accompagnement <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(toujours servi)</span></label>
+          <input class="form-input" id="pm-sauces" placeholder="Ex : Sauce béarnaise">
+        </div>
         <div class="form-group">
           <label class="form-label">Allergènes (cocher tout ce qui s'applique)</label>
           <div id="pm-allergens" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:6px"></div>
@@ -3301,14 +3308,27 @@ async function saveProduct(){
   const glutenFree=document.getElementById('pm-glutenFree').checked;
   const spicy=document.getElementById('pm-spicy').checked;
   const alcohol=document.getElementById('pm-alcohol').checked;
+  const pdj=document.getElementById('pm-pdj').checked;
+
+  // Plat du jour unique : si on coche pdj, on décoche TOUS les autres
+  // (avant : on pouvait avoir N plats du jour → bruit visuel sur les cards)
+  let _replacedPdj = null;
+  if(pdj){
+    products.forEach(p => {
+      if(p.id !== editingProdId && p.pdj){
+        if(!_replacedPdj) _replacedPdj = p.name;
+        p.pdj = false;
+      }
+    });
+  }
 
   let prodId = editingProdId;
   if(editingProdId){
     const p=products.find(x=>x.id===editingProdId);
-    if(p){ p.name=nm; p.sub=document.getElementById('pm-sub').value.trim(); p.price=price; p.cat=cat; p.section=section; p.pdj=document.getElementById('pm-pdj').checked; p.active=document.getElementById('pm-active').checked; p.hasCuisson=hasCuisson; p.hasGarniture=hasGarniture; p.tva=tva; p.stock=stock; p.description=description; p.garniture=garnitureText; p.sauces=sauces; p.allergens=allergens; p.vegetarian=vegetarian; p.vegan=vegan; p.glutenFree=glutenFree; p.spicy=spicy; p.alcohol=alcohol; }
+    if(p){ p.name=nm; p.sub=document.getElementById('pm-sub').value.trim(); p.price=price; p.cat=cat; p.section=section; p.pdj=pdj; p.active=document.getElementById('pm-active').checked; p.hasCuisson=hasCuisson; p.hasGarniture=hasGarniture; p.tva=tva; p.stock=stock; p.description=description; p.garniture=garnitureText; p.sauces=sauces; p.allergens=allergens; p.vegetarian=vegetarian; p.vegan=vegan; p.glutenFree=glutenFree; p.spicy=spicy; p.alcohol=alcohol; }
   } else {
     prodId='p_'+uid();
-    products.push({id:prodId,cat,name:nm,sub:document.getElementById('pm-sub').value.trim(),price,section,pdj:document.getElementById('pm-pdj').checked,active:document.getElementById('pm-active').checked,hasCuisson,hasGarniture,tva,stock,description,garniture:garnitureText,sauces,allergens,vegetarian,vegan,glutenFree,spicy,alcohol});
+    products.push({id:prodId,cat,name:nm,sub:document.getElementById('pm-sub').value.trim(),price,section,pdj,active:document.getElementById('pm-active').checked,hasCuisson,hasGarniture,tva,stock,description,garniture:garnitureText,sauces,allergens,vegetarian,vegan,glutenFree,spicy,alcohol});
   }
   
   // Upload image to Firebase Storage if new image
@@ -3326,7 +3346,12 @@ async function saveProduct(){
     }
   }
   
-  saveAll(); closeProdModal(); renderProdList(); renderMenu(); toast('✓ Produit enregistré');
+  saveAll(); closeProdModal(); renderProdList(); renderMenu();
+  if(_replacedPdj){
+    toast(`⭐ "${_replacedPdj}" n'est plus le plat du jour → "${nm}" l'est maintenant`, 'o');
+  } else {
+    toast('✓ Produit enregistré');
+  }
 }
 function confirmDelProduct(id){ if(confirm('Supprimer ce produit ?')){ products=products.filter(p=>p.id!==id); saveAll(); renderProdList(); toast('Produit supprimé'); } }
 function deleteProduct(){ if(editingProdId) confirmDelProduct(editingProdId); closeProdModal(); }

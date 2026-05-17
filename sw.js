@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v54-product-modal-cat-validation';
+const CACHE_NAME = 'marmite-v55-pdj-unique-garniture-labels';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
