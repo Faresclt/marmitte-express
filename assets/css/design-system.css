@@ -252,6 +252,40 @@ select:focus-visible {
   }
 }
 
+/* ============================================================
+   PWA standalone via classe JS (pwa-standalone sur <html>)
+   Backup fiable au @media (display-mode: standalone) qui peut foirer
+   sur iOS Safari. Pousse TOUT le contenu sous le notch / Dynamic Island.
+   ============================================================ */
+
+html.pwa-standalone body {
+  /* Push global du body pour compenser la zone notch/Dynamic Island.
+     min 50px (iPhone Pro avec Dynamic Island) ou plus si safe-area connu. */
+  padding-top: max(env(safe-area-inset-top), 50px);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: border-box;
+}
+
+/* Position:absolute/fixed enfants : ne respectent PAS le body padding.
+   On doit leur appliquer la safe-area directement. */
+html.pwa-standalone .screen,
+html.pwa-standalone #pin-screen,
+html.pwa-standalone #pos-screen,
+html.pwa-standalone #admin-screen,
+html.pwa-standalone #salle-screen,
+html.pwa-standalone #histo-screen {
+  padding-top: max(env(safe-area-inset-top), 50px) !important;
+  padding-bottom: env(safe-area-inset-bottom) !important;
+  box-sizing: border-box;
+}
+
+/* Bottom safe-area pour les cart-bars / footers fixes */
+html.pwa-standalone #cart-bar,
+html.pwa-standalone .cart-bar,
+html.pwa-standalone .sync-banner {
+  padding-bottom: calc(14px + env(safe-area-inset-bottom)) !important;
+}
+
 /* iOS Safari sans standalone : si viewport-fit=cover, on a besoin
    de safe-area dans certains contextes (orientation paysage avec notch).
    On applique seulement aux headers fixes sticky/fixed pour ne pas

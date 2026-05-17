@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v40-logo-auto-restore-no-overwrite';
+const CACHE_NAME = 'marmite-v41-pwa-standalone-safe-area';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
@@ -11,6 +11,7 @@ const ASSETS = [
   './assets/js/tap-feedback.js',
   './assets/js/theme.js',
   './assets/js/orders-rest-poll.js',
+  './assets/js/pwa-standalone-detect.js',
   './assets/js/firebase-sync.js',
   'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap'
 ];
