@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v48-sync-tables-anti-doublons';
+const CACHE_NAME = 'marmite-v49-tablestatus-local-priority';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

@@ -2307,7 +2307,9 @@ function validatePay(){
   showPrintOption();
 }
 
-let lastReceipt = null;
+// `var` pour exposition automatique à window (utile pour shareReceiptByQR,
+// printReceipt, et tous les handlers qui lisent window.lastReceipt).
+var lastReceipt = null;
 
 function showPrintOption(){
   if(!lastReceipt || !lastReceipt.total) return;
@@ -3861,13 +3863,20 @@ if(!window._salleResizeAttached){
 }
 
 function tableStatus(tid){
-  // 1) État local (le plus récent sur ce device)
+  // 1) État local : si la table a un état explicite (existe dans tableData),
+  //    ce device fait foi pour SES propres modifications récentes.
+  //    - ticket vide → return free immédiat (évite le flash "occupied" juste
+  //      après encaissement local pendant que Firebase round-trip)
+  //    - ticket non vide avec total>0 → occupied
   const d = tableData[tid];
-  if(d && (d.ticket?.length)){
-    const total = (d.ticket||[]).reduce((s,r)=>s+r.qty*r.price,0);
+  if(d && Array.isArray(d.ticket)){
+    if(d.ticket.length === 0){
+      return 'free'; // état local explicite : vidé localement
+    }
+    const total = d.ticket.reduce((s,r)=>s+r.qty*r.price,0);
     if(total > 0) return 'occupied';
   }
-  // 2) État Firebase (autres devices peuvent avoir occupé cette table)
+  // 2) Pas d'état local pour cette table → consulter Firebase
   //    Source de vérité cross-device : si un autre iPhone/iPad a ouvert la
   //    table, elle apparaît occupée chez tout le monde.
   const fbT = (window.fbTables || {})[tid];
