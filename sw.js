@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v38-dedup-imports-no-spam';
+const CACHE_NAME = 'marmite-v39-brand-rest-sync-autopublish';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

@@ -105,6 +105,50 @@
     }
   }
 
+  // Sync branding (logo, accent, nom) depuis Firebase config/menu via REST
+  // Garantit que tous les devices voient le même branding même si le
+  // Firebase SDK est bloqué.
+  async function pullBrandingViaREST() {
+    try {
+      var res = await fetch(BASE + '/config/menu', { mode: 'cors', credentials: 'omit' });
+      if (!res.ok) return;
+      var doc = await res.json();
+      var fields = doc.fields || {};
+      var branding = fields.branding ? parseFsValue(fields.branding) : null;
+      if (!branding) return;
+      window.__fbBranding = branding;
+
+      // Met à jour localStorage brand_* pour que brand-boot.js et applyBranding utilisent
+      try {
+        if (branding.logoUrl) localStorage.setItem('brand_logoUrl', JSON.stringify(branding.logoUrl));
+        else localStorage.removeItem('brand_logoUrl');
+        if (branding.name)   localStorage.setItem('brand_name',   JSON.stringify(branding.name));
+        if (branding.accent) localStorage.setItem('brand_accent', JSON.stringify(branding.accent));
+      } catch (e) {}
+
+      // Met à jour l'objet `branding` JS si défini (caisse classic script)
+      if (typeof window.branding !== 'undefined' && window.branding) {
+        Object.assign(window.branding, branding);
+        if (typeof window.applyBranding === 'function') {
+          try { window.applyBranding(); } catch(e){}
+        }
+      }
+      // Met à jour l'accent CSS au cas où
+      if (branding.accent) {
+        document.documentElement.style.setProperty('--accent', branding.accent);
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', branding.accent);
+      }
+    } catch (e) {
+      console.warn('[branding pull] error:', e && e.message || e);
+    }
+  }
+
+  window.pullBrandingViaREST = pullBrandingViaREST;
+  // Pull branding au boot puis toutes les 30s (peu fréquent, change rarement)
+  setTimeout(pullBrandingViaREST, 1000);
+  setInterval(pullBrandingViaREST, 30000);
+
   window.pollOrdersViaREST = pollOrdersViaREST;
 
   // Démarre le polling à 5s après chargement (laisse le temps au SDK d'essayer en premier)

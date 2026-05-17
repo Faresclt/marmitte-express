@@ -1301,7 +1301,27 @@ let products = LS.get('products', DEFAULT_PRODUCTS);
 var branding = LS.get('branding', {name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'});
 let settings = LS.get('settings', {showImg:true,tableMode:false,showSub:true,currency:'€',tva:5.5,cuissons:'Bleu,Saignant,À point,Bien cuit',garnitures:'Frites maison,Salade,Pommes de terre sautées,Pâtes'});
 
-function saveAll(){ LS.set('cats',cats); LS.set('products',products); LS.set('branding',branding); LS.set('settings',settings); }
+function saveAll(){
+  LS.set('cats',cats);
+  LS.set('products',products);
+  LS.set('branding',branding);
+  LS.set('settings',settings);
+  // Auto-publish vers Firebase 2.5s après la dernière modification
+  // (debounced) → garantit que tes ajouts/changements atterrissent dans
+  // Firebase sans avoir à cliquer Publier manuellement.
+  scheduleAutoPublish();
+}
+
+var _autoPublishTimer = null;
+function scheduleAutoPublish(){
+  clearTimeout(_autoPublishTimer);
+  _autoPublishTimer = setTimeout(function(){
+    if(typeof publishMenu === 'function' && window.FB){
+      console.log('[auto-publish] triggered');
+      try { publishMenu(true); } catch(e){ console.warn('[auto-publish] error:', e); }
+    }
+  }, 2500);
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  POS STATE
@@ -3759,9 +3779,10 @@ function showOrderNotif(order){
 }
 
 // Publish menu to Firebase so waiter app can use it
-function publishMenu(){
-  if(!window.FB){ toast('Firebase non connecté','r'); return; }
-  toast('📤 Publication en cours…','o');
+// silent=true → pas de toast (utilisé par auto-publish)
+function publishMenu(silent){
+  if(!window.FB){ if(!silent) toast('Firebase non connecté','r'); return; }
+  if(!silent) toast('📤 Publication en cours…','o');
   
   const activeProducts = products.filter(p=>p.active);
   const menuData = {
@@ -3788,8 +3809,8 @@ function publishMenu(){
   if(imgIds.length === 0){
     // No images — publish menu only
     window.FB.set('config','menu',menuData)
-      .then(()=>toast('✓ Carte publiée (sans images)'))
-      .catch(()=>toast('Erreur de publication','r'));
+      .then(()=>{ if(!silent) toast('✓ Carte publiée (sans images)'); })
+      .catch((e)=>{ if(!silent) toast('Erreur de publication','r'); console.warn('[publish] error:', e); });
     return;
   }
   
