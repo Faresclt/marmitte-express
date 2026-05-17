@@ -108,7 +108,7 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
   <div class="section-sub">Génère automatiquement des photos de haute qualité pour tous les plats, entrées, salades et desserts manquants.</div>
 
   <div class="alert" style="background:rgba(34,201,122,.08);border:1px solid rgba(34,201,122,.25);color:#22c97a;padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.5;margin-bottom:14px">
-    ✅ <strong>Aucune clé requise par défaut</strong> — Pollinations.ai gratuit illimité (modèle Flux). Pour une qualité premium et un meilleur respect du prompt (idéal pour la carte client finale), passe sur Recraft ci-dessous (clé Bearer requise, 50 crédits gratuits/mois).
+    ✅ <strong>Aucune clé requise par défaut</strong> — Pollinations.ai gratuit illimité (modèle Flux). Pour une qualité premium et un meilleur respect du prompt (idéal pour la carte client finale), passe sur Recraft ci-dessous. ⚠ Recraft API est <strong>payant</strong> : il faut recharger des crédits ($5 minimum = 5000 unités ≈ 125 images recraftv3) avant de pouvoir générer une clé.
   </div>
 
   <label style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:6px">Provider IA</label>
@@ -466,7 +466,7 @@ window.toggleProviderKey = function() {
   // Seul "recraft" reste avec une clé requise (gemini retiré du select)
   label.textContent = 'Clé API Recraft (Bearer token)';
   input.placeholder = 'recraft_...';
-  hint.innerHTML = 'Obtiens ta clé sur <a href="https://www.recraft.ai/docs" target="_blank" style="color:var(--accent)">recraft.ai/docs</a> — 50 crédits gratuits/mois.';
+  hint.innerHTML = 'Obtiens ta clé sur <a href="https://www.recraft.ai/profile/api" target="_blank" style="color:var(--accent)">recraft.ai/profile/api</a> — il faut recharger des crédits avant ($5 minimum = 5000 unités ≈ 125 images recraftv3).';
   input.value = localStorage.getItem('recraft_api_key') || '';
   input.oninput = () => localStorage.setItem('recraft_api_key', input.value.trim());
 };
@@ -602,10 +602,12 @@ async function runGenerationLoop(targets, contextLabel) {
   if (!cfg) return;
 
   // Confirmation avant génération massive (>5) car ça prend du temps ET
-  // consomme des crédits API si Recraft
+  // consomme des unités API si Recraft (~40 unités / image recraftv3)
   if (targets.length > 5) {
     const eta = Math.ceil(targets.length * 1.5);
-    const apiCost = cfg.provider === 'recraft' ? `\n⚠ Recraft consomme ${targets.length} crédit(s).` : '';
+    const apiCost = cfg.provider === 'recraft'
+      ? `\n💳 Coût Recraft : ~${targets.length * 40} unités API (≈ $${(targets.length * 40 / 1000).toFixed(2)})`
+      : '';
     if (!confirm(`Générer ${targets.length} images via ${cfg.provider} ?\n\n⏱️ Temps estimé : ~${eta}s${apiCost}\n\nContinuer ?`)) return;
   }
 
