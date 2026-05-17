@@ -254,6 +254,8 @@ document.addEventListener('DOMContentLoaded', () => {
 <link rel="stylesheet" href="./assets/css/components.css">
 <script src="assets/js/theme.js"></script>
 <link rel="stylesheet" href="./assets/css/caisse.css">
+<!-- REST poll des orders - marche MÊME SI Firebase SDK foire (script classic, pas module) -->
+<script src="assets/js/orders-rest-poll.js" defer></script>
 <script>
 /* Pre-boot caisse : si un logo custom est en cache, on précharge l'image
    et on l'injecte dans #pin-logo dès qu'il est parsé. Sinon, on révèle
