@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v42-clean-state-helper';
+const CACHE_NAME = 'marmite-v43-logo-history-fix-publish';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

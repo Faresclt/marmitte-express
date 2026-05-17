@@ -427,7 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <!-- ═══════════════ ADMIN SCREEN ═══════════════ -->
 <div class="screen" id="admin-screen">
   <div id="admin-header">
-    <button class="btn-back" onclick="showPOS()">← Retour caisse</button>
+    <button class="btn-back" onclick="showPOS()" aria-label="Retour caisse" title="Retour caisse">←</button>
     <h1>⚙️ Administration</h1>
     <div style="margin-left:auto;font-size:12px;color:var(--muted)">Toutes les modifications sont sauvegardées automatiquement</div>
   </div>
@@ -489,6 +489,11 @@ document.addEventListener('DOMContentLoaded', () => {
               <div style="display:flex;gap:6px;flex-wrap:wrap" id="emoji-picker"></div>
             </div>
           </div>
+        </div>
+        <div class="form-group" id="logo-history-wrap" style="display:none">
+          <label class="form-label">📚 Historique des logos</label>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Cliquez sur un logo pour le réutiliser. Vos imports récents restent ici en proposition.</div>
+          <div id="logo-history-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
         </div>
         <div class="form-group"><label class="form-label">Couleur principale</label>
           <div class="color-row" id="color-picker"></div>
@@ -755,7 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <div class="screen" id="salle-screen" style="background:var(--bg)">
   <!-- Header -->
   <div id="salle-header" style="min-height:58px;display:flex;align-items:center;padding:0 16px;gap:10px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
-    <button class="btn-back" onclick="closeSalle()">← Retour caisse</button>
+    <button class="btn-back" onclick="closeSalle()" aria-label="Retour caisse" title="Retour caisse">←</button>
     <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px;color:var(--accent)">🗺️ Plan de salle</div>
     <div id="salle-mode-tabs" style="display:flex;gap:6px;margin-left:16px">
       <button id="stab-service" class="hbtn" style="background:rgba(34,201,122,.15);border:1px solid rgba(34,201,122,.3);color:var(--green)" onclick="setSalleMode('service')">🍽️ Service</button>
@@ -1420,6 +1425,7 @@ function handleLogoUpload(e){
       c.getContext('2d').drawImage(img,sx,sy,sc,sc,0,0,sz,sz);
       const b64=c.toDataURL('image/png',0.85);
       LS.set('brand_logo',b64);
+      addLogoToHistory(b64);
       applyLogoPreview(b64);
       applyBranding();
       // Upload Firebase Storage + propagation cross-device via config/menu.branding.logoUrl
@@ -1431,6 +1437,8 @@ function handleLogoUpload(e){
           const { doc: docFn, setDoc: setDocFn } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
           await setDocFn(docFn(window.FB.db, 'config', 'menu'), { branding: { logoUrl: url } }, { merge: true });
           branding.logoUrl = url;
+          LS.set('brand_logoUrl', url);
+          renderLogoHistory();
           toast('✓ Logo synchronisé');
         }catch(err){
           console.warn('[logo] upload Firebase échoué:', err);
@@ -1441,6 +1449,92 @@ function handleLogoUpload(e){
       }
     }; img.src=ev.target.result;
   }; r.readAsDataURL(f);
+}
+
+// ── Historique des logos uploadés ──
+// On stocke les vignettes b64 dans localStorage (max 8 entrées).
+// L'utilisateur peut cliquer sur un ancien logo pour le réutiliser.
+function getLogoHistory(){
+  try{ return JSON.parse(localStorage.getItem('brand_logo_history') || '[]'); }
+  catch(e){ return []; }
+}
+function addLogoToHistory(b64){
+  if(!b64) return;
+  let hist = getLogoHistory();
+  // Vignette plus petite pour l'historique (économie storage)
+  try{
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      const sz = 96; c.width = sz; c.height = sz;
+      c.getContext('2d').drawImage(img, 0, 0, sz, sz);
+      const thumb = c.toDataURL('image/jpeg', 0.7);
+      hist = hist.filter(h => h.thumb !== thumb);
+      hist.unshift({ thumb, full: b64, addedAt: Date.now() });
+      hist = hist.slice(0, 8);
+      try{ localStorage.setItem('brand_logo_history', JSON.stringify(hist)); }
+      catch(e){ console.warn('[logo-history] storage plein:', e); }
+      renderLogoHistory();
+    };
+    img.src = b64;
+  }catch(e){ console.warn('[logo-history]', e); }
+}
+function useLogoFromHistory(idx){
+  const hist = getLogoHistory();
+  const item = hist[idx];
+  if(!item) return;
+  LS.set('brand_logo', item.full);
+  applyLogoPreview(item.full);
+  // Re-upload to Firebase Storage so all devices see it
+  (async () => {
+    if(window.FB && window.FB.uploadImage){
+      try{
+        toast('📤 Application logo…','o');
+        const url = await window.FB.uploadImage('branding/logo.png', item.full);
+        const { doc: docFn, setDoc: setDocFn } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+        await setDocFn(docFn(window.FB.db, 'config', 'menu'), { branding: { logoUrl: url } }, { merge: true });
+        branding.logoUrl = url;
+        LS.set('brand_logoUrl', url);
+        applyBranding();
+        toast('✓ Logo restauré');
+      }catch(err){
+        console.warn('[logo-history] sync échouée:', err);
+        applyBranding();
+        toast('⚠ Logo local OK, sync échouée','o');
+      }
+    } else {
+      applyBranding();
+      toast('✓ Logo restauré (local)');
+    }
+  })();
+}
+function removeLogoFromHistory(idx){
+  const hist = getLogoHistory();
+  hist.splice(idx, 1);
+  try{ localStorage.setItem('brand_logo_history', JSON.stringify(hist)); }catch(e){}
+  renderLogoHistory();
+}
+function renderLogoHistory(){
+  const wrap = document.getElementById('logo-history-list');
+  if(!wrap) return;
+  let hist = getLogoHistory();
+  // Seed avec le logo courant si l'historique est vide
+  if(!hist.length){
+    const current = LS.get('brand_logo', null);
+    if(current){
+      addLogoToHistory(current); // async — re-rendra une fois prêt
+      return;
+    }
+    wrap.parentElement.style.display = 'none';
+    return;
+  }
+  wrap.parentElement.style.display = '';
+  wrap.innerHTML = hist.map((h, i) => (
+    '<div class="logo-hist-item" title="Cliquer pour réutiliser ce logo">'+
+      '<img src="'+h.thumb+'" onclick="useLogoFromHistory('+i+')" alt="logo">'+
+      '<button class="logo-hist-del" onclick="removeLogoFromHistory('+i+')" title="Retirer de l\'historique">✕</button>'+
+    '</div>'
+  )).join('');
 }
 
 function applyLogoPreview(b64){
@@ -2303,6 +2397,7 @@ function applyBrandingForm(){
   // logo preview
   const logoImg=LS.get('brand_logo',null);
   applyLogoPreview(logoImg);
+  renderLogoHistory();
   previewBrand();
 }
 function selectEmoji(el,e){ branding.emoji=e; document.querySelectorAll('#emoji-picker span').forEach(s=>s.style.borderColor='transparent'); el.style.borderColor='var(--accent)'; previewBrand(); }
@@ -3820,7 +3915,13 @@ function publishMenu(silent){
   const menuData = {
     cats: cats.filter(c=>activeProducts.some(p=>p.cat===c.id)),
     products: activeProducts.map(p=>({id:p.id,cat:p.cat,name:p.name,sub:p.sub||'',price:p.price,section:p.section||'',pdj:!!p.pdj,hasCuisson:!!p.hasCuisson,hasGarniture:!!p.hasGarniture,hasVariant:!!p.hasVariant,hasSirop:!!p.hasSirop,variants:p.variants||null,tva:p.tva||10,stock:p.stock===undefined?-1:p.stock,imgUrl:p.imgUrl||null})),
-    branding: {name:branding.name, accent:branding.accent, emoji:branding.emoji},
+    branding: {
+      name: branding.name,
+      tagline: branding.tagline || '',
+      accent: branding.accent,
+      emoji: branding.emoji,
+      logoUrl: branding.logoUrl || LS.get('brand_logoUrl', null) || null
+    },
     options: {
       cuissons: (settings.cuissons||'').split(',').map(s=>s.trim()).filter(Boolean),
       garnitures: (settings.garnitures||'').split(',').map(s=>s.trim()).filter(Boolean)
