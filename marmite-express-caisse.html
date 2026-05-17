@@ -235,6 +235,14 @@ window.initFirebaseListeners = function(){
       const localJson = JSON.stringify(localSalle || []);
       const remoteJson = JSON.stringify(data.salleLayout);
       if(localJson !== remoteJson){
+        // Audit fix #2 : si l'admin local est en train de drag/edit, on
+        // bufferise le snapshot pour ne PAS écraser sa position en cours.
+        // Le snapshot sera appliqué à la fin du drag (cf. endDrag dans initSalle).
+        if(window._salleDragActive){
+          window._pendingSalleSnapshot = data.salleLayout;
+          console.log('[Salle] Snapshot bufferisé (drag en cours)');
+          return;
+        }
         if(typeof window.salleElements !== 'undefined'){
           window.salleElements = data.salleLayout;
         }
@@ -960,17 +968,17 @@ document.addEventListener('DOMContentLoaded', () => {
 </div>
 
 <!-- ═══════════════ TABLE SERVICE MODAL (from floor plan click) ═══════════════ -->
-<div id="table-overlay" onclick="if(event.target===this)closeTableModal()">
+<div id="table-overlay" role="dialog" aria-modal="true" aria-labelledby="tm-table-title" onclick="if(event.target===this)closeTableModal()">
   <div id="table-modal">
     <div class="tm-header">
       <h3 id="tm-table-title">👥 Table —</h3>
-      <button class="tm-close" onclick="closeTableModal()">✕</button>
+      <button class="tm-close" onclick="closeTableModal()" aria-label="Fermer le modal table">✕</button>
     </div>
     <div class="tm-body">
       <!-- B4 : Note libre sur la table (allergies, anniv, infos diverses) -->
       <div class="tm-section">
         <h4>📝 Note (allergie, anniversaire, infos…)</h4>
-        <textarea id="tm-note" placeholder="Ex: allergie noix, anniversaire client, sans gluten…" oninput="saveTableNote(this.value)" style="width:100%;min-height:50px;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit;resize:vertical"></textarea>
+        <textarea id="tm-note" placeholder="Ex: allergie noix, anniversaire client, sans gluten…" maxlength="500" aria-label="Note pour cette table" oninput="saveTableNote(this.value)" style="width:100%;min-height:50px;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit;resize:vertical"></textarea>
       </div>
       <div class="tm-section">
         <h4>Convives à la table</h4>
@@ -2082,14 +2090,23 @@ function openTableModal(tableId){
 }
 
 // B4 : Persist note on table (auto-save sur input)
+// Audit salle #11 : debounce 500ms pour éviter de flood Firebase à chaque
+// keystroke + tronque à 500 caractères pour limiter le coût bande passante
+// et éviter les tooltips explosifs (title="..." sur les cards table).
+let _saveTableNoteTimer = null;
 function saveTableNote(value){
   if(!currentTableId) return;
   if(!tableData[currentTableId]) tableData[currentTableId] = {persons:[],ticket:[]};
-  tableData[currentTableId].note = value || '';
+  // Limite stricte 500 chars même si l'attribut maxlength HTML est contourné
+  const trimmed = String(value || '').slice(0, 500);
+  tableData[currentTableId].note = trimmed;
   LS.set('tableData', tableData);
-  // Sync vers Firebase pour que tous les serveurs voient la note
-  if(typeof syncTableToFirebase === 'function') syncTableToFirebase(currentTableId);
-  if(typeof renderSalle === 'function') renderSalle();
+  // Debounce le sync Firebase : on n'envoie qu'après 500ms d'inactivité de frappe
+  clearTimeout(_saveTableNoteTimer);
+  _saveTableNoteTimer = setTimeout(() => {
+    if(typeof syncTableToFirebase === 'function') syncTableToFirebase(currentTableId);
+    if(typeof renderSalle === 'function') renderSalle();
+  }, 500);
 }
 window.saveTableNote = saveTableNote;
 function closeTableModal(){
@@ -2394,10 +2411,17 @@ function closePay(){
 }
 
 // Fix #10 : Escape ferme le modal d'encaissement (a11y desktop + clavier)
+// + audit salle #7 : Escape ferme aussi le modal table-overlay
+// Ordre de priorité : modal le plus haut Z-index d'abord (pay > table)
 document.addEventListener('keydown', (e) => {
   if(e.key !== 'Escape') return;
-  const overlay = document.getElementById('pay-overlay');
-  if(overlay && overlay.classList.contains('show')) closePay();
+  const payOverlay = document.getElementById('pay-overlay');
+  if(payOverlay && payOverlay.classList.contains('show')){ closePay(); return; }
+  const tableOverlay = document.getElementById('table-overlay');
+  if(tableOverlay && tableOverlay.classList.contains('show')){
+    if(typeof closeTableModal === 'function') closeTableModal();
+    return;
+  }
 });
 
 // ── Split (diviser l'addition) — calcul d'info uniquement, pas de débit réel séparé ──
@@ -2435,6 +2459,13 @@ function goToPOSForTable(){
   if(currentTableId){
     tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};
     LS.set('tableData',tableData);
+    // Audit fix #5 : push Firebase AVANT bascule POS pour que les autres
+    // devices voient déjà la table comme occupée (ou avec ses items en cours).
+    // Avant : si crash entre bascule et prochain sync, articles perdus pour
+    // les autres serveurs ; table affichée "libre" partout sauf localement.
+    if(typeof syncTableToFirebase === 'function'){
+      try { syncTableToFirebase(currentTableId); } catch(e){ console.warn('[Salle] syncTable fail:', e); }
+    }
   }
   // Fermer le modal table
   document.getElementById('table-overlay').classList.remove('show');
@@ -4217,10 +4248,25 @@ function applySalleMode(){
   if(!isEdit) document.getElementById('salle-detail').style.overflow = '';
 }
 
+// Sauvegarde le plan : LS local + push Firebase pour les autres devices.
+// Avant : juste LS.set, donc les serveurs sur d'autres iPad ne voyaient
+// jamais le nouveau plan tant qu'un autre push (publishMenu) n'arrivait pas.
 function saveSalle(){
   LS.set('salleLayout', salleElements);
-  toast('✓ Plan de salle sauvegardé');
+  _salleDirty = false;
+  if(window.FB && typeof window.FB.setMerge === 'function'){
+    window.FB.setMerge('config', 'menu', { salleLayout: salleElements })
+      .then(() => toast('✓ Plan sauvegardé et publié sur tous les devices'))
+      .catch(e => {
+        console.warn('[Salle] Firebase push fail:', e);
+        toast('⚠ Plan sauvé localement (Firebase indispo)', 'o');
+      });
+  } else {
+    toast('✓ Plan sauvegardé (local seulement)');
+  }
 }
+// Flag "modifications non sauvegardées" — set par les actions edit, reset par saveSalle.
+let _salleDirty = false;
 
 function drawGrid(){
   const svg = document.getElementById('salle-grid-svg');
@@ -4420,11 +4466,18 @@ function tableStatus(tid){
   //    ce device fait foi pour SES propres modifications récentes.
   //    - ticket vide → return free immédiat (évite le flash "occupied" juste
   //      après encaissement local pendant que Firebase round-trip)
+  //    - certains convives payés mais pas tous → 'partial' (encaissement en cours)
   //    - ticket non vide avec total>0 → occupied
   const d = tableData[tid];
   if(d && Array.isArray(d.ticket)){
     if(d.ticket.length === 0){
       return 'free'; // état local explicite : vidé localement
+    }
+    // Audit fix #4 : détection paiement partiel par convive
+    // Si au moins 1 convive a paid=true et au moins 1 autre non payé → 'partial'
+    if(Array.isArray(d.persons) && d.persons.length > 0){
+      const paid = d.persons.filter(p => p.paid).length;
+      if(paid > 0 && paid < d.persons.length) return 'partial';
     }
     const total = d.ticket.reduce((s,r)=>s+r.qty*r.price,0);
     if(total > 0) return 'occupied';
@@ -4491,11 +4544,20 @@ function makeElDOM(el){
 
   const isSelected = selectedEl===el.id;
 
+  // Audit fix #4 : helper unifié couleur table selon statut
+  // Renvoie {color, bg, label} pour les 3 états libre / partiel / occupée
+  function tableColors(status){
+    if(status === 'partial') return { color:'#9b6bff', bg:'rgba(155,107,255,.14)', label:'PARTIEL' };
+    if(status === 'occupied') return { color:'var(--accent)', bg:'rgba(245,166,35,.12)', label:'EN COURS' };
+    return { color:'#22c97a', bg:'rgba(34,201,122,.10)', label:'' };
+  }
+
   if(el.type==='table-round'){
     const sz = el.size||90;
     const status = tableStatus(el.id);
-    const color = status==='occupied' ? 'var(--accent)' : '#22c97a';
-    const bg = status==='occupied' ? 'rgba(245,166,35,.12)' : 'rgba(34,201,122,.10)';
+    const tc = tableColors(status);
+    const color = tc.color;
+    const bg = tc.bg;
     const border = isSelected ? '2.5px solid #fff' : `2.5px solid ${color}`;
     div.style.width = sz+'px';
     div.style.height = sz+'px';
@@ -4507,13 +4569,14 @@ function makeElDOM(el){
     div.style.alignItems = 'center';
     div.style.justifyContent = 'center';
     div.style.cursor = salleMode==='edit' ? 'grab' : 'pointer';
-    div.style.boxShadow = isSelected ? '0 0 0 3px rgba(255,255,255,.3)' : status==='occupied'?'0 4px 20px rgba(245,166,35,.25)':'0 4px 16px rgba(34,201,122,.15)';
+    const shadowColor = status==='partial' ? 'rgba(155,107,255,.20)' : status==='occupied' ? 'rgba(245,166,35,.25)' : 'rgba(34,201,122,.15)';
+    div.style.boxShadow = isSelected ? '0 0 0 3px rgba(255,255,255,.3)' : `0 4px 20px ${shadowColor}`;
     const noteRound = (tableData[el.id] && tableData[el.id].note) || '';
     div.innerHTML = `
       ${noteRound ? `<div style="position:absolute;top:6px;right:6px;font-size:14px;cursor:help;z-index:2" title="${esc(noteRound)}">📝</div>` : ''}
       <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;letter-spacing:1px;color:${color};line-height:1">${el.number||''}</div>
       <div style="font-size:10px;color:var(--muted);font-weight:600">${el.seats||0} cvts</div>
-      ${status==='occupied'?`<div style="font-size:9px;font-weight:800;color:var(--accent);margin-top:2px">EN COURS</div>`:''}
+      ${tc.label?`<div style="font-size:9px;font-weight:800;color:${color};margin-top:2px">${tc.label}</div>`:''}
     `;
     // Chairs around table
     drawChairs(div, el.seats||4, sz);
@@ -4522,8 +4585,9 @@ function makeElDOM(el){
   else if(el.type==='table-rect'){
     const sz = el.size||110;
     const status = tableStatus(el.id);
-    const color = status==='occupied' ? 'var(--accent)' : '#22c97a';
-    const bg = status==='occupied' ? 'rgba(245,166,35,.12)' : 'rgba(34,201,122,.10)';
+    const tc = tableColors(status);
+    const color = tc.color;
+    const bg = tc.bg;
     const border = isSelected ? '2.5px solid #fff' : `2.5px solid ${color}`;
     div.style.width = (sz*1.4)+'px';
     div.style.height = sz+'px';
@@ -4535,13 +4599,14 @@ function makeElDOM(el){
     div.style.alignItems = 'center';
     div.style.justifyContent = 'center';
     div.style.cursor = salleMode==='edit' ? 'grab' : 'pointer';
-    div.style.boxShadow = isSelected ? '0 0 0 3px rgba(255,255,255,.3)' : status==='occupied'?'0 4px 20px rgba(245,166,35,.25)':'0 4px 16px rgba(34,201,122,.15)';
+    const shadowColor = status==='partial' ? 'rgba(155,107,255,.20)' : status==='occupied' ? 'rgba(245,166,35,.25)' : 'rgba(34,201,122,.15)';
+    div.style.boxShadow = isSelected ? '0 0 0 3px rgba(255,255,255,.3)' : `0 4px 20px ${shadowColor}`;
     const noteRect = (tableData[el.id] && tableData[el.id].note) || '';
     div.innerHTML = `
       ${noteRect ? `<div style="position:absolute;top:6px;right:6px;font-size:14px;cursor:help;z-index:2" title="${esc(noteRect)}">📝</div>` : ''}
       <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:${color};line-height:1">${el.number||''}</div>
       <div style="font-size:10px;color:var(--muted);font-weight:600">${el.seats||0} couverts</div>
-      ${status==='occupied'?`<div style="font-size:9px;font-weight:800;color:var(--accent);margin-top:2px">EN COURS</div>`:''}
+      ${tc.label?`<div style="font-size:9px;font-weight:800;color:${color};margin-top:2px">${tc.label}</div>`:''}
     `;
   }
 
@@ -4657,6 +4722,9 @@ function startDrag(e, id){
   const canvas = document.getElementById('salle-elements');
   const rect = canvas.getBoundingClientRect();
   dragState = {id, startMX: e.clientX, startMY: e.clientY, origX: el.x, origY: el.y, rect};
+  // Audit fix #2 : flag global pour que le snapshot listener bufferise au
+  // lieu d'écraser la position en cours
+  window._salleDragActive = true;
   document.addEventListener('mousemove', onDrag);
   document.addEventListener('mouseup', endDrag);
   // Touch
@@ -4670,7 +4738,16 @@ function onDrag(e){
   let nx = dragState.origX+(e.clientX-dragState.startMX);
   let ny = dragState.origY+(e.clientY-dragState.startMY);
   nx=Math.round(nx/snap)*snap; ny=Math.round(ny/snap)*snap;
-  el.x=Math.max(0,nx); el.y=Math.max(0,ny);
+  // Audit fix #6 : clamp aussi à droite/bas pour ne pas perdre l'élément
+  // hors du canvas (auto-fit en mode Service shrink toute la vue à 0.01)
+  const canvas = document.getElementById('salle-elements');
+  const cW = canvas.clientWidth  || 1200;
+  const cH = canvas.clientHeight || 700;
+  const hasWH = el.type === 'bar' || el.type === 'wall';
+  const elW = hasWH ? (parseFloat(el.w) || 120) : (parseFloat(el.size) || 80);
+  const elH = hasWH ? (parseFloat(el.h) ||  60) : (parseFloat(el.size) || 80);
+  el.x = Math.max(0, Math.min(nx, cW - elW));
+  el.y = Math.max(0, Math.min(ny, cH - elH));
   const dom=document.querySelector(`[data-id="${dragState.id}"]`);
   if(dom){dom.style.left=el.x+'px';dom.style.top=el.y+'px';}
 }
@@ -4682,7 +4759,20 @@ function onDragTouch(e){
   onDrag(fakeE);
 }
 function endDrag(){
+  // Marque le plan comme modifié (cf. saveSalle qui resetera _salleDirty)
+  if(dragState) _salleDirty = true;
   dragState=null;
+  // Audit fix #2 : libère le verrou et applique un snapshot Firebase en
+  // attente si présent. Le dernier write côté qui drag est gardé.
+  window._salleDragActive = false;
+  if(window._pendingSalleSnapshot){
+    // Notre drag local écrase le snapshot (last-write-wins côté local éditeur),
+    // mais on persiste maintenant en LS pour qu'il soit publié à saveSalle.
+    LS.set('salleLayout', salleElements);
+    delete window._pendingSalleSnapshot;
+  } else {
+    LS.set('salleLayout', salleElements);
+  }
   document.removeEventListener('mousemove',onDrag);
   document.removeEventListener('mouseup',endDrag);
   document.removeEventListener('touchmove',onDragTouch);
@@ -4739,6 +4829,9 @@ function updateSelected(field, value){
   // Live-update the DOM element
   const dom=document.querySelector(`[data-id="${selectedEl}"]`);
   if(dom){ const canvas=document.getElementById('salle-elements'); canvas.replaceChild(makeElDOM(el),dom); }
+  // Audit fix #3 : persist local immédiat (le push Firebase passe par "💾 Sauvegarder")
+  LS.set('salleLayout', salleElements);
+  _salleDirty = true;
 }
 
 function deleteSelected(){
@@ -4748,6 +4841,9 @@ function deleteSelected(){
   selectedEl=null;
   document.getElementById('edit-props').style.display='none';
   renderSalle();
+  // Audit fix #3 : persist local + flag dirty pour rappeler à publier
+  LS.set('salleLayout', salleElements);
+  _salleDirty = true;
 }
 
 function copySelected(){
@@ -4763,6 +4859,9 @@ function copySelected(){
   renderSalle();
   selectEl(copy.id);
   toast('Élément dupliqué — Table '+copy.number);
+  // Audit fix #3 : persist immédiat
+  LS.set('salleLayout', salleElements);
+  _salleDirty = true;
 }
 
 function addElement(type){
@@ -4781,6 +4880,9 @@ function addElement(type){
   salleElements.push(el);
   renderSalle();
   selectEl(el.id);
+  // Audit fix #3 : persist immédiat
+  LS.set('salleLayout', salleElements);
+  _salleDirty = true;
 }
 
 // Keyboard shortcuts in edit mode
