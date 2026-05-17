@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v51-setup-images-refactor';
+const CACHE_NAME = 'marmite-v52-fix-pay-callback-reset-confirm';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',

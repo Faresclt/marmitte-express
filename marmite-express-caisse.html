@@ -977,7 +977,7 @@ document.addEventListener('DOMContentLoaded', () => {
     <div class="tm-footer">
       <div class="tm-total-info">Total table : <span id="tm-total">0,00 €</span></div>
       <button class="btn-add-articles" onclick="goToPOSForTable()">📋 Ajouter des articles</button>
-      <button class="btn-reset-table" onclick="resetTable()">🗑️ Nouvelle table</button>
+      <button class="btn-reset-table" onclick="resetTable()" title="Vide complètement cette table (articles + convives)">🗑️ Vider la table</button>
       <button class="btn-pay-all" id="btn-pay-all" onclick="payAllAndClose()">💳 Tout encaisser</button>
       <button class="btn-close-table" onclick="closeTableModal()">Fermer</button>
     </div>
@@ -2060,7 +2060,23 @@ function assignAllToActive(){
   const p=persons.find(x=>x.id===activePerson);
   toast('✓ Articles attribués à '+(p?p.name:'convive'));
 }
-function resetTable(){ persons=[]; activePerson=null; ticket=[]; if(currentTableId){tableData[currentTableId]={persons:[],ticket:[]};LS.set('tableData',tableData);} renderPersonBar(); renderTableModal(); renderTicket(); toast('Nouvelle table créée'); }
+function resetTable(){
+  // Confirmation OBLIGATOIRE car action destructive en plein service
+  const hasData = ticket.length > 0 || persons.length > 0;
+  if(hasData){
+    const tot = ticket.reduce((s,r)=>s+r.qty*r.price,0);
+    if(!confirm(`⚠ Vider complètement cette table ?\n\n${ticket.length} article(s) — ${fmt(tot)}\n${persons.length} convive(s)\n\nCette action est irréversible.`)) return;
+  }
+  persons=[]; activePerson=null; ticket=[];
+  if(currentTableId){
+    tableData[currentTableId]={persons:[],ticket:[]};
+    LS.set('tableData',tableData);
+    syncTableToFirebase(currentTableId);
+  }
+  renderPersonBar(); renderTableModal(); renderTicket();
+  if(typeof renderSalle === 'function') renderSalle();
+  toast(hasData ? 'Table vidée' : 'Table déjà vide');
+}
 
 function renderPersonBar(){
   const bar=document.getElementById('person-bar');
@@ -2451,8 +2467,12 @@ function validatePay(){
   };
   // Reset tip pour la prochaine vente
   window._currentTip = 0;
+  // ⚠ CAPTURE le callback AVANT closePay() — sinon closePay le met à null
+  // et l'encaissement n'est jamais finalisé (historique vide, ticket non vidé,
+  // table jamais libérée)
+  const cb = payCallback;
   closePay();
-  if(payCallback){ payCallback(); payCallback=null; }
+  if(cb) cb();
   // Show print option
   showPrintOption();
 }
@@ -4819,18 +4839,9 @@ window.closeTableModal = function(){
   renderSalle();
 };
 
-// Override resetTable to also sync
-const _origResetTable = resetTable;
-window.resetTable = function(){
-  persons=[]; activePerson=null; ticket=[];
-  if(currentTableId){
-    tableData[currentTableId]={persons:[],ticket:[]};
-    LS.set('tableData',tableData);
-    syncTableToFirebase(currentTableId);
-  }
-  renderPersonBar(); renderTableModal(); renderTicket();
-  toast('Nouvelle table créée');
-};
+// (l'override "to also sync" a été supprimé : il écrasait la version avec
+// confirmation + sync — qui appelle DÉJÀ syncTableToFirebase. La version
+// canonique est définie plus haut ligne ~2063)
 
 // ═══════════════════════════════════════════════════════════════
 //  PIN LOCK
