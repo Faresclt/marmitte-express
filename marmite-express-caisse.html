@@ -3658,6 +3658,37 @@ window.clearImportedOrders = function(){
   console.log('[orders] reset _importedOrderIds');
 };
 
+// Reset complet de l'état local des tables.
+// Tape `clearAllLocalTables()` en console pour vider toutes les tables
+// occupées localement (utile si tableData a des vieilles données).
+window.clearAllLocalTables = function(opts){
+  opts = opts || {};
+  var confirmed = opts.silent || confirm('Vider TOUTES les tables locales ?\n\nTous les tickets en cours seront perdus (encaissés ou pas).\nLes ventes déjà enregistrées dans l\'historique restent intactes.');
+  if(!confirmed) return;
+  try {
+    // Reset tableData
+    if(typeof window.tableData !== 'undefined'){
+      Object.keys(window.tableData).forEach(function(k){ delete window.tableData[k]; });
+    }
+    LS.set('tableData', {});
+    // Reset les imported order IDs aussi
+    _importedOrderIds.clear();
+    _saveImportedIds();
+    // Reset le ticket courant + persons
+    if(typeof window.ticket !== 'undefined') window.ticket = [];
+    if(typeof window.persons !== 'undefined') window.persons = [];
+    // Re-render
+    if(typeof renderSalle === 'function') renderSalle();
+    if(typeof renderTicket === 'function') renderTicket();
+    if(typeof renderPersonBar === 'function') renderPersonBar();
+    toast('✓ Toutes les tables vidées','g');
+    console.log('[reset] all local tables cleared');
+  } catch(e){
+    console.error('[reset] error:', e);
+    toast('Erreur : '+(e.message||e),'r');
+  }
+};
+
 function importOrderToTable(order){
   let tid = order.tableId;
   if(!tid) return;

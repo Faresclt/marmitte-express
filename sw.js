@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v41-pwa-standalone-safe-area';
+const CACHE_NAME = 'marmite-v42-clean-state-helper';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
