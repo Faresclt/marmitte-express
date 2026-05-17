@@ -3276,6 +3276,14 @@ async function saveProduct(){
   const nm=document.getElementById('pm-name').value.trim(); if(!nm) return toast('Nom requis','r');
   const price=parseFloat(document.getElementById('pm-price').value); if(isNaN(price)||price<0) return toast('Prix invalide','r');
   const cat=document.getElementById('pm-cat').value;
+  // Validation cat : sans catégorie, le produit serait invisible dans le menu
+  // (filtré par cat dans renderMenu). On bloque + on guide l'user.
+  if(!cat){
+    if(cats.length === 0){
+      return toast('Crée d\'abord une catégorie (panneau Catégories)','r');
+    }
+    return toast('Sélectionne une catégorie','r');
+  }
   const section=document.getElementById('pm-section').value.trim()||undefined;
   const hasCuisson=document.getElementById('pm-cuisson').checked;
   const hasGarniture=document.getElementById('pm-garniture').checked;
