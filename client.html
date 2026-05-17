@@ -62,6 +62,15 @@ let productImages = {}; // {productId: base64_thumbnail}
 let activeFilters = new Set(); // tags actifs : 'vegan', 'glutenFree', 'spicy', 'vegetarian'
 let searchQuery = '';
 
+// ── Allergies du client (persistées par device pour les visites suivantes) ──
+// Liste officielle INCO 2014 (Annexe II Règlement UE 1169/2011)
+const ALLERGENS_LIST = ['Céréales contenant du gluten','Crustacés','Œufs','Poissons','Arachides','Soja','Lait','Fruits à coque','Céleri','Moutarde','Graines de sésame','Sulfites','Lupin','Mollusques'];
+let myAllergies = new Set();
+try {
+  const stored = localStorage.getItem('client_allergies');
+  if(stored) myAllergies = new Set(JSON.parse(stored));
+} catch(e){ /* ignore corrupt storage */ }
+
 // Update page title and table display
 document.getElementById('table-display').textContent = tableNum;
 document.title = `Table ${tableNum} — Commander`;
@@ -99,6 +108,7 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
     // Persiste en cache pour la prochaine visite (élimine le FOUC)
     window.BrandCache?.save(b);
     renderMenu();
+    updateAllergiesChip();
     document.getElementById('loading').style.display='none';
     document.getElementById('app').style.display='flex';
     // Load images if available
@@ -111,6 +121,12 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
 });
 
 function matchesFilters(p){
+  // Filtre allergies : si le client a déclaré une allergie X, on masque les plats contenant X
+  if(myAllergies.size > 0 && Array.isArray(p.allergens)){
+    for(const a of p.allergens){
+      if(myAllergies.has(a)) return false;
+    }
+  }
   if(activeFilters.size === 0) return true;
   for(const f of activeFilters){
     if(f === 'vegan' && !p.vegan) return false;
@@ -155,30 +171,45 @@ function renderMenu(){
 
   let html='';
   sections.forEach(sec=>{
-    if(sec.name) html+=`<div class="sec-sep">${sec.name.toUpperCase()}</div>`;
+    if(sec.name) html+=`<div class="sec-sep">${escHtml(sec.name.toUpperCase())}</div>`;
     sec.items.forEach(p=>{
       const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
       const img = (p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null);
+      // Note: src d'image est une URL/data-URI contrôlée par l'admin (Firebase Storage ou base64 local).
+      // alt est échappé pour bloquer toute injection via le nom de produit.
       const imgHtml = img
-        ? `<div class="prod-img"><img src="${img}" alt="${p.name}" loading="lazy" decoding="async" width="64" height="64"></div>`
+        ? `<div class="prod-img"><img src="${escHtml(img)}" alt="${escHtml(p.name)}" loading="lazy" decoding="async" width="64" height="64"></div>`
         : '';
-      const outOfStock = p.stock!==undefined && p.stock>=0 && p.stock===0;
-      html+=`<div class="prod-card${img?' has-img':''}${outOfStock?' sold-out':''}" onclick="openProductDetail('${p.id}')">
+      // Stock : 0 = épuisé, N positif = limité (N-inCart restants), -1/undefined = illimité
+      const outOfStock = p.stock === 0;
+      const stockLimited = typeof p.stock === 'number' && p.stock > 0;
+      const stockLeft = stockLimited ? Math.max(0, p.stock - inCart) : Infinity;
+      const stockReached = stockLimited && inCart >= p.stock;
+      const stockWarn = stockLimited && stockLeft > 0 && stockLeft <= 3 ? `<div class="stock-warn">⏱️ Plus que ${stockLeft} en stock</div>` : '';
+      // Pastille allergènes (visible AVANT clic = conformité INCO 2014 art. 9)
+      const allergens = Array.isArray(p.allergens) ? p.allergens : [];
+      const allergenHint = allergens.length ? `<div class="prod-allergens-hint">⚠️ Allergènes (${allergens.length})</div>` : '';
+      const displayName = (p.pdj && menu.platDuJour && menu.platDuJour.nom) ? menu.platDuJour.nom : p.name;
+      const displaySub = p.sub;
+      html+=`<div class="prod-card${img?' has-img':''}${outOfStock||stockReached?' sold-out':''}" data-pid="${escHtml(p.id)}" data-action="detail">
         ${imgHtml}
         <div class="prod-info">
-          <div class="prod-name">${p.pdj?'⭐ ':''}${(p.pdj && menu.platDuJour && menu.platDuJour.nom) ? menu.platDuJour.nom : p.name}</div>
-          ${p.sub?`<div class="prod-sub">${p.sub}</div>`:''}
+          <div class="prod-name">${p.pdj?'⭐ ':''}${escHtml(displayName)}</div>
+          ${displaySub?`<div class="prod-sub">${escHtml(displaySub)}</div>`:''}
           ${(p.hasCuisson||p.hasGarniture)?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${p.hasCuisson?'🔥 Cuisson':''}${p.hasCuisson&&p.hasGarniture?' · ':''}${p.hasGarniture?'🍟 Garniture':''}</div>`:''}
+          ${allergenHint}
+          ${stockWarn}
           <div class="prod-price">${p.price.toFixed(2).replace('.',',')} €</div>
         </div>
-        <div class="prod-actions" onclick="event.stopPropagation()">
-          ${outOfStock ? `<span style="font-size:12px;font-weight:700;color:var(--red);background:rgba(232,64,64,.1);padding:6px 14px;border-radius:20px">Épuisé</span>` :
+        <div class="prod-actions">
+          ${outOfStock ? `<span class="badge-soldout">Épuisé</span>` :
+            stockReached ? `<span class="badge-soldout">Stock atteint</span>` :
             inCart ? `
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--accent)">${inCart} dans le panier</span>
-              <button class="add-btn" onclick="event.stopPropagation();addProduct('${p.id}',${p.price},'${esc(p.name)}')">+</button>
+              <button class="add-btn" data-pid="${escHtml(p.id)}" data-action="add" aria-label="Ajouter ${escHtml(displayName)}">+</button>
             </div>` :
-            `<button class="add-btn" onclick="event.stopPropagation();addProduct('${p.id}',${p.price},'${esc(p.name)}')">+ Ajouter</button>`
+            `<button class="add-btn" data-pid="${escHtml(p.id)}" data-action="add" aria-label="Ajouter ${escHtml(displayName)} au panier">+ Ajouter</button>`
           }
         </div>
       </div>`;
@@ -193,6 +224,23 @@ function renderMenu(){
     content.innerHTML = html;
   }
 }
+
+// Event delegation : remplace les onclick inline (sécurité XSS + maintenabilité)
+// closest() prend le bouton "+" si on clique dessus, sinon la card si on clique ailleurs.
+document.getElementById('menu-content').addEventListener('click', (e) => {
+  const target = e.target.closest('[data-action]');
+  if(!target) return;
+  const pid = target.dataset.pid;
+  const action = target.dataset.action;
+  const p = (menu?.products||[]).find(x => x.id === pid);
+  if(!p) return;
+  if(action === 'add'){
+    e.stopPropagation();
+    addProduct(p.id, p.price, p.name);
+  } else if(action === 'detail'){
+    openProductDetail(pid);
+  }
+});
 
 function clearFilters(){
   activeFilters.clear();
@@ -222,6 +270,66 @@ function onSearch(value){
 window.clearFilters = clearFilters;
 window.toggleFilter = toggleFilter;
 window.onSearch = onSearch;
+
+// ── Modal "Mes allergies" ──
+function openAllergiesModal(){
+  const html = `
+    <h3 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;margin:0 0 6px">🚫 Mes allergies</h3>
+    <p style="font-size:13px;color:var(--muted);line-height:1.5;margin:0 0 14px">Cochez vos allergies alimentaires. Les plats qui en contiennent seront automatiquement masqués.</p>
+    <div id="allergies-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px">
+      ${ALLERGENS_LIST.map(a => `
+        <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--card);border:1.5px solid ${myAllergies.has(a)?'var(--accent)':'var(--border)'};border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s">
+          <input type="checkbox" value="${escHtml(a)}" ${myAllergies.has(a)?'checked':''} style="margin:0;accent-color:var(--accent)">
+          <span>${escHtml(a)}</span>
+        </label>
+      `).join('')}
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="clearAllergies()" style="flex:1;height:44px;border-radius:12px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-weight:700;font-size:13px;cursor:pointer">Tout décocher</button>
+      <button onclick="saveAllergies()" style="flex:2;height:44px;border-radius:12px;background:var(--accent);border:none;color:#000;font-weight:800;font-size:14px;cursor:pointer">✓ Appliquer</button>
+    </div>
+  `;
+  document.getElementById('allergies-modal-body').innerHTML = html;
+  document.getElementById('allergies-modal').style.display = 'flex';
+}
+
+function closeAllergiesModal(){
+  document.getElementById('allergies-modal').style.display = 'none';
+}
+
+function saveAllergies(){
+  const checked = Array.from(document.querySelectorAll('#allergies-checkboxes input[type=checkbox]:checked')).map(c => c.value);
+  myAllergies = new Set(checked);
+  try { localStorage.setItem('client_allergies', JSON.stringify(checked)); } catch(e){}
+  updateAllergiesChip();
+  closeAllergiesModal();
+  renderMenu();
+  if(checked.length > 0) showCartToast('🛡️ '+checked.length+' allergie(s) actives');
+}
+
+function clearAllergies(){
+  document.querySelectorAll('#allergies-checkboxes input[type=checkbox]').forEach(c => c.checked = false);
+  // Reset visuel des labels
+  document.querySelectorAll('#allergies-checkboxes label').forEach(l => l.style.borderColor = 'var(--border)');
+}
+
+function updateAllergiesChip(){
+  const el = document.getElementById('allergies-chip-text');
+  if(!el) return;
+  const chip = el.closest('.chip');
+  if(myAllergies.size > 0){
+    el.textContent = '🚫 Mes allergies ('+myAllergies.size+')';
+    chip?.setAttribute('aria-pressed', 'true');
+  } else {
+    el.textContent = '🚫 Mes allergies';
+    chip?.setAttribute('aria-pressed', 'false');
+  }
+}
+
+window.openAllergiesModal = openAllergiesModal;
+window.closeAllergiesModal = closeAllergiesModal;
+window.saveAllergies = saveAllergies;
+window.clearAllergies = clearAllergies;
 
 function changeQty(pid, price, delta, name, cuisson, garniture, tva, cat){
   // For products with options, find by pid+cuisson+garniture
@@ -256,6 +364,14 @@ let pendingOptProduct = null;
 
 function addProduct(pid, price, name){
   const p = (menu.products||[]).find(x=>x.id===pid);
+  // Garde stock : empêche dépassement quand p.stock est un quota fini
+  if(p && typeof p.stock === 'number' && p.stock >= 0){
+    const inCart = cart.filter(r => r.pid === pid).reduce((s,r) => s + r.qty, 0);
+    if(p.stock === 0 || inCart >= p.stock){
+      showCartToast(p.stock === 0 ? '✕ Produit épuisé' : '✕ Stock atteint ('+p.stock+' max)');
+      return;
+    }
+  }
   if(p && (p.hasCuisson || p.hasGarniture)){
     openOptionsModal(p);
     return;
@@ -359,6 +475,15 @@ function selChip(el, group){
 function confirmOpt(){
   if(!pendingOptProduct) return;
   const p = pendingOptProduct;
+  // Garde stock (cohérence avec addProduct)
+  if(typeof p.stock === 'number' && p.stock >= 0){
+    const inCart = cart.filter(r => r.pid === p.id).reduce((s,r) => s + r.qty, 0);
+    if(p.stock === 0 || inCart >= p.stock){
+      showCartToast(p.stock === 0 ? '✕ Produit épuisé' : '✕ Stock atteint ('+p.stock+' max)');
+      closeOptModal();
+      return;
+    }
+  }
   const cuissonEl = document.querySelector('#opt-cuisson-btns .opt-chip.sel');
   const garnitureEl = document.querySelector('#opt-garniture-btns .opt-chip.sel');
   const cuisson = cuissonEl ? cuissonEl.dataset.val : null;
@@ -396,18 +521,18 @@ function closeCartPanel(){ document.getElementById('cart-panel').style.display='
 
 function renderCartPanel(){
   const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
-  document.getElementById('cp-items').innerHTML = cart.map(r=>{
+  document.getElementById('cp-items').innerHTML = cart.map((r, idx)=>{
     const optTxt = [r.cuisson, r.garniture].filter(Boolean).join(' · ');
     return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)">
       <div style="flex:1">
-        <div style="font-size:15px;font-weight:600">${r.name}</div>
-        ${optTxt?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${optTxt}</div>`:''}
+        <div style="font-size:15px;font-weight:600">${escHtml(r.name)}</div>
+        ${optTxt?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${escHtml(optTxt)}</div>`:''}
         <div style="font-size:12px;color:#888">${r.price.toFixed(2).replace('.',',')}€/u</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
-        <button onclick="changeQty('${r.pid}',${r.price},-1,'${esc(r.name)}','${r.cuisson||''}','${r.garniture||''}',${r.tva||10});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
+        <button data-cart-idx="${idx}" data-cart-delta="-1" aria-label="Retirer un ${escHtml(r.name)}" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
         <span style="font-family:'Bebas Neue',sans-serif;font-size:22px">${r.qty}</span>
-        <button onclick="changeQty('${r.pid}',${r.price},1,'${esc(r.name)}','${r.cuisson||''}','${r.garniture||''}',${r.tva||10});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
+        <button data-cart-idx="${idx}" data-cart-delta="1" aria-label="Ajouter un ${escHtml(r.name)}" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
       </div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:65px;text-align:right">${(r.qty*r.price).toFixed(2).replace('.',',')}€</div>
     </div>`;
@@ -415,6 +540,29 @@ function renderCartPanel(){
   document.getElementById('cp-total').textContent = total.toFixed(2).replace('.',',')+'€';
   document.getElementById('cp-send').disabled = !cart.length;
 }
+
+// Délégation pour les boutons +/- du panier (remplace onclick inline)
+document.getElementById('cp-items').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-cart-idx]');
+  if(!btn) return;
+  const idx = parseInt(btn.dataset.cartIdx);
+  const delta = parseInt(btn.dataset.cartDelta);
+  const r = cart[idx];
+  if(!r) return;
+  // Garde stock sur l'incrément (cohérence)
+  if(delta > 0){
+    const p = (menu?.products||[]).find(x => x.id === r.pid);
+    if(p && typeof p.stock === 'number' && p.stock >= 0){
+      const inCart = cart.filter(c => c.pid === r.pid).reduce((s,c) => s + c.qty, 0);
+      if(p.stock === 0 || inCart >= p.stock){
+        showCartToast(p.stock === 0 ? '✕ Produit épuisé' : '✕ Stock atteint ('+p.stock+' max)');
+        return;
+      }
+    }
+  }
+  changeQty(r.pid, r.price, delta, r.name, r.cuisson, r.garniture, r.tva||10, r.cat);
+  renderCartPanel();
+});
 
 async function sendOrder(){
   if(!cart.length) return;
@@ -552,6 +700,22 @@ body{display:flex;flex-direction:column}
 .opt-chip:active{transform:scale(.95)}
 .opt-chip.sel{border-color:var(--accent);background:rgba(245,166,35,.12);color:var(--accent)}
 
+/* Allergies modal */
+#allergies-modal{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:160;display:none;align-items:center;justify-content:center;padding:16px}
+#allergies-modal-inner{background:var(--surface);border-radius:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;padding:24px 20px 20px;border:1px solid var(--border);position:relative}
+#allergies-modal-close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:14px;cursor:pointer;z-index:1}
+#allergies-checkboxes label:has(input:checked){border-color:var(--accent) !important;background:rgba(245,166,35,.08) !important}
+.chip-allergies[aria-pressed="true"]{background:rgba(232,64,64,.15) !important;border-color:rgba(232,64,64,.5) !important;color:#ff7878 !important}
+
+/* Pastille allergènes sur card produit */
+.prod-allergens-hint{font-size:10px;font-weight:700;color:#e84040;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.25);padding:2px 8px;border-radius:8px;margin-top:4px;display:inline-block;letter-spacing:.3px}
+
+/* Badge "Épuisé" / "Stock atteint" */
+.badge-soldout{font-size:12px;font-weight:700;color:var(--red);background:rgba(232,64,64,.1);padding:6px 14px;border-radius:20px;white-space:nowrap}
+
+/* Stock warn "Plus que N en stock" */
+.stock-warn{font-size:10px;font-weight:700;color:#f5a623;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.25);padding:2px 8px;border-radius:8px;margin-top:4px;display:inline-block;letter-spacing:.3px}
+
 /* Product detail modal */
 #detail-modal{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;display:none;align-items:flex-end;justify-content:center;padding:0}
 #detail-modal.show{display:flex}
@@ -613,6 +777,9 @@ body{display:flex;flex-direction:column}
     <input id="search-input" type="search" placeholder="Rechercher un plat…" aria-label="Rechercher dans le menu" oninput="onSearch(this.value)">
   </div>
   <div id="filter-bar" role="group" aria-label="Filtres alimentaires">
+    <button class="chip chip-allergies" aria-label="Configurer mes allergies" onclick="openAllergiesModal()">
+      <span id="allergies-chip-text">🚫 Mes allergies</span>
+    </button>
     <button class="chip" aria-pressed="false" onclick="toggleFilter('vegetarian', this)">🥬 Végé</button>
     <button class="chip" aria-pressed="false" onclick="toggleFilter('vegan', this)">🌱 Vegan</button>
     <button class="chip" aria-pressed="false" onclick="toggleFilter('glutenFree', this)">🌾 Sans gluten</button>
@@ -653,6 +820,14 @@ body{display:flex;flex-direction:column}
 <div id="opt-modal" onclick="if(event.target===this)closeOptModal()">
   <div id="opt-modal-inner">
     <div id="opt-modal-body"></div>
+  </div>
+</div>
+
+<!-- "Mes allergies" modal -->
+<div id="allergies-modal" onclick="if(event.target===this)closeAllergiesModal()">
+  <div id="allergies-modal-inner">
+    <button id="allergies-modal-close" onclick="closeAllergiesModal()" aria-label="Fermer">✕</button>
+    <div id="allergies-modal-body"></div>
   </div>
 </div>
 
