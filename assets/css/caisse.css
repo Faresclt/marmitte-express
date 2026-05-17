@@ -262,7 +262,8 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
   .bottom-sheet{max-width:100%;border-radius:20px 20px 0 0;padding:16px 16px 30px}
   .pay-type-btns{gap:6px}
   .ptypebtn{height:64px}
-  .nb{height:46px;font-size:18px}
+  /* Touch-target WCAG ≥44px et Apple HIG ≥44pt */
+  .nb{height:48px;font-size:18px;min-height:44px}
 
   /* Admin responsive */
   #admin-body{flex-direction:column}

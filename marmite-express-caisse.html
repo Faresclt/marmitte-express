@@ -781,10 +781,10 @@ document.addEventListener('DOMContentLoaded', () => {
     <div class="mni">⚙️</div><div>Admin</div>
   </button>
 </div>
-<div class="overlay" id="pay-overlay" onclick="if(event.target===this)closePay()">
+<div class="overlay" id="pay-overlay" role="dialog" aria-modal="true" aria-labelledby="pay-modal-title" onclick="if(event.target===this)closePay()">
   <div class="bottom-sheet">
     <div class="bsh-handle"></div>
-    <div class="bsh-title">💳 Encaissement</div>
+    <div class="bsh-title" id="pay-modal-title">💳 Encaissement</div>
     <div class="bsh-amount" id="pay-total-lbl">0,00 €</div>
     <div id="pay-tva-summary" style="max-width:280px;margin:0 auto 16px"></div>
 
@@ -819,14 +819,14 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     </div>
 
-    <!-- Zone split (diviser l'addition) -->
+    <!-- Zone split (diviser l'addition) — info uniquement -->
     <div id="split-section">
       <div class="split-row">
         <span class="split-label">✂️ Diviser par :</span>
         <div class="split-ctrl">
-          <button class="sc-btn" onclick="changeSplit(-1)">−</button>
+          <button class="sc-btn" onclick="changeSplit(-1)" aria-label="Diminuer le nombre de parts">−</button>
           <span class="sc-val" id="split-val">1</span>
-          <button class="sc-btn" onclick="changeSplit(1)">+</button>
+          <button class="sc-btn" onclick="changeSplit(1)" aria-label="Augmenter le nombre de parts">+</button>
         </div>
       </div>
       <div class="split-result" id="split-result" style="display:none">
@@ -839,18 +839,25 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="sr-val" id="split-total-ref" style="color:var(--muted)">0,00€</div>
         </div>
       </div>
+      <!-- Fix #5 : disclaimer pour clarifier que c'est un calcul d'info, pas un split réel -->
+      <div id="split-info-note" style="display:none;font-size:10px;color:var(--muted);text-align:center;margin-top:6px;line-height:1.4;padding:0 8px">
+        ℹ️ Info de calcul uniquement — le débit reste en 1 transaction. Pour des paiements séparés, utilise "Répartir par convive" dans le plan de salle.
+      </div>
     </div>
 
     <!-- Zone espèces avec pavé numérique (cachée par défaut) -->
     <div id="cash-section">
       <div id="cash-disp">0,00</div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button id="numpad-clear" onclick="numClear()" aria-label="Tout effacer la saisie" style="height:32px;padding:0 14px;border-radius:8px;background:rgba(232,64,64,.08);border:1px solid rgba(232,64,64,.2);color:var(--red);font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.3px">C — Tout effacer</button>
+      </div>
       <div id="numpad">
-        <button class="nb" onclick="numIn('1')">1</button><button class="nb" onclick="numIn('2')">2</button><button class="nb" onclick="numIn('3')">3</button>
-        <button class="nb" onclick="numIn('4')">4</button><button class="nb" onclick="numIn('5')">5</button><button class="nb" onclick="numIn('6')">6</button>
-        <button class="nb" onclick="numIn('7')">7</button><button class="nb" onclick="numIn('8')">8</button><button class="nb" onclick="numIn('9')">9</button>
-        <button class="nb z" onclick="numIn('0')">0</button>
-        <button class="nb" onclick="numIn('.')">•</button>
-        <button class="nb dn" onclick="numDel()">⌫</button>
+        <button class="nb" onclick="numIn('1')" aria-label="1">1</button><button class="nb" onclick="numIn('2')" aria-label="2">2</button><button class="nb" onclick="numIn('3')" aria-label="3">3</button>
+        <button class="nb" onclick="numIn('4')" aria-label="4">4</button><button class="nb" onclick="numIn('5')" aria-label="5">5</button><button class="nb" onclick="numIn('6')" aria-label="6">6</button>
+        <button class="nb" onclick="numIn('7')" aria-label="7">7</button><button class="nb" onclick="numIn('8')" aria-label="8">8</button><button class="nb" onclick="numIn('9')" aria-label="9">9</button>
+        <button class="nb z" onclick="numIn('0')" aria-label="0">0</button>
+        <button class="nb" onclick="numIn('.')" aria-label="Virgule">•</button>
+        <button class="nb dn" onclick="numDel()" aria-label="Effacer le dernier caractère">⌫</button>
       </div>
       <div id="change-disp"><span class="lb">Monnaie à rendre</span><span class="cv u" id="change-val">—</span></div>
     </div>
@@ -2307,14 +2314,28 @@ function payAllAndClose(){
 //  PAYMENT — SIMPLIFIÉ
 // ═══════════════════════════════════════════════════════════════
 let payCallback=null, currentPayType='', cashStr='0', hasDot=false, splitN=1;
+// Garde anti-double-encaissement : un double-tap accidentel sur "Valider"
+// déclenchait 2× nextReceiptNumber + 2× saveToHistory + 2× cb. En service
+// tactile c'est très fréquent. Le flag est reset par closePay().
+let isValidating=false;
 
 function openPay(){
   if(!ticket.length) return;
   const total=ticket.reduce((s,r)=>s+r.qty*r.price,0);
   openPayFor(total, ()=>{
-    // Enregistrer dans l'historique — total inclut le pourboire si CB
-    const tip = (window.lastReceipt && window.lastReceipt.tip) || 0;
-    saveToHistory({tableId: currentTableId||'direct', items:[...ticket], total: total + tip, payType: currentPayType, tip});
+    // window.lastReceipt est rempli par validatePay() AVANT le callback (cf. L2517+)
+    // donc on récupère ici tip + payType + montant réellement encaissé.
+    const lr = window.lastReceipt || {};
+    const tip = lr.tip || 0;
+    const realTotal = lr.total ?? (total + tip); // 0 si "Offert", sinon total+tip
+    saveToHistory({
+      tableId: currentTableId||'direct',
+      items:[...ticket],
+      total: realTotal,
+      payType: lr.payType || currentPayType,
+      tip,
+      offert: !!lr.offert
+    });
     ticket=[]; persons=[]; activePerson=null;
     if(currentTableId){
       tableData[currentTableId]={persons:[],ticket:[]};
@@ -2323,13 +2344,21 @@ function openPay(){
     }
     renderTicket(); renderPersonBar();
     if(typeof renderSalle==='function') renderSalle();
-    toast('✅ Paiement validé ! — '+fmt(total),'g');
+    // Fix #14 : toast affiche le bon montant (incluant tip, ou 0 si offert)
+    const msg = lr.offert ? '🎁 Offert — '+fmt(total)
+                          : '✅ Paiement validé ! — '+fmt(realTotal);
+    toast(msg, 'g');
   });
 }
 function openPayFor(amount, cb){
+  // Fix #4 : reset complet de l'état entre 2 paiements (anciennement
+  // _currentTip pouvait être hérité d'une session précédente)
   payCallback=cb; cashStr='0'; hasDot=false; currentPayType=''; splitN=1;
+  isValidating=false;
   window._currentTip = 0;
   window._baseAmount = amount; // sans pourboire
+  // Fix #15 : empêche le scroll de fond derrière le modal sur mobile
+  document.body.style.overflow = 'hidden';
   document.getElementById('pay-total-lbl').textContent=fmt(amount);
   document.getElementById('pay-overlay').dataset.amount=amount;
   document.getElementById('cash-section').style.display='none';
@@ -2357,21 +2386,46 @@ function openPayFor(amount, cb){
   if(payTvaSumEl) payTvaSumEl.innerHTML = ticket.length ? renderTVASummaryHTML(ticket) : '';
   document.getElementById('pay-overlay').classList.add('show');
 }
-function closePay(){ document.getElementById('pay-overlay').classList.remove('show'); payCallback=null; currentPayType=''; splitN=1; }
+function closePay(){
+  document.getElementById('pay-overlay').classList.remove('show');
+  payCallback=null; currentPayType=''; splitN=1; isValidating=false;
+  // Fix #15 : libère le scroll du body
+  document.body.style.overflow = '';
+}
 
-// ── Split (diviser l'addition) ──
+// Fix #10 : Escape ferme le modal d'encaissement (a11y desktop + clavier)
+document.addEventListener('keydown', (e) => {
+  if(e.key !== 'Escape') return;
+  const overlay = document.getElementById('pay-overlay');
+  if(overlay && overlay.classList.contains('show')) closePay();
+});
+
+// ── Split (diviser l'addition) — calcul d'info uniquement, pas de débit réel séparé ──
 function changeSplit(delta){
   splitN = Math.max(1, Math.min(20, splitN + delta));
   document.getElementById('split-val').textContent = splitN;
   const amount = parseFloat(document.getElementById('pay-overlay').dataset.amount)||0;
   const resultEl = document.getElementById('split-result');
+  const noteEl = document.getElementById('split-info-note');
   if(splitN > 1){
     resultEl.style.display = 'grid';
-    const perPerson = amount / splitN;
-    document.getElementById('split-per-person').textContent = fmt(perPerson);
+    if(noteEl) noteEl.style.display = 'block';
+    // Fix #6 : calcul en centimes pour éviter les flottants fantômes
+    const totalCents = Math.round(amount * 100);
+    const perPersonCents = Math.floor(totalCents / splitN);
+    const remainder = totalCents - (perPersonCents * splitN);
+    const perPerson = perPersonCents / 100;
+    // Si reste != 0, la N-ième personne paie le reliquat (1-19 centimes)
+    let perPersonLbl = fmt(perPerson);
+    if(remainder > 0){
+      const lastPersonCents = perPersonCents + remainder;
+      perPersonLbl = `${splitN-1}× ${fmt(perPerson)} + 1× ${fmt(lastPersonCents/100)}`;
+    }
+    document.getElementById('split-per-person').textContent = perPersonLbl;
     document.getElementById('split-total-ref').textContent = fmt(amount);
   } else {
     resultEl.style.display = 'none';
+    if(noteEl) noteEl.style.display = 'none';
   }
 }
 
@@ -2434,14 +2488,26 @@ function selectPayType(type){
   });
   const cashSec=document.getElementById('cash-section');
   const ok=document.getElementById('btn-pay-ok');
+  // Fix #8 : reset systématique de la saisie cash quand on change de mode
+  // (avant : cashStr persistait silencieusement, surprise au retour Cash)
+  cashStr = '0'; hasDot = false;
+  document.getElementById('cash-disp').textContent = '0,00';
+  document.getElementById('change-val').textContent = '—';
+  document.getElementById('change-val').className = 'cv u';
   // Pourboire : visible uniquement pour CB (cash → on tape directement le montant
   // donné, c'est le client qui décide ; offert → pas de tip)
   const tipSec = document.getElementById('tip-section');
   if(tipSec) tipSec.style.display = (type === 'cb') ? 'block' : 'none';
-  if(type !== 'cb') selectTip(0); // reset le tip si on change de mode
+  if(type !== 'cb'){
+    selectTip(0);
+    // Fix #9 : reset input pourboire libre aussi (selectTip ne le faisait pas)
+    const tc = document.getElementById('tip-custom');
+    if(tc) tc.value = '';
+  }
   if(type==='cash'){
     cashSec.style.display='block';
     ok.disabled=true; // attendre saisie montant
+    ok.textContent = '✓ Valider';
   } else {
     cashSec.style.display='none';
     ok.disabled=false; // CB ou Offert → valider direct
@@ -2492,37 +2558,83 @@ function applyTip(tipEuros){
 }
 
 function numIn(v){
-  if(v==='.'){if(hasDot)return;hasDot=true;cashStr+='.';}
-  else{ if(cashStr==='0') cashStr=v; else{ const p=cashStr.split('.');if(p[1]!==undefined&&p[1].length>=2)return;cashStr+=v;} }
+  if(v==='.'){
+    if(hasDot) return;
+    // Fix #13 : "." sans chiffre devant → on force "0." pour éviter cashStr=""
+    if(cashStr === '' || cashStr === '0'){ cashStr = '0'; }
+    hasDot = true;
+    cashStr += '.';
+  } else {
+    if(cashStr==='0') cashStr=v;
+    else{ const p=cashStr.split('.'); if(p[1]!==undefined && p[1].length>=2) return; cashStr+=v; }
+  }
   updateCash();
 }
-function numDel(){ if(cashStr.length<=1){cashStr='0';hasDot=false;}else{if(cashStr.slice(-1)==='.') hasDot=false;cashStr=cashStr.slice(0,-1);} updateCash(); }
+function numDel(){
+  if(cashStr.length<=1){ cashStr='0'; hasDot=false; }
+  else{ if(cashStr.slice(-1)==='.') hasDot=false; cashStr=cashStr.slice(0,-1); }
+  updateCash();
+}
+// Fix #7 : bouton "C" (Clear) — reset complet de la saisie cash en 1 tap
+function numClear(){
+  cashStr='0'; hasDot=false;
+  updateCash();
+}
+window.numClear = numClear;
 
 function updateCash(){
-  const raw=parseFloat(cashStr)||0;
-  const amount=parseFloat(document.getElementById('pay-overlay').dataset.amount)||0;
-  const change=raw-amount;
-  document.getElementById('cash-disp').textContent=cashStr.endsWith('.')?cashStr+'0':raw.toFixed(2);
-  const cv=document.getElementById('change-val'),ok=document.getElementById('btn-pay-ok');
-  if(raw===0){cv.textContent='—';cv.className='cv u';ok.disabled=true;ok.textContent='✓ Valider';return;}
-  if(change<0){cv.textContent=`−${fmt(Math.abs(change))}`;cv.className='cv n';ok.disabled=true;ok.textContent='✓ Valider';}
-  else{cv.textContent=fmt(change);cv.className='cv p';ok.disabled=false;ok.textContent='✓ Valider (monnaie: '+fmt(change)+')';}
+  // Fix #6 : calcul en centimes entiers pour éviter les flottants fantômes
+  // (ex: 10.10 - 10.00 = 0.09999... avant ; 1 centime affiché en moins)
+  const rawCents    = Math.round((parseFloat(cashStr) || 0) * 100);
+  const amountCents = Math.round((parseFloat(document.getElementById('pay-overlay').dataset.amount) || 0) * 100);
+  const changeCents = rawCents - amountCents;
+  const raw = rawCents / 100;
+  const change = changeCents / 100;
+  document.getElementById('cash-disp').textContent = cashStr.endsWith('.') ? cashStr+'0' : raw.toFixed(2);
+  const cv = document.getElementById('change-val'), ok = document.getElementById('btn-pay-ok');
+  if(rawCents === 0){ cv.textContent='—'; cv.className='cv u'; ok.disabled=true; ok.textContent='✓ Valider'; return; }
+  if(changeCents < 0){
+    cv.textContent = '−' + fmt(Math.abs(change));
+    cv.className = 'cv n';
+    ok.disabled = true;
+    ok.textContent = '✓ Valider';
+  } else {
+    cv.textContent = fmt(change);
+    cv.className = 'cv p';
+    ok.disabled = false;
+    ok.textContent = '✓ Valider (monnaie: ' + fmt(change) + ')';
+  }
 }
 
 function validatePay(){
+  // Garde anti-double-clic (cf. audit modal encaissement #1)
+  if(isValidating) return;
+  // Garde mode payement valide (cf. audit #2) : empêche enregistrement
+  // avec payType:'' si btn-pay-ok a été activé par une race condition.
+  if(!['cb','cash','off'].includes(currentPayType)){
+    toast('Sélectionne un mode de paiement','o');
+    return;
+  }
+  isValidating = true;
   // Store receipt data BEFORE clearing ticket
   const items = ticket.map(r=>({...r}));
   const tvaDetails = calculateTVADetails(items);
   const tip = (currentPayType === 'cb') ? (parseFloat(window._currentTip) || 0) : 0;
+  // Mode "Offert" (cf. audit #12) : le client ne paie rien donc le total
+  // encaissé est 0. On garde tvaDetails comme référence comptable (matière
+  // première TVA-récupérable) mais le receipt indique 0€ encaissé.
+  const isOffert = currentPayType === 'off';
   lastReceipt = {
     number: nextReceiptNumber(),
     items,
-    total: tvaDetails.totalTTC + tip, // total facturé incluant le pourboire
-    subtotal: tvaDetails.totalTTC,    // sous-total HORS pourboire
-    tip,
-    totalHT: tvaDetails.totalHT,
-    totalTVA: tvaDetails.totalTVA,
-    tvaRates: tvaDetails.rates,
+    total: isOffert ? 0 : (tvaDetails.totalTTC + tip), // facturé client
+    subtotal: isOffert ? 0 : tvaDetails.totalTTC,      // hors pourboire
+    tip: isOffert ? 0 : tip,
+    totalHT: isOffert ? 0 : tvaDetails.totalHT,
+    totalTVA: isOffert ? 0 : tvaDetails.totalTVA,
+    tvaRates: isOffert ? [] : tvaDetails.rates,
+    offert: isOffert,                                  // flag pour stats/comptable
+    offertGrossValue: isOffert ? tvaDetails.totalTTC : 0, // valeur initiale du "cadeau"
     payType: currentPayType,
     tableId: currentTableId,
     time: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),

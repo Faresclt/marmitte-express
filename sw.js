@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marmite-v59-client-yellows-confirm-a11y-tva';
+const CACHE_NAME = 'marmite-v60-payment-modal-fixes';
 const ASSETS = [
   './manifest.json',
   './icon-192.png',
