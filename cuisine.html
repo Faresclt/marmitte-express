@@ -180,6 +180,30 @@ let prevCount = 0;
 let noCuisineCategories = [];
 let noCuisineProductNames = new Set(); // Fallback: product names from noCuisine categories
 
+// Audit cuisine #9 : seuil "late" configurable (avant hardcodé à 10 min L342).
+// Lu depuis config/menu.lateThresholdMin pour permettre adaptation
+// fast-food (5 min) vs gastro (30 min). Default 10 min si non défini.
+let lateThresholdMin = 10;
+
+// Audit cuisine #3 : AudioContext SINGLETON (avant : new AudioContext() à chaque
+// playSound → fuite mémoire, Chrome bloque > 6 contexts → audio mort mi-service).
+// Réutilise audioCtx créé dans unlockAudio() pour bénéficier du déblocage iOS.
+// audioCtx déclaré plus bas L383 — on l'utilisera dans playSound.
+
+// Audit cuisine #6 : toast helper minimaliste pour feedback erreur Firebase.
+// Avant : doStatus/doClear catch silencieux → cuisinier re-clique 10× sans rien voir.
+function toast(msg, kind){
+  const el = document.createElement('div');
+  el.setAttribute('role', 'alert');
+  el.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:99999;background:'
+    + (kind === 'err' ? '#e84040' : '#22c97a')
+    + ';color:#fff;padding:12px 24px;border-radius:12px;font-weight:700;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.4);max-width:90vw;text-align:center';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; }, 2500);
+  setTimeout(() => el.remove(), 2900);
+}
+
 // ── États persistants (localStorage) ──
 let soundOn = localStorage.getItem('cuisineSoundOn') !== 'false';
 let voiceOn = localStorage.getItem('cuisineVoiceOn') !== 'false';
@@ -236,6 +260,12 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
     });
   }
   console.log('[Cuisine] noCuisine cats:', noCuisineCategories, 'products:', [...noCuisineProductNames]);
+  // Audit cuisine #9 : lire seuil "late" configurable. Default 10 min.
+  if (data && typeof data.lateThresholdMin === 'number' && data.lateThresholdMin > 0){
+    lateThresholdMin = data.lateThresholdMin;
+  } else if (data && data.settings && typeof data.settings.lateThresholdMin === 'number'){
+    lateThresholdMin = data.settings.lateThresholdMin;
+  }
   // Re-render with updated filter
   if (Object.keys(orders).length > 0) renderAll();
 });
@@ -247,16 +277,31 @@ onSnapshot(collection(db, 'orders'), snap => {
 
   const actS = ['pending','received','preparing'];
   const nA = Object.values(nw).filter(o => actS.includes(o.status)).length;
-  const oA = Object.values(orders).filter(o => actS.includes(o.status)).length;
 
-  if (nA > oA && prevCount > 0) {
-    const newOrders = Object.values(nw).filter(o =>
-      actS.includes(o.status) && !orders[o._id]
-    );
+  // Audit cuisine #4 : détecter les nouvelles commandes via la PRÉSENCE de
+  // _id absents de la version précédente, plutôt que via un delta de count.
+  // Avant : if (nA > oA) — bug si 1 commande arrive ET 1 passe à 'ready' dans
+  // le même snapshot (nA=oA) → aucun son joué pendant le rush. Maintenant :
+  // newOrders.length > 0 garantit détection même si compteur stable.
+  const newOrders = Object.values(nw).filter(o =>
+    actS.includes(o.status) && !orders[o._id]
+  );
+
+  // prevCount > 0 garde : pas de son au premier load (cache hydration)
+  if (newOrders.length > 0 && prevCount > 0) {
     if (soundOn) playSound();
-    if (voiceOn && newOrders.length > 0) speakOrder(newOrders[0]);
-    if (Notification.permission === 'granted')
-      new Notification('Nouvelle commande !', {body:'Commande en cuisine', icon:'icon-192.png'});
+    if (voiceOn) speakOrder(newOrders[0]);
+    // Audit cuisine #10 : tag = renotify la même notif au lieu d'empiler
+    // 50 notifs OS. Auto-close après 8s.
+    if (Notification.permission === 'granted'){
+      const n = new Notification('Nouvelle commande !', {
+        body: `Table ${newOrders[0].tableNum || newOrders[0].tableId || '?'}`,
+        icon: 'icon-192.png',
+        tag: 'cuisine-new-order',
+        renotify: true
+      });
+      setTimeout(() => { try { n.close(); } catch(e){} }, 8000);
+    }
   }
   prevCount = nA;
   orders = nw;
@@ -265,11 +310,38 @@ onSnapshot(collection(db, 'orders'), snap => {
   document.getElementById('stxt').textContent = 'Connecté';
 });
 
+// Audit cuisine #6 : feedback erreur visuel (avant : catch silencieux).
+// Si Firebase down ou règles refusent, le cuisinier voit "Erreur — réessayez"
+// au lieu de re-cliquer 10 fois dans le vide.
 window.doStatus = async function(id, s) {
-  try { await updateDoc(doc(db, 'orders', id), { status: s, updatedAt: serverTimestamp() }); } catch(e) { console.error(e); }
+  try {
+    await updateDoc(doc(db, 'orders', id), { status: s, updatedAt: serverTimestamp() });
+  } catch(e) {
+    console.error('[Cuisine] doStatus fail:', e);
+    toast('Erreur réseau — réessayez', 'err');
+  }
 };
+
+// Audit cuisine #2 : soft-delete + confirm (avant : deleteDoc dur silencieux).
+// La commande reste en base avec status='cancelled' + cancelledAt — traçable
+// pour réclamation client ("j'ai commandé y a 2h") et audit interne.
+// Conformité NF525 partielle : si l'order est lié à un ticket fiscal, la
+// suppression dure créerait un trou comptable.
 window.doClear = async function(id) {
-  try { await deleteDoc(doc(db, 'orders', id)); } catch(e) {}
+  const o = orders[id];
+  const tbl = o ? (o.tableNum || o.tableId || '?') : '?';
+  if (!confirm(`Annuler la commande de la table ${tbl} ?\n\nElle restera consultable dans l'historique (status: cancelled) mais disparaîtra de l'écran cuisine.`)) return;
+  try {
+    await updateDoc(doc(db, 'orders', id), {
+      status: 'cancelled',
+      cancelledAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    toast(`✓ Commande table ${tbl} annulée`);
+  } catch(e) {
+    console.error('[Cuisine] doClear fail:', e);
+    toast('Erreur — annulation refusée', 'err');
+  }
 };
 
 function minsAgo(o) {
@@ -294,8 +366,33 @@ function filterCuisineItems(items) {
   });
 }
 
-function renderAll() {
-  const all = Object.values(orders).sort((a,b) => (a?.sentAt?.seconds||0) - (b?.sentAt?.seconds||0));
+// Audit cuisine #1 : renderAll DEBOUNCED 200ms + skip si signature identique.
+// Avant : chaque snapshot Firebase → innerHTML rewrite des 3 colonnes immédiat.
+// Si cuisinier tap "EN PRÉPARATION" pile à ce moment, son doigt rate le bouton
+// (DOM recréé entre tap-start et tap-end). Maintenant : on debounce les rafales
+// de snapshots typiques pendant un rush + skip si rien n'a vraiment changé.
+let _renderTimer = null;
+let _lastRenderSig = '';
+const renderAll = function(){
+  clearTimeout(_renderTimer);
+  _renderTimer = setTimeout(_renderAllImpl, 200);
+};
+
+function _renderAllImpl() {
+  // Audit cuisine #14 : tri robuste si sentAt manquant (premiers snapshots
+  // avant que serverTimestamp soit résolu). Fallback ts client puis _id pour
+  // ordre déterministe.
+  const all = Object.values(orders).sort((a,b) => {
+    const sa = a?.sentAt?.seconds || a?._localTs || 0;
+    const sb = b?.sentAt?.seconds || b?._localTs || 0;
+    if (sa !== sb) return sa - sb;
+    return (a?._id || '').localeCompare(b?._id || '');
+  });
+  // Skip si rien n'a changé visuellement (évite rebuild inutile + bouton recréé)
+  const sig = all.map(o => `${o._id}:${o.status}:${(o.items||[]).length}`).join('|');
+  if (sig === _lastRenderSig) return;
+  _lastRenderSig = sig;
+
   const received = all.filter(o => o.status === 'received' || o.status === 'pending');
   const preparing = all.filter(o => o.status === 'preparing');
   const ready = all.filter(o => o.status === 'ready');
@@ -339,24 +436,32 @@ function makeTicket(o, type) {
   const tbl = o.tableNum || o.tableId || '?';
   const time = o.sentAt?.toDate ? o.sentAt.toDate().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
   const mins = minsAgo(o);
-  const late = type === 'new' && mins >= 10;
+  // Audit cuisine #9 : seuil "late" via lateThresholdMin (config-driven)
+  const late = type === 'new' && mins >= lateThresholdMin;
+  // _id Firestore ne contient théoriquement que [a-zA-Z0-9_-] mais on échappe
+  // par défense en profondeur (quote-safe inside onclick=").
+  const idEsc = esc(o._id);
 
   let btns = '';
-  if (type === 'new') btns = `<button class="tbtn tbtn-prep" onclick="doStatus('${o._id}','preparing')">🔥 EN PRÉPARATION</button>`;
-  else if (type === 'prep') btns = `<button class="tbtn tbtn-ready" onclick="doStatus('${o._id}','ready')">✅ PRÊT À SERVIR</button>`;
-  else btns = `<button class="tbtn tbtn-done" onclick="doStatus('${o._id}','served')">🍽️ SERVI</button><button class="tbtn tbtn-clr" onclick="doClear('${o._id}')">✕</button>`;
+  if (type === 'new') btns = `<button class="tbtn tbtn-prep" onclick="doStatus('${idEsc}','preparing')">🔥 EN PRÉPARATION</button>`;
+  else if (type === 'prep') btns = `<button class="tbtn tbtn-ready" onclick="doStatus('${idEsc}','ready')">✅ PRÊT À SERVIR</button>`;
+  else btns = `<button class="tbtn tbtn-done" onclick="doStatus('${idEsc}','served')">🍽️ SERVI</button><button class="tbtn tbtn-clr" onclick="doClear('${idEsc}')">✕</button>`;
 
+  // Audit cuisine #5 : XSS — esc() partout. Avant : i.name / i.cuisson /
+  // i.garniture injectés sans échappement. Un nom de produit '<script>' (admin
+  // malicieux ou bug input) exécutait du JS arbitraire dans cuisine.html.
   let itemsHTML = '';
   for (const i of items) {
     const opts = [i.cuisson, i.garniture].filter(Boolean);
-    itemsHTML += `<div class="tkt-row"><span class="tkt-qty">${i.qty}×</span><span class="tkt-nm">${i.name.toUpperCase()}</span></div>`;
-    if (opts.length) itemsHTML += `<div class="tkt-tags">${opts.map(x=>`<span class="tkt-tag">${x}</span>`).join('')}</div>`;
+    const qty = Number(i.qty) || 0;
+    itemsHTML += `<div class="tkt-row"><span class="tkt-qty">${qty}×</span><span class="tkt-nm">${esc(i.name).toUpperCase()}</span></div>`;
+    if (opts.length) itemsHTML += `<div class="tkt-tags">${opts.map(x=>`<span class="tkt-tag">${esc(x)}</span>`).join('')}</div>`;
   }
 
   return `<div class="tkt ${type}${late?' late':''}">
     <div class="tkt-hd">
-      <div class="tkt-tbl">TABLE ${tbl}</div>
-      <div><div class="tkt-time">${time}</div>${mins>0?`<div class="tkt-ago${late?' late-txt':''}">${mins} min</div>`:''}</div>
+      <div class="tkt-tbl">TABLE ${esc(tbl)}</div>
+      <div><div class="tkt-time">${esc(time)}</div>${mins>0?`<div class="tkt-ago${late?' late-txt':''}">${mins} min</div>`:''}</div>
     </div>
     <div class="tkt-body">${itemsHTML}</div>
     ${o.note?`<div class="tkt-note">⚠️ ${esc(o.note)}</div>`:''}
@@ -364,19 +469,54 @@ function makeTicket(o, type) {
   </div>`;
 }
 
-function playSound() {
+// Audit cuisine #3 : SINGLETON AudioContext (réutilise audioCtx créé par
+// unlockAudio L383). Avant : new AudioContext() à chaque playSound → Chrome
+// limite à ~6 contexts → audio mort après 6-100 commandes (mi-service).
+// Si audioCtx pas encore débloqué (avant clic "Activer le son"), on tente
+// quand même via lazy-init (le bip restera muté tant que l'user n'a pas cliqué,
+// comportement navigateur normal).
+function playSound(freqs) {
   try {
-    const c = new AudioContext();
-    [0,.15,.3].forEach((d,i) => {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const c = audioCtx;
+    const tones = freqs || [880, 1100, 1320]; // pattern défaut "nouvelle commande"
+    tones.forEach((freq, i) => {
+      const d = i * 0.15;
       const o = c.createOscillator(), g = c.createGain();
       o.connect(g); g.connect(c.destination);
-      o.frequency.setValueAtTime([880,1100,1320][i], c.currentTime+d);
+      o.frequency.setValueAtTime(freq, c.currentTime+d);
       g.gain.setValueAtTime(.3, c.currentTime+d);
       g.gain.exponentialRampToValueAtTime(.001, c.currentTime+d+.2);
       o.start(c.currentTime+d); o.stop(c.currentTime+d+.2);
     });
-  } catch(e) {}
+  } catch(e) { console.warn('[Cuisine] playSound fail:', e.message); }
 }
+
+// Audit cuisine #7/#8/#13 : tick périodique pour rafraîchir les badges "X min",
+// le compteur "Aujourd'hui" (reset à minuit) et détecter les passages en late.
+// Avant : minsAgo recalculé uniquement au snapshot → si rien ne change pendant
+// 30 min, le badge affichait toujours "5 min" alors qu'il devait dire "35 min".
+// #13 : son d'alerte (note plus aiguë) joué une seule fois quand un order
+// franchit le seuil late (suivi via window._lateNotified Set).
+window._lateNotified = new Set();
+function tickRefresh(){
+  // Force re-render (skip identique laissé par renderAll géré séparément)
+  // — on signe avec mins en plus pour invalider _lastRenderSig.
+  _lastRenderSig = ''; // invalide le skip cache
+  _renderAllImpl();
+  // Détecte les nouveaux late
+  Object.values(orders).forEach(o => {
+    if ((o.status === 'received' || o.status === 'pending') && minsAgo(o) >= lateThresholdMin){
+      if (!window._lateNotified.has(o._id)){
+        window._lateNotified.add(o._id);
+        if (soundOn) playSound([1500, 1500, 1500]); // 3 bips aigus pour late
+      }
+    } else {
+      window._lateNotified.delete(o._id);
+    }
+  });
+}
+setInterval(tickRefresh, 30 * 1000); // toutes les 30s
 
 // ── Audio unlock system (contourne les restrictions navigateur) ──
 let audioUnlocked = false;
@@ -385,6 +525,12 @@ let speechQueue = [];
 
 window.unlockAudio = function() {
   const btn = document.getElementById('audio-unlock');
+  // Audit cuisine #11 : demander la permission Notification depuis un user
+  // gesture (bouton "Activer le son") au lieu du load (anti-pattern UX).
+  // Avant : prompt navigateur dès l'ouverture de la page, ignoré par 80% des users.
+  if ('Notification' in window && Notification.permission === 'default'){
+    try { Notification.requestPermission(); } catch(e){}
+  }
   // 1. Unlock AudioContext
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -419,21 +565,16 @@ window.unlockAudio = function() {
   speechQueue = [];
 };
 
-function speakOrder(order) {
-  if (!('speechSynthesis' in window)) return;
-  if (!audioUnlocked) { speechQueue.push(order); return; }
-  const items = filterCuisineItems(order.items || []);
-  if (!items.length) return;
-  const tbl = order.tableNum || order.tableId || '?';
-  const liste = items.map(i => {
-    let desc = `${i.qty} ${i.name}`;
-    if (i.cuisson) desc += `, cuisson ${i.cuisson}`;
-    if (i.garniture) desc += `, avec ${i.garniture}`;
-    return desc;
-  }).join('. ');
-  const texte = `Nouvelle commande, table ${tbl}. ${liste}.`;
-  // Cancel any ongoing speech
-  window.speechSynthesis.cancel();
+// Audit cuisine #12 : file d'attente vocale au lieu de cancel().
+// Avant : `speechSynthesis.cancel()` à chaque appel → si 5 commandes arrivent
+// en 2s, seule la dernière est lue, les 4 autres sont perdues. Maintenant :
+// on enchaîne via onend, le cuisinier entend TOUTES les commandes.
+let _speakingQueue = [];
+let _speaking = false;
+function _speakNext(){
+  if (_speakingQueue.length === 0){ _speaking = false; return; }
+  _speaking = true;
+  const texte = _speakingQueue.shift();
   const utt = new SpeechSynthesisUtterance(texte);
   utt.lang = 'fr-FR';
   utt.rate = 0.92;
@@ -441,7 +582,29 @@ function speakOrder(order) {
   utt.volume = 1;
   // Workaround: Chrome sometimes pauses long utterances
   utt.onpause = () => window.speechSynthesis.resume();
+  utt.onend = _speakNext;
+  utt.onerror = _speakNext;
   window.speechSynthesis.speak(utt);
+}
+
+function speakOrder(order) {
+  if (!('speechSynthesis' in window)) return;
+  if (!audioUnlocked) { speechQueue.push(order); return; }
+  const items = filterCuisineItems(order.items || []);
+  if (!items.length) return;
+  const tbl = order.tableNum || order.tableId || '?';
+  const liste = items.map(i => {
+    let desc = `${Number(i.qty) || 1} ${i.name || ''}`;
+    if (i.cuisson) desc += `, cuisson ${i.cuisson}`;
+    if (i.garniture) desc += `, avec ${i.garniture}`;
+    return desc;
+  }).join('. ');
+  const texte = `Nouvelle commande, table ${tbl}. ${liste}.`;
+  _speakingQueue.push(texte);
+  // Cap la queue à 3 messages max (évite que pendant un mega-rush
+  // la voix prenne 5 min de retard sur la cuisine)
+  if (_speakingQueue.length > 3) _speakingQueue = _speakingQueue.slice(-3);
+  if (!_speaking) _speakNext();
 }
 
 window.toggleSound = function() {
@@ -456,7 +619,8 @@ window.toggleVoice = function() {
 };
 window.toggleSum = function() { document.getElementById('sum').classList.toggle('open'); };
 
-if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+// Audit cuisine #11 : permission demandée dans unlockAudio() (user gesture),
+// pas au load. Ne plus appeler ici.
 </script>
 </body>
 </html>
