@@ -58,7 +58,19 @@
 </script>
 
 <script type="module">
-import { db, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp, escHtml } from './assets/js/firebase-sync.js';
+import { db, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp, escHtml, query, where } from './assets/js/firebase-sync.js';
+
+// Audit serveur #9 : renommé l'ancien `esc` ambigu en `escJs` pour clarifier
+// son rôle. Il N'ÉCHAPPE QUE les single quotes pour insertion dans onclick="...'X'..."
+// — c'est INSUFFISANT pour du HTML. Pour le contenu HTML, utiliser escHtml() importé.
+// Avant : esc() utilisé partout sans réaliser qu'il n'échappe pas <, >, & → XSS sur p.name.
+function escJs(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+// Audit serveur #6 : lock anti-double-envoi sendOrder.
+// Si le timeout 10s remettait le bouton enabled pendant que Firebase finissait
+// par accepter le premier addDoc en arrière-plan, un re-clic créait UN SECOND order
+// pour la même table.
+let _orderInFlight = false;
 
 // Get table number from URL: client.html?table=3
 const params = new URLSearchParams(window.location.search);
@@ -95,24 +107,31 @@ function showTablePicker(){
     maxY=Math.max(maxY, (e.y||0)+h);
   });
   
+  // Audit serveur #1 : escape numbers/ids du plan salle. Avant : ${el.id} et
+  // ${el.number} injectés bruts dans onclick=" et innerHTML — XSS si un admin
+  // utilise un nom de table avec un guillemet (rare mais possible).
   let elHtml = '';
   elements.forEach(el=>{
     const isTable = el.type==='table-round'||el.type==='table-rect';
+    const idJs = escJs(el.id || '');
+    const numJs = escJs(el.number || '');
+    const numHtml = escHtml(el.number || '');
+    const seats = Number(el.seats) || 0;
     if(el.type==='table-round'){
       const sz=el.size||90;
-      elHtml+=`<div onclick="${isTable?`pickTable('${el.id}','${el.number||''}')`:''}" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz}px;height:${sz}px;border-radius:50%;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(245,166,35,.15)'" onmouseout="this.style.borderColor='#22c97a';this.style.background='rgba(34,201,122,.1)'">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;color:#22c97a;line-height:1">${el.number||''}</div>
-        <div style="font-size:10px;color:var(--muted);font-weight:600">${el.seats||0} cvts</div>
+      elHtml+=`<div onclick="${isTable?`pickTable('${idJs}','${numJs}')`:''}" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz}px;height:${sz}px;border-radius:50%;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(245,166,35,.15)'" onmouseout="this.style.borderColor='#22c97a';this.style.background='rgba(34,201,122,.1)'">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;color:#22c97a;line-height:1">${numHtml}</div>
+        <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
       </div>`;
     } else if(el.type==='table-rect'){
       const sz=el.size||110;
-      elHtml+=`<div onclick="pickTable('${el.id}','${el.number||''}')" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz*1.4}px;height:${sz}px;border-radius:12px;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(245,166,35,.15)'" onmouseout="this.style.borderColor='#22c97a';this.style.background='rgba(34,201,122,.1)'">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:#22c97a;line-height:1">${el.number||''}</div>
-        <div style="font-size:10px;color:var(--muted);font-weight:600">${el.seats||0} cvts</div>
+      elHtml+=`<div onclick="pickTable('${idJs}','${numJs}')" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz*1.4}px;height:${sz}px;border-radius:12px;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(245,166,35,.15)'" onmouseout="this.style.borderColor='#22c97a';this.style.background='rgba(34,201,122,.1)'">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:#22c97a;line-height:1">${numHtml}</div>
+        <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
       </div>`;
     } else if(el.type==='bar'){
       elHtml+=`<div style="position:absolute;left:${el.x}px;top:${el.y}px;width:${el.w||160}px;height:${el.h||55}px;border-radius:10px;background:rgba(74,158,255,.1);border:2px solid rgba(74,158,255,.4);display:flex;align-items:center;justify-content:center;gap:6px">
-        <span style="font-size:18px">🍺</span><span style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:#4a9eff">${el.number||'BAR'}</span>
+        <span style="font-size:18px">🍺</span><span style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:#4a9eff">${numHtml || 'BAR'}</span>
       </div>`;
     }
   });
@@ -210,11 +229,23 @@ function pickTable(id, num){
 }
 
 // Change table button — confirme si la commande en cours sera perdue
+// Audit serveur #8 : si un PIN serveur est défini (≠ '0000'), on le redemande
+// pour éviter qu'un client laissé seul avec la tablette change la table de
+// destination (et reçoive les commandes d'une autre table).
 function changeTable(){
   if(cart.length > 0){
-    const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
+    const total = cart.reduce((s,r)=>s+(Number(r.qty)||0)*(Number(r.price)||0),0);
     const msg = `⚠ Changer de table maintenant ?\n\n${cart.length} article(s) — ${total.toFixed(2).replace('.',',')}€\nLa commande en cours sera PERDUE.\n\nPour conserver, confirme d'abord la commande.`;
     if(!confirm(msg)) return;
+  }
+  // PIN guard (si le restaurant utilise un PIN serveur)
+  if(window._serveurPin && window._serveurPin !== '0000'){
+    const entered = prompt('🔒 Code PIN serveur requis pour changer de table :');
+    if(entered === null) return;
+    if(entered !== window._serveurPin){
+      alert('Code PIN incorrect.');
+      return;
+    }
   }
   cart = [];
   updateCartBar();
@@ -304,42 +335,77 @@ window.unlockApp = unlockApp;
 // ── Order notifications (kitchen → serveur) ──
 let knownReadyOrders = new Set();
 let orderListenerStarted = false;
+let _firstOrderSnapshot = true; // Audit #5 : skip notif au hydration initial
+
+// Audit serveur #3 : AudioContext SINGLETON (avant : new AudioContext() à
+// chaque showServeurNotif → leak mémoire, Chrome limite à 6 contexts → audio
+// mort mi-service). Lazy-init au premier appel.
+let _serveurAudioCtx = null;
 
 function startOrderNotifications(){
   if(orderListenerStarted) return;
   orderListenerStarted = true;
-  
-  // Request notification permission
+
+  // Audit serveur #12 : permission demandée — OK car appelée depuis unlockApp
+  // qui est lui-même déclenché par PIN OK (user gesture).
   if('Notification' in window && Notification.permission === 'default'){
     Notification.requestPermission();
   }
-  
-  onSnapshot(collection(db, 'orders'), snap => {
+
+  // Audit serveur #4 : query Firestore strict — status='ready' uniquement.
+  // Avant : onSnapshot collection complet → lecture de TOUS les orders à chaque
+  // snapshot (cost FB + fuite cross-tenant si rules trop ouvertes). Maintenant :
+  // filtre serveur, ne reçoit que les orders concernés.
+  // Note : pas de filtre date côté Firestore pour rester simple (les rules /
+  // une cleanup périodique gèrent l'ancien). Le _firstOrderSnapshot évite
+  // les notifs au hydration des orders du jour.
+  const readyOrdersQuery = query(
+    collection(db, 'orders'),
+    where('status', '==', 'ready')
+  );
+
+  onSnapshot(readyOrdersQuery, snap => {
+    const seenIds = new Set();
     snap.forEach(d => {
       const order = d.data();
       const id = d.id;
-      if(order.status === 'ready' && !knownReadyOrders.has(id)){
+      seenIds.add(id);
+      if(!knownReadyOrders.has(id)){
         knownReadyOrders.add(id);
-        // Only notify if we have known orders (skip first load)
-        if(knownReadyOrders.size > 1 || orderListenerStarted){
+        // Audit #5 : skip notif au PREMIER snapshot (hydration). Avant : bug
+        // logique avec `|| orderListenerStarted` qui était toujours true →
+        // le serveur entendait "Commande prête !" pour les orders de la veille
+        // à chaque refresh page.
+        if(!_firstOrderSnapshot){
           const tNum = order.tableNum || order.tableId || '?';
           showServeurNotif('🟢 Commande prête — Table '+tNum);
-          // Browser notification
           if(Notification.permission === 'granted'){
-            new Notification('Commande prête !', {body: 'Table '+tNum+' — à servir', icon: 'icon-192.png'});
+            const n = new Notification('Commande prête !', {
+              body: 'Table '+tNum+' — à servir',
+              icon: 'icon-192.png',
+              tag: 'serveur-ready-'+id, // évite doublons
+              renotify: false
+            });
+            setTimeout(() => { try { n.close(); } catch(e){} }, 8000);
           }
         }
       }
-      // Clean up served/deleted orders
-      if(order.status === 'served') knownReadyOrders.delete(id);
     });
+    // Audit #11 : reset les IDs qui ne sont plus 'ready' (servis, annulés,
+    // ou repassés à 'preparing' par correction cuisinier). Avant : un order
+    // qui re-passait à 'ready' après correction ne re-notifiait jamais.
+    knownReadyOrders.forEach(id => {
+      if(!seenIds.has(id)) knownReadyOrders.delete(id);
+    });
+    _firstOrderSnapshot = false;
   });
 }
 
 function showServeurNotif(msg){
-  // Sound
+  // Audit serveur #3 : singleton audioCtx.
   try{
-    const ctx = new AudioContext();
+    if(!_serveurAudioCtx) _serveurAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _serveurAudioCtx;
     const o = ctx.createOscillator(); const g = ctx.createGain();
     o.connect(g); g.connect(ctx.destination);
     o.frequency.setValueAtTime(660, ctx.currentTime);
@@ -348,7 +414,7 @@ function showServeurNotif(msg){
     g.gain.setValueAtTime(0.3, ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.4);
     o.start(ctx.currentTime); o.stop(ctx.currentTime+0.4);
-  }catch(e){}
+  }catch(e){ console.warn('[serveur] audio fail:', e.message); }
   // Visual toast
   let t = document.getElementById('serveur-toast');
   if(!t){
@@ -393,26 +459,34 @@ function renderMenu(){
     sec.items.forEach(p=>{
       const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
       const img = (p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null);
+      // Audit serveur #1 : XSS — escHtml partout sur les contenus produits dérivés de Firebase.
+      // Avant : ${p.name} brut → admin malicieux qui tape "<scr"+"ipt>alert(1)" en nom
+      // de produit exécutait du JS sur la tablette serveur. Idem alt="${p.name}" (XSS via
+      // <img onerror=...> si name = '"><img onerror=...>').
+      const safeName = escHtml(p.pdj && menu.platDuJour && menu.platDuJour.nom ? menu.platDuJour.nom : p.name);
+      const safeSub = escHtml(p.sub || '');
       const imgHtml = img
-        ? `<div class="prod-img"><img src="${img}" alt="${p.name}" loading="lazy"></div>`
+        ? `<div class="prod-img"><img src="${escHtml(img)}" alt="${safeName}" loading="lazy"></div>`
         : '';
       const outOfStock = p.stock!==undefined && p.stock>=0 && p.stock===0;
+      const price = Number(p.price) || 0;
+      const pidJs = escJs(p.id), nameJs = escJs(p.name);
       html+=`<div class="prod-card${img?' has-img':''}${outOfStock?' sold-out':''}">
         ${imgHtml}
         <div class="prod-info">
-          <div class="prod-name">${p.pdj?'⭐ ':''}${(p.pdj && menu.platDuJour && menu.platDuJour.nom) ? menu.platDuJour.nom : p.name}</div>
-          ${p.sub?`<div class="prod-sub">${p.sub}</div>`:''}
+          <div class="prod-name">${p.pdj?'⭐ ':''}${safeName}</div>
+          ${safeSub?`<div class="prod-sub">${safeSub}</div>`:''}
           ${(p.hasCuisson||p.hasGarniture)?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${p.hasCuisson?'🔥 Cuisson':''}${p.hasCuisson&&p.hasGarniture?' · ':''}${p.hasGarniture?'🍟 Garniture':''}</div>`:''}
-          <div class="prod-price">${p.price.toFixed(2).replace('.',',')} €</div>
+          <div class="prod-price">${price.toFixed(2).replace('.',',')} €</div>
         </div>
         <div class="prod-actions">
           ${outOfStock ? `<span style="font-size:12px;font-weight:700;color:var(--red);background:rgba(232,64,64,.1);padding:6px 14px;border-radius:20px">Épuisé</span>` :
             inCart ? `
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--accent)">${inCart} dans le panier</span>
-              <button class="add-btn" onclick="addProduct('${p.id}',${p.price},'${esc(p.name)}')">+</button>
+              <button class="add-btn" onclick="addProduct('${pidJs}',${price},'${nameJs}')">+</button>
             </div>` :
-            `<button class="add-btn" onclick="addProduct('${p.id}',${p.price},'${esc(p.name)}')">+ Ajouter</button>`
+            `<button class="add-btn" onclick="addProduct('${pidJs}',${price},'${nameJs}')">+ Ajouter</button>`
           }
         </div>
       </div>`;
@@ -525,21 +599,28 @@ function openCartPanel(){
 function closeCartPanel(){ document.getElementById('cart-panel').style.display='none'; }
 
 function renderCartPanel(){
-  const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
+  const total = cart.reduce((s,r)=>s+(Number(r.qty)||0)*(Number(r.price)||0),0);
   document.getElementById('cp-items').innerHTML = cart.map(r=>{
-    const optTxt = [r.cuisson, r.garniture].filter(Boolean).join(' · ');
+    // Audit serveur #1 : escHtml sur le contenu, escJs pour les insertions onclick.
+    const safeName = escHtml(r.name);
+    const optTxt = [r.cuisson, r.garniture].filter(Boolean).map(escHtml).join(' · ');
+    const price = Number(r.price) || 0;
+    const qty = Number(r.qty) || 0;
+    const tva = Number(r.tva) || 10;
+    const pidJs = escJs(r.pid), nameJs = escJs(r.name);
+    const cuissonJs = escJs(r.cuisson || ''), garnitureJs = escJs(r.garniture || '');
     return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)">
       <div style="flex:1">
-        <div style="font-size:15px;font-weight:600">${r.name}</div>
+        <div style="font-size:15px;font-weight:600">${safeName}</div>
         ${optTxt?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${optTxt}</div>`:''}
-        <div style="font-size:12px;color:#888">${r.price.toFixed(2).replace('.',',')}€/u</div>
+        <div style="font-size:12px;color:#888">${price.toFixed(2).replace('.',',')}€/u</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
-        <button onclick="changeQty('${r.pid}',${r.price},-1,'${esc(r.name)}','${r.cuisson||''}','${r.garniture||''}',${r.tva||10});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
-        <span style="font-family:'Bebas Neue',sans-serif;font-size:22px">${r.qty}</span>
-        <button onclick="changeQty('${r.pid}',${r.price},1,'${esc(r.name)}','${r.cuisson||''}','${r.garniture||''}',${r.tva||10});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
+        <button onclick="changeQty('${pidJs}',${price},-1,'${nameJs}','${cuissonJs}','${garnitureJs}',${tva});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
+        <span style="font-family:'Bebas Neue',sans-serif;font-size:22px">${qty}</span>
+        <button onclick="changeQty('${pidJs}',${price},1,'${nameJs}','${cuissonJs}','${garnitureJs}',${tva});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
       </div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:65px;text-align:right">${(r.qty*r.price).toFixed(2).replace('.',',')}€</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:65px;text-align:right">${(qty*price).toFixed(2).replace('.',',')}€</div>
     </div>`;
   }).join('');
   document.getElementById('cp-total').textContent = total.toFixed(2).replace('.',',')+'€';
@@ -548,25 +629,96 @@ function renderCartPanel(){
 
 async function sendOrder(){
   if(!cart.length) return;
+
+  // Audit serveur #6 : lock anti-double-envoi. Avant : si le timeout 10s
+  // re-enable le bouton et Firebase finit par accepter le premier addDoc,
+  // re-cliquer = DEUX orders pour la même table.
+  if(_orderInFlight){
+    console.warn('[sendOrder] Already in flight, skipping double-click');
+    return;
+  }
+
+  // Audit serveur #2 : guard table sélectionnée. Avant : on pouvait pousser
+  // un order avec tableId=null → cuisine affiche "Table ?".
+  if(!tableId || !tableNum){
+    const errEl = document.getElementById('cp-error');
+    errEl.textContent = '⚠️ Sélectionnez d\'abord une table.';
+    errEl.style.display='block';
+    return;
+  }
+
+  // Audit serveur #10 : validation cart vs menu actuel. Le menu peut avoir
+  // changé pendant la prise de commande (admin baisse un prix, retire un
+  // produit). On re-check avant addDoc et alerte le serveur si divergence.
+  if(menu && Array.isArray(menu.products)){
+    const productsMap = new Map(menu.products.map(p => [p.id, p]));
+    const warnings = [];
+    const validCart = [];
+    cart.forEach(r => {
+      const p = productsMap.get(r.pid);
+      if(!p){
+        warnings.push(`• "${r.name}" — produit retiré de la carte (item retiré)`);
+        return; // skip
+      }
+      if(p.active === false){
+        warnings.push(`• "${r.name}" — produit désactivé (item retiré)`);
+        return;
+      }
+      const newPrice = Number(p.price) || 0;
+      const oldPrice = Number(r.price) || 0;
+      if(Math.abs(newPrice - oldPrice) > 0.001){
+        warnings.push(`• "${r.name}" — prix changé : ${oldPrice.toFixed(2)}€ → ${newPrice.toFixed(2)}€`);
+        validCart.push({...r, price: newPrice}); // utilise prix actuel
+      } else {
+        validCart.push(r);
+      }
+    });
+    if(warnings.length){
+      const msg = 'Modifications détectées sur la carte :\n\n' + warnings.join('\n') + '\n\nEnvoyer la commande avec les corrections ?';
+      if(!confirm(msg)){
+        // L'utilisateur refuse → on rafraîchit le cart pour qu'il revoie
+        cart = validCart;
+        updateCartBar();
+        renderCartPanel();
+        return;
+      }
+      cart = validCart;
+      if(!cart.length){
+        const errEl = document.getElementById('cp-error');
+        errEl.textContent = 'Tous les items ont été retirés (carte modifiée). Recommandez.';
+        errEl.style.display='block';
+        updateCartBar();
+        return;
+      }
+    }
+  }
+
+  _orderInFlight = true;
   const btn = document.getElementById('cp-send');
   btn.disabled=true; btn.textContent='⏳ Envoi en cours...';
-  
-  // Timeout safety — si Firebase ne répond pas en 10s
+
+  // Timeout safety — si Firebase ne répond pas en 10s, on AFFICHE l'erreur
+  // mais on NE remet PAS le bouton enabled tant que la Promise n'est pas
+  // résolue (évite double-envoi, cf. #6).
+  let timedOut = false;
   const timeoutId = setTimeout(()=>{
-    btn.disabled=false; btn.textContent='✅ Confirmer la commande';
-    document.getElementById('cp-error').textContent='⚠️ Délai dépassé. Vérifiez votre connexion et réessayez.';
+    timedOut = true;
+    btn.textContent='⏳ Envoi long... patience';
+    document.getElementById('cp-error').textContent='⚠️ Délai dépassé — la commande peut encore aboutir. Attendez avant de réessayer.';
     document.getElementById('cp-error').style.display='block';
   }, 10000);
-  
+
   try{
     const note = document.getElementById('cp-note')?.value||'';
     await addDoc(collection(db,'orders'),{
       tableId,
       tableNum: tableNum,
-      items: cart.map(r=>({pid:r.pid,name:r.name,price:r.price,qty:r.qty,tva:r.tva||10,cuisson:r.cuisson||null,garniture:r.garniture||null,cat:r.cat||null})),
+      items: cart.map(r=>({pid:r.pid,name:r.name,price:Number(r.price)||0,qty:Number(r.qty)||0,tva:Number(r.tva)||10,cuisson:r.cuisson||null,garniture:r.garniture||null,cat:r.cat||null})),
       note,
       status: 'pending',
-      source: 'client',
+      // Audit serveur #7 : source='serveur' (avant: 'client' — incohérent,
+      // la cuisine ne pouvait pas distinguer ordre serveur vs ordre client direct)
+      source: 'serveur',
       sentAt: serverTimestamp()
     });
     clearTimeout(timeoutId);
@@ -582,11 +734,14 @@ async function sendOrder(){
     showConfirmation();
   }catch(e){
     clearTimeout(timeoutId);
-    btn.disabled=false; btn.textContent='✅ Confirmer la commande';
     const errEl = document.getElementById('cp-error');
     errEl.textContent = '❌ Erreur : '+e.message+'. Appelez un serveur.';
     errEl.style.display='block';
     console.error('Firebase error:',e);
+  } finally {
+    _orderInFlight = false;
+    btn.disabled = !cart.length;
+    btn.textContent = '✅ Confirmer la commande';
   }
 }
 
@@ -598,7 +753,7 @@ function showConfirmation(){
   }, 3000);
 }
 
-function esc(s){ return String(s||'').replace(/'/g,"\\'"); }
+function esc(s){ return escJs(s); } // alias backcompat — utilisé dans onclick="...'esc(name)'..."
 window.switchTab=switchTab; window.changeQty=changeQty; window.addProduct=addProduct;
 window.openCartPanel=openCartPanel; window.closeCartPanel=closeCartPanel;
 window.renderCartPanel=renderCartPanel; window.sendOrder=sendOrder;
