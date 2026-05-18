@@ -1,9 +1,27 @@
-// firestore.rules.v3 — Multi-tenant strict (Phase 3)
+// firestore.rules v4 — Durcissement backward-compat root (Phase 3.5)
 //
-// Activation après migration des données root → restaurants/marmitte-express/
-// Cf. docs/MIGRATION-MULTITENANT-PLAN.md
+// Contexte : la cible multi-tenant /restaurants/{slug}/... n'est pas encore activée
+// (RESTO_SLUG = null dans firebase-sync.js — re-activation prévue Phase 5).
+// L'app fonctionne sur les collections root depuis 2026-05-06.
 //
-// Backward compat root active jusqu'au 2026-05-15 puis à supprimer.
+// La v3 laissait /orders et /tables `read: if true` (lecture totalement publique)
+// et /config/* `read: if docId != 'apikeys'` (lecture publique sauf apikeys).
+// Conséquence : un visiteur de client.html → signInAnonymously → puis console JS pouvait :
+//   - Lire toutes les commandes (notes RGPD, totaux, infos table)
+//   - Lire les backups (config/backup*) qui peuvent contenir des données privées
+//   - Voler la clé Gemini (config/apikeys lisible si isAuth)
+//   - Modifier les prix du menu (config/menu write isAuth)
+//
+// v4 — Durcissement minimum viable sans casser le runtime :
+//   - /config/menu, /config/tables, /config/images_* : reads publics (clients QR)
+//   - /config/{autres} (apikeys, backup*) : reads auth uniquement
+//   - /tables/{id} root : reads auth (clients ne lisent pas /tables directement)
+//   - /orders/{id} root : reads auth (clients voient leur ticket via /tickets/{id})
+//   - /tickets/{id} : read public préservé (lien QR partagé au client)
+//   - /payments/{id} : auth uniquement (inchangé)
+//
+// Restrictions write conservées en isAuth() : la plupart des pages POS sont
+// signInAnonymously. Phase 5 ajoutera RBAC (admin claims) pour serrer write/delete.
 
 rules_version = '2';
 service cloud.firestore {
@@ -24,7 +42,8 @@ service cloud.firestore {
       return isResto(slug) && role(slug) == 'admin';
     }
 
-    // ════════════ MULTI-TENANT (cible) ════════════
+    // ════════════ MULTI-TENANT (cible — non utilisée par l'app prod aujourd'hui) ════════════
+    // Inchangé par rapport à v3. Servira quand RESTO_SLUG sera ré-activé en Phase 5.
     match /restaurants/{slug} {
       allow read: if isResto(slug);
       allow write: if isAdmin(slug);
@@ -41,62 +60,77 @@ service cloud.firestore {
         allow write: if isAdmin(slug);
       }
 
-      // Tables : tous les staff resto peuvent lire/écrire
       match /tables/{tableId} {
-        allow read: if isResto(slug);
-        allow write: if isResto(slug);
+        allow read, write: if isResto(slug);
       }
 
-      // Commandes : staff peut créer/maj, admin peut supprimer
       match /orders/{orderId} {
         allow read: if isResto(slug);
         allow create, update: if isResto(slug);
         allow delete: if isAdmin(slug);
       }
 
-      // Paiements : staff crée, admin gère
       match /payments/{paymentId} {
         allow read: if isResto(slug);
         allow create: if isResto(slug);
         allow update, delete: if isAdmin(slug);
       }
 
-      // Users (rôles) : admin uniquement
       match /users/{uid} {
         allow read: if isResto(slug);
         allow write: if isAdmin(slug);
       }
 
-      // Storage refs (images IA Phase 4)
       match /images/{productId}/{document=**} {
         allow read: if true; // images du menu publiques
         allow write: if isAdmin(slug);
       }
     }
 
-    // ════════════ BACKWARD COMPAT ROOT (transition) ════════════
-    // Suppression J+7 après migration validée — cf. cutover plan.
-    // Garde l'app prod parents fonctionnelle pendant la transition.
+    // ════════════ BACKWARD COMPAT ROOT (actif jusqu'à Phase 5) ════════════
+    //
+    // Lecture publique uniquement pour les paths utilisés par les clients QR
+    // (clients arrivent sans auth, signInAnonymously asynchrone, peut ne pas
+    // être prêt au premier read).
     match /config/{docId} {
-      allow read: if docId != 'apikeys';
-      allow read: if docId == 'apikeys' && isAuth();
+      // PUBLIC : menu (clients QR le voient), tables (plan de salle UI),
+      // images_<productId> (vignettes du menu).
+      allow read: if docId == 'menu'
+                  || docId == 'tables'
+                  || docId.matches('images_.*');
+      // AUTH (apikeys, backup, backup_*, autres) : signInAnonymously rend
+      // isAuth() vrai côté caisse/cuisine/serveur. Empêche le scraping pur
+      // sans même ouvrir le client.
+      // Note Phase 5 : apikeys devra être déplacé hors Firestore (env vars
+      // Functions) ou restreint via custom claims admin.
+      allow read: if isAuth();
+      // Écriture : isAuth() (RBAC root pas encore en place).
       allow write: if isAuth();
     }
+
+    // TABLES root : pas utilisées en lecture par les clients QR (le plan
+    // de salle vient de config/tables). Read auth uniquement.
     match /tables/{id} {
-      allow read: if true;
-      allow write: if isAuth();
+      allow read, write: if isAuth();
     }
+
+    // ORDERS : durcissement majeur. Les clients ne lisent JAMAIS /orders
+    // directement — ils voient leur statut via le QR /tickets/{id} qui
+    // expose seulement ce qui doit l'être (ticket lisible publiquement).
     match /orders/{id} {
-      allow read: if true;
+      allow read: if isAuth();
       allow create, update: if isAuth();
       allow delete: if isAuth();
     }
+
+    // PAYMENTS : auth uniquement (inchangé). Données financières sensibles.
     match /payments/{id} {
       allow read, write: if isAuth();
     }
 
-    // Tickets publics (lien QR partagé au client) :
-    // read public (le client scanne sans auth), write auth uniquement (caisse)
+    // TICKETS publics (lien QR partagé au client) :
+    // read public (le client scanne sans auth), write auth uniquement (caisse).
+    // Ne contient PAS de données client identifiables — seulement items + total.
     match /tickets/{id} {
       allow read: if true;
       allow create, update: if isAuth();

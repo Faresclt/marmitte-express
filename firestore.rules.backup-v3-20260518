@@ -1,0 +1,111 @@
+// firestore.rules.v3 — Multi-tenant strict (Phase 3)
+//
+// Activation après migration des données root → restaurants/marmitte-express/
+// Cf. docs/MIGRATION-MULTITENANT-PLAN.md
+//
+// Backward compat root active jusqu'au 2026-05-15 puis à supprimer.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ════════════ HELPERS ════════════
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isResto(slug) {
+      return isAuth()
+        && exists(/databases/$(database)/documents/restaurants/$(slug)/users/$(request.auth.uid));
+    }
+    function role(slug) {
+      return get(/databases/$(database)/documents/restaurants/$(slug)/users/$(request.auth.uid)).data.role;
+    }
+    function isAdmin(slug) {
+      return isResto(slug) && role(slug) == 'admin';
+    }
+
+    // ════════════ MULTI-TENANT (cible) ════════════
+    match /restaurants/{slug} {
+      allow read: if isResto(slug);
+      allow write: if isAdmin(slug);
+
+      // Menu public en lecture (clients QR sans auth)
+      match /config/menu {
+        allow read: if true;
+        allow write: if isAdmin(slug);
+      }
+
+      // Autres configs : auth resto requise
+      match /config/{docId} {
+        allow read: if isResto(slug);
+        allow write: if isAdmin(slug);
+      }
+
+      // Tables : tous les staff resto peuvent lire/écrire
+      match /tables/{tableId} {
+        allow read: if isResto(slug);
+        allow write: if isResto(slug);
+      }
+
+      // Commandes : staff peut créer/maj, admin peut supprimer
+      match /orders/{orderId} {
+        allow read: if isResto(slug);
+        allow create, update: if isResto(slug);
+        allow delete: if isAdmin(slug);
+      }
+
+      // Paiements : staff crée, admin gère
+      match /payments/{paymentId} {
+        allow read: if isResto(slug);
+        allow create: if isResto(slug);
+        allow update, delete: if isAdmin(slug);
+      }
+
+      // Users (rôles) : admin uniquement
+      match /users/{uid} {
+        allow read: if isResto(slug);
+        allow write: if isAdmin(slug);
+      }
+
+      // Storage refs (images IA Phase 4)
+      match /images/{productId}/{document=**} {
+        allow read: if true; // images du menu publiques
+        allow write: if isAdmin(slug);
+      }
+    }
+
+    // ════════════ BACKWARD COMPAT ROOT (transition) ════════════
+    // Suppression J+7 après migration validée — cf. cutover plan.
+    // Garde l'app prod parents fonctionnelle pendant la transition.
+    match /config/{docId} {
+      allow read: if docId != 'apikeys';
+      allow read: if docId == 'apikeys' && isAuth();
+      allow write: if isAuth();
+    }
+    match /tables/{id} {
+      allow read: if true;
+      allow write: if isAuth();
+    }
+    match /orders/{id} {
+      allow read: if true;
+      allow create, update: if isAuth();
+      allow delete: if isAuth();
+    }
+    match /payments/{id} {
+      allow read, write: if isAuth();
+    }
+
+    // Tickets publics (lien QR partagé au client) :
+    // read public (le client scanne sans auth), write auth uniquement (caisse)
+    match /tickets/{id} {
+      allow read: if true;
+      allow create, update: if isAuth();
+      allow delete: if isAuth();
+    }
+
+    // Tout le reste bloqué
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
