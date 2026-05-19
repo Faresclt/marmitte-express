@@ -25,10 +25,12 @@ onSnapshot(doc(db,'config','menu'), snap => {
     return;
   }
   const data=snap.data();
-  // Branding cross-device
+  // Branding cross-device (validation stricte anti-CSS-injection sur accent)
   const b = data.branding || {};
-  if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
-  if(b.name) document.title = b.name + ' — QR Codes';
+  if(b.accent && /^#[0-9a-fA-F]{3,8}$/.test(b.accent)){
+    document.documentElement.style.setProperty('--accent', b.accent);
+  }
+  if(b.name) document.title = String(b.name).slice(0, 80) + ' — QR Codes';
   const layout=data.salleLayout||[];
   const tables=layout.filter(e=>e.type==='table-round'||e.type==='table-rect');
   if(!tables.length){
@@ -37,27 +39,40 @@ onSnapshot(doc(db,'config','menu'), snap => {
   }
   document.getElementById('status').textContent='✅ '+tables.length+' tables trouvées — QR codes générés automatiquement';
   document.getElementById('table-count').textContent=tables.length+' tables';
-  
+
   // Detect base URL
   const base=window.location.href.replace(/qrcodes\.html.*/,'')+'client.html';
-  
+
   const grid=document.getElementById('qr-grid');
   grid.innerHTML='';
   tables.sort((a,b)=>(parseInt(a.number)||0)-(parseInt(b.number)||0));
   tables.forEach(t=>{
-    const num=t.number||'?';
-    const url=base+'?table='+num+'&id='+t.id;
-    const card=document.createElement('div');
-    card.className='qr-card';
-    card.innerHTML=`
-      <div class="qr-num">TABLE ${num}</div>
-      <div class="qr-box" id="qr-${t.id}"></div>
-      <div class="qr-url">${url}</div>
-    `;
+    // Sanitize : num doit être numérique/alphanum, id doit matcher [\w-]+ uniquement.
+    // config/menu est writable par tout user auth → un attaquant pourrait
+    // pousser `number:'<img src=x onerror=...>'` pour XSS sur l'admin.
+    const num = String(t.number || '?').replace(/[^A-Za-z0-9 #_-]/g, '').slice(0, 16) || '?';
+    const safeId = String(t.id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+    if(!safeId) return; // id obligatoire et safe
+    const url = base + '?table=' + encodeURIComponent(num) + '&id=' + encodeURIComponent(safeId);
+
+    const card = document.createElement('div');
+    card.className = 'qr-card';
+    // Construction DOM par createElement + textContent (jamais innerHTML
+    // sur des valeurs Firestore qui peuvent être contrôlées par un user auth).
+    const divNum = document.createElement('div');
+    divNum.className = 'qr-num';
+    divNum.textContent = 'TABLE ' + num;
+    const divBox = document.createElement('div');
+    divBox.className = 'qr-box';
+    divBox.id = 'qr-' + safeId;
+    const divUrl = document.createElement('div');
+    divUrl.className = 'qr-url';
+    divUrl.textContent = url;
+    card.append(divNum, divBox, divUrl);
     grid.appendChild(card);
-    // Generate QR
+
     setTimeout(()=>{
-      new QRCode(document.getElementById('qr-'+t.id),{text:url,width:180,height:180,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+      new QRCode(document.getElementById('qr-'+safeId),{text:url,width:180,height:180,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     },50);
   });
 });

@@ -85,7 +85,14 @@ let stats = { copied: 0, skipped: 0, errors: 0 };
 function log(msg, type = 'info') {
   const el = document.getElementById('log');
   const ts = new Date().toISOString().slice(11, 19);
-  el.innerHTML += `<span class="${type}">[${ts}] ${msg}</span>\n`;
+  // type whitelist (sert de CSS class). msg peut venir d'erreurs Firebase ou
+  // de noms de docs contrôlés par data — toujours via textContent.
+  const safeType = ['info','warn','error','ok'].includes(type) ? type : 'info';
+  const span = document.createElement('span');
+  span.className = safeType;
+  span.textContent = '[' + ts + '] ' + String(msg);
+  el.appendChild(span);
+  el.appendChild(document.createTextNode('\n'));
   el.scrollTop = el.scrollHeight;
 }
 

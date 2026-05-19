@@ -190,7 +190,17 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
 </div><!-- /container -->
 
 <script type="module">
-import { db, doc, onSnapshot } from './assets/js/firebase-sync.js';
+import { db, doc, onSnapshot, escHtml } from './assets/js/firebase-sync.js';
+
+// Whitelist d'URL safe pour <img src>. Bloque javascript:, data:text/html, etc.
+// Accepte uniquement http(s):// et data:image/(png|jpe?g|webp|gif|avif|svg+xml ⛔)
+function safeImgUrl(u) {
+  if (!u || typeof u !== 'string') return '';
+  const t = u.trim();
+  if (/^https?:\/\//i.test(t)) return t;
+  if (/^data:image\/(png|jpe?g|webp|gif|avif|heic|heif);/i.test(t)) return t;
+  return ''; // tout le reste rejeté (data:text/html, javascript:, file:, vbscript:, etc.)
+}
 
 // ── Branding cross-device ──
 onSnapshot(doc(db, 'config', 'menu'), snap => {
@@ -305,17 +315,26 @@ window.clearSelect = function() {
 function renderGrid() {
   const grid = document.getElementById('img-grid');
   let ok=0, miss=0, gen=0;
+  // PRODUCTS vient de config/menu (writable par tout user auth via Firebase).
+  // Un attaquant pourrait pousser name/cat/imgUrl avec du HTML pour XSS stocké
+  // sur l'admin qui ouvre cette page. On échappe TOUT et on whitelist l'URL img.
   grid.innerHTML = PRODUCTS.map(p => {
-    const img = p.imgUrl || getImg(p.id) || getImg(p.name) || importedImages[p.id];
-    const isGen = importedImages[p.id] && importedImages[p.id].startsWith('data:image');
+    const rawImg = p.imgUrl || getImg(p.id) || getImg(p.name) || importedImages[p.id];
+    const img = safeImgUrl(rawImg);
     if (img) ok++; else miss++;
     const catEmoji = {boissons:'🥤',bieres:'🍺',vins:'🍷',entrees:'🥗',plats:'🍽️',salades:'🥬',desserts:'🍮'}[p.cat]||'🍴';
     const checked = selectedIds.has(p.id);
-    return `<div class="img-card${checked?' selected':''}" id="card-${p.id}" onclick="openImgPreview('${p.id}')" style="cursor:pointer">
-      <div class="check-box" onclick="toggleSelect('${p.id}', event)">${checked ? '✓' : ''}</div>
-      ${img ? '<img src="'+img+'" loading="lazy">' : '<div class="img-ph">'+catEmoji+'</div>'}
+    // p.id doit être strictement alphanum+_- pour pouvoir aller dans onclick='...'.
+    // Si non conforme, on skip la card (ne casse pas le render).
+    const safeId = String(p.id || '').replace(/[^A-Za-z0-9_-]/g, '');
+    if (!safeId) return '';
+    const safeName = escHtml(p.name);
+    const safeCat  = escHtml(p.cat);
+    return `<div class="img-card${checked?' selected':''}" id="card-${safeId}" onclick="openImgPreview('${safeId}')" style="cursor:pointer">
+      <div class="check-box" onclick="toggleSelect('${safeId}', event)">${checked ? '✓' : ''}</div>
+      ${img ? '<img src="'+escHtml(img)+'" loading="lazy">' : '<div class="img-ph">'+catEmoji+'</div>'}
       <div class="status ${img?'status-ok':'status-miss'}">${img?'✓':'!'}</div>
-      <div class="label">${p.name}<small>${p.cat}</small></div>
+      <div class="label">${safeName}<small>${safeCat}</small></div>
     </div>`;
   }).join('');
   document.getElementById('stat-ok').textContent = ok;
