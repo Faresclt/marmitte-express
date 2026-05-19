@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://generativelanguage.googleapis.com https://*.workers.dev https://*.pages.dev https://text.pollinations.ai https://image.pollinations.ai">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://*.workers.dev https://*.pages.dev https://text.pollinations.ai https://image.pollinations.ai">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>CaisseApp — POS</title>
 <meta name="theme-color" content="#f5a623">
@@ -3876,18 +3876,6 @@ function applySettingsForm(){
   const lt=document.getElementById('s-legal-tvaintra'); if(lt) lt.value=lg.tvaIntra||'';
   const lp=document.getElementById('s-legal-ape');      if(lp) lp.value=lg.ape||'';
   updateLegalStatus();
-  // Gemini key status (les inputs peuvent ne pas exister dans certaines builds)
-  const gk = (typeof GEMINI_KEY_PDJ !== 'undefined') ? GEMINI_KEY_PDJ : '';
-  const gkStatus = document.getElementById('gemini-key-status');
-  const gkInput  = document.getElementById('s-gemini-key');
-  if(gkStatus){
-    if(gk && gk.length > 10){
-      if(gkInput) gkInput.value = gk;
-      gkStatus.innerHTML = '<span style="color:#22c97a">&#10003; Clé configurée ('+gk.slice(0,8)+'...'+gk.slice(-4)+')</span>';
-    } else {
-      gkStatus.innerHTML = '<span style="color:#e84040">&#10007; Aucune clé configurée — les fonctions IA sont désactivées</span>';
-    }
-  }
 }
 function saveSettings(){
   settings.showImg=document.getElementById('s-showimg').checked;
@@ -6371,35 +6359,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 // ════════════════════════════════════════════════
 // ⭐ PLAT DU JOUR — Modal Admin + Popup quotidienne
 // ════════════════════════════════════════════════
-// Clé Gemini sécurisée: stockée dans Firebase (config/apikeys) ou localStorage admin
-// JAMAIS en dur dans le code source pour éviter l'exposition sur GitHub
-let GEMINI_KEY_PDJ = LS.get('gemini_api_key', '');
-
-// Charge la clé depuis Firebase si disponible
-(function loadGeminiKey(){
-  if(window.FB){
-    window.FB.listen('config','apikeys', data => {
-      if(data && data.geminiKey){
-        GEMINI_KEY_PDJ = data.geminiKey;
-        LS.set('gemini_api_key', data.geminiKey);
-      }
-    });
-  }
-})();
-
-// Sauvegarde la clé dans Firebase + localStorage
-function saveGeminiKey(key){
-  if(!key || !/^AIzaSy[A-Za-z0-9_-]{28,40}$/.test(key)) return toast('Format de clé API invalide','r');
-  GEMINI_KEY_PDJ = key;
-  LS.set('gemini_api_key', key);
-  if(window.FB){
-    window.FB.set('config','apikeys',{geminiKey:key, updatedAt: window.FB.ts()})
-      .then(()=>toast('✓ Clé API Gemini sauvegardée (Firebase + local)','g'))
-      .catch(()=>toast('Clé sauvée localement, erreur Firebase','o'));
-  } else {
-    toast('✓ Clé API Gemini sauvegardée localement','g');
-  }
-}
+// Génération d'image via Pollinations (text→image gratuit, aucune clé API requise)
 
 let pdjImgData = null;
 

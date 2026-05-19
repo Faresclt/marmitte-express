@@ -98,14 +98,11 @@ service cloud.firestore {
       allow read: if docId == 'menu'
                   || docId == 'tables'
                   || docId.matches('images_.*');
-      // AUTH (apikeys, backup, backup_*, autres) : signInAnonymously rend
-      // isAuth() vrai côté caisse/cuisine/serveur. Empêche le scraping pur
-      // sans même ouvrir le client.
-      // Note Phase 5 : apikeys devra être déplacé hors Firestore (env vars
-      // Functions) ou restreint via custom claims admin.
-      allow read: if isAuth();
-      // Écriture : isAuth() (RBAC root pas encore en place).
-      allow write: if isAuth();
+      // BLOQUÉ TOTALEMENT : apikeys est une collection morte (Gemini retiré
+      // du runtime en v68, voir commit "cleanup Gemini"). Aucune lecture ou
+      // écriture ne doit être possible. Le doc résiduel en prod doit être
+      // supprimé manuellement via Firebase Console.
+      allow read, write: if docId != 'apikeys' && isAuth();
     }
 
     // TABLES root : pas utilisées en lecture par les clients QR (le plan
