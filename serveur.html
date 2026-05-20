@@ -80,6 +80,7 @@ let tableId = params.get('id') || (tableNum ? 't'+tableNum : null);
 let menu = null;
 let cart = [];
 let productImages = {};
+let occupiedTables = new Set();
 
 // Update page title and table display
 function updateTableDisplay(){
@@ -117,17 +118,24 @@ function showTablePicker(){
     const numJs = escJs(el.number || '');
     const numHtml = escHtml(el.number || '');
     const seats = Number(el.seats) || 0;
+    // Occupée = au moins une commande active (pending/preparing/ready) sur la table.
+    const occ = isTable && (occupiedTables.has(el.id) || occupiedTables.has(String(el.number)));
+    const tCol = occ ? '#e84040' : '#22c97a';
+    const tBg = occ ? 'rgba(232,64,64,.13)' : 'rgba(34,201,122,.1)';
+    const tBgHov = occ ? 'rgba(232,64,64,.24)' : 'rgba(245,166,35,.15)';
+    const tLabel = occ ? 'Occupée' : seats+' cvts';
+    const tLabelCol = occ ? '#e84040' : 'var(--muted)';
     if(el.type==='table-round'){
       const sz=el.size||90;
-      elHtml+=`<div onclick="${isTable?`pickTable('${idJs}','${numJs}')`:''}" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz}px;height:${sz}px;border-radius:50%;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(245,166,35,.15)'" onmouseout="this.style.borderColor='#22c97a';this.style.background='rgba(34,201,122,.1)'">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;color:#22c97a;line-height:1">${numHtml}</div>
-        <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
+      elHtml+=`<div onclick="${isTable?`pickTable('${idJs}','${numJs}')`:''}" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz}px;height:${sz}px;border-radius:50%;background:${tBg};border:2.5px solid ${tCol};display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='${tBgHov}'" onmouseout="this.style.borderColor='${tCol}';this.style.background='${tBg}'">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;color:${tCol};line-height:1">${numHtml}</div>
+        <div style="font-size:10px;color:${tLabelCol};font-weight:600">${tLabel}</div>
       </div>`;
     } else if(el.type==='table-rect'){
       const sz=el.size||110;
-      elHtml+=`<div onclick="pickTable('${idJs}','${numJs}')" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz*1.4}px;height:${sz}px;border-radius:12px;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(245,166,35,.15)'" onmouseout="this.style.borderColor='#22c97a';this.style.background='rgba(34,201,122,.1)'">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:#22c97a;line-height:1">${numHtml}</div>
-        <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
+      elHtml+=`<div onclick="pickTable('${idJs}','${numJs}')" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz*1.4}px;height:${sz}px;border-radius:12px;background:${tBg};border:2.5px solid ${tCol};display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='${tBgHov}'" onmouseout="this.style.borderColor='${tCol}';this.style.background='${tBg}'">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:${tCol};line-height:1">${numHtml}</div>
+        <div style="font-size:10px;color:${tLabelCol};font-weight:600">${tLabel}</div>
       </div>`;
     } else if(el.type==='bar'){
       elHtml+=`<div style="position:absolute;left:${el.x}px;top:${el.y}px;width:${el.w||160}px;height:${el.h||55}px;border-radius:10px;background:rgba(74,158,255,.1);border:2px solid rgba(74,158,255,.4);display:flex;align-items:center;justify-content:center;gap:6px">
@@ -138,9 +146,13 @@ function showTablePicker(){
   
   picker.innerHTML = `
     <div style="width:100%;height:100%;display:flex;flex-direction:column">
-      <div style="padding:16px;text-align:center;flex-shrink:0">
+      <div style="padding:14px 16px 12px;text-align:center;flex-shrink:0">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px">🍽️ Choisir une <span style="color:var(--accent)">table</span></div>
         <div style="font-size:12px;color:var(--muted);margin-top:4px">Touchez une table pour prendre la commande</div>
+        <div style="display:flex;gap:16px;justify-content:center;margin-top:9px;font-size:11px;font-weight:600">
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:3px;background:#22c97a"></span>Libre</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:3px;background:#e84040"></span>Occupée</span>
+        </div>
       </div>
       <div id="plan-scroll" style="flex:1;overflow:hidden;-webkit-overflow-scrolling:touch;position:relative;min-height:0;touch-action:none">
         <div id="plan-wrapper" style="position:relative;width:100%;height:100%;overflow:hidden">
@@ -329,6 +341,8 @@ function unlockApp(){
   }
   // Start listening to orders for notifications
   startOrderNotifications();
+  // Suivi de l'occupation des tables (recolore le plan de salle)
+  startTableOccupancy();
 }
 window.unlockApp = unlockApp;
 
@@ -398,6 +412,34 @@ function startOrderNotifications(){
       if(!seenIds.has(id)) knownReadyOrders.delete(id);
     });
     _firstOrderSnapshot = false;
+  });
+}
+
+// Occupation des tables : le plan de salle ne montrait pas quelles tables
+// avaient déjà une commande en cours, le serveur ne pouvait pas voir où
+// prendre une nouvelle commande. On écoute les commandes actives et on
+// recolore le picker en conséquence.
+let occupancyListenerStarted = false;
+function startTableOccupancy(){
+  if(occupancyListenerStarted) return;
+  occupancyListenerStarted = true;
+  const activeOrdersQuery = query(
+    collection(db, 'orders'),
+    where('status', 'in', ['pending','preparing','ready'])
+  );
+  onSnapshot(activeOrdersQuery, snap => {
+    const occ = new Set();
+    snap.forEach(d => {
+      const o = d.data();
+      if(o.tableId) occ.add(o.tableId);
+      if(o.tableNum != null && o.tableNum !== '') occ.add(String(o.tableNum));
+    });
+    occupiedTables = occ;
+    // Recolore le plan si le serveur le regarde en ce moment
+    const picker = document.getElementById('table-picker');
+    if(picker && getComputedStyle(picker).display !== 'none'){
+      showTablePicker();
+    }
   });
 }
 
@@ -769,10 +811,15 @@ html{height:100%;height:100dvh}
 body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 
 /* Header */
-#app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0}
-.table-pill{background:var(--accent);color:#000;font-family:'Bebas Neue',sans-serif;font-size:18px;padding:4px 14px;border-radius:20px;letter-spacing:1px;flex-shrink:0}
-#resto-name{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px}
-.tagline{font-size:10px;color:var(--muted);font-weight:700}
+#app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:9px 10px;display:flex;align-items:center;gap:7px;flex-shrink:0}
+.hdr-back{display:flex;align-items:center;gap:4px;background:var(--card);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:13px;font-weight:700;padding:8px 11px;border-radius:20px;cursor:pointer;flex-shrink:0;white-space:nowrap}
+.hdr-back:active{background:rgba(245,166,35,.15);border-color:var(--accent)}
+.hdr-table{flex-shrink:0;background:var(--accent);color:#000;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:.5px;padding:5px 12px;border-radius:20px;white-space:nowrap}
+.hdr-resto{flex:1;display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0;text-decoration:none;color:inherit}
+.hdr-resto img{width:28px;height:28px;border-radius:7px;object-fit:cover;flex-shrink:0}
+.hdr-resto-txt{min-width:0;overflow:hidden;text-align:right}
+#resto-name{font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:.5px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tagline{font-size:9px;color:var(--muted);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* Main app */
 #app{flex:1;display:none;flex-direction:column;overflow:hidden;min-height:0}
@@ -828,10 +875,10 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 #cp-send:disabled{opacity:.4;cursor:not-allowed}
 
 /* Confirmation screen */
-#confirm-screen{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+#confirm-screen{position:fixed;inset:0;background:var(--bg);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px;padding:24px}
 .confirm-icon{font-size:72px;animation:pop .4s ease}
 @keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.2)}100%{transform:scale(1)}}
-.confirm-title{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:var(--green)}
+.confirm-title{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;color:var(--green);white-space:nowrap}
 .confirm-sub{font-size:14px;color:var(--muted);text-align:center;line-height:1.6}
 
 /* Options modal */
@@ -918,15 +965,15 @@ window.forgotPin = forgotPin;
 </script>
 
 <div id="app-header">
-  <a href="index.html" style="text-decoration:none">
-    <div class="table-pill" style="background:var(--blue)">🍽️ SERVEUR</div>
+  <button class="hdr-back" onclick="changeTable()" title="Changer de table">← Tables</button>
+  <div class="hdr-table">TABLE <span id="table-display">?</span></div>
+  <a href="index.html" class="hdr-resto" title="Quitter le mode serveur">
+    <img id="resto-logo" alt="" style="display:none">
+    <div class="hdr-resto-txt">
+      <div id="resto-name">La <span style="color:var(--accent)">Marmite</span> Express</div>
+      <div class="tagline">PRISE DE COMMANDE</div>
+    </div>
   </a>
-  <div class="table-pill" id="table-pill-num" onclick="changeTable()" style="cursor:pointer" title="Changer de table">TABLE <span id="table-display">?</span> ✎</div>
-  <img id="resto-logo" alt="" style="display:none;width:32px;height:32px;border-radius:7px;object-fit:cover;flex-shrink:0">
-  <div style="flex:1">
-    <div id="resto-name">La <span style="color:var(--accent)">Marmite</span> Express</div>
-    <div class="tagline">PRISE DE COMMANDE</div>
-  </div>
 </div>
 
 <script src="assets/js/brand-boot.js"></script>
@@ -987,7 +1034,7 @@ window.forgotPin = forgotPin;
 <div id="confirm-screen">
   <div class="confirm-icon">🎉</div>
   <div class="confirm-title">Commande envoyée !</div>
-  <div class="confirm-sub">Commande transmise à la caisse et la cuisine.<br>Table prête à servir.</div>
+  <div class="confirm-sub">Commande transmise à la cuisine et à la caisse.<br>Tu seras prévenu dès qu'elle est prête.</div>
 </div>
 
 <!-- PIN logic -->
