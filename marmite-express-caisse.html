@@ -1019,6 +1019,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <span class="iu-txt" id="pm-img-label">Ajouter une photo</span>
         <span class="iu-hint">JPG / PNG — max 15 Mo</span>
       </div>
+      <button type="button" id="pm-crop-btn" onclick="cropEditingProduct()" style="display:none;width:100%;height:34px;margin:-10px 0 14px;border-radius:var(--radius-sm);background:var(--card);color:var(--accent);border:1px solid var(--border);font-weight:700;font-size:12px;cursor:pointer">✂️ Recadrer la photo</button>
       <div class="form-group"><label class="form-label">Nom du produit *</label><input class="form-input" id="pm-name" placeholder="Ex: Burger Maison"></div>
       <div class="form-group"><label class="form-label">Description courte</label><textarea class="form-textarea" id="pm-sub" placeholder="Ingrédients, précisions…"></textarea></div>
       <div class="form-row">
@@ -1194,6 +1195,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <span style="font-size:11px;color:var(--muted)">Cliquer pour importer</span>
         </div>
         <div id="pdj-ia-img-status" style="font-size:11px;color:var(--muted);margin-top:6px;min-height:16px;text-align:center"></div>
+        <button type="button" id="pdj-crop-btn" onclick="cropPdjImage()" style="display:none;width:100%;height:32px;margin-top:6px;border-radius:var(--radius-sm);background:var(--card);color:var(--accent);border:1px solid var(--border);font-weight:700;font-size:11px;cursor:pointer">✂️ Recadrer la photo</button>
       </div>
     </div>
     <div class="modal-foot">
@@ -1217,6 +1219,31 @@ document.addEventListener('DOMContentLoaded', () => {
     <div class="modal-foot" style="gap:8px">
       <button class="mbtn mbtn-cancel" onclick="closePdjDaily()">Non, garder tel quel</button>
       <button class="mbtn mbtn-save" onclick="closePdjDaily();openPdjModal()">✏️ Modifier</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL RECADRAGE PHOTO ══ -->
+<div class="modal-overlay" id="crop-modal" style="z-index:700" onclick="if(event.target===this)closeCropModal()">
+  <div class="modal-box" style="max-width:380px">
+    <div class="modal-head">
+      <h3>✂️ Recadrer la photo</h3>
+      <div class="modal-close" onclick="closeCropModal()">✕</div>
+    </div>
+    <div class="modal-body" style="text-align:center">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">Glisse la photo et règle le zoom.<br>Le carré visible sera la vignette affichée côté serveur et client.</div>
+      <div id="crop-stage" style="position:relative;width:min(76vw,300px);height:min(76vw,300px);margin:0 auto;border-radius:var(--radius);overflow:hidden;background:#000;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none" onpointerdown="cropDragStart(event)" onpointermove="cropDragMove(event)" onpointerup="cropDragEnd(event)" onpointercancel="cropDragEnd(event)" onwheel="cropWheel(event)">
+        <img id="crop-img" alt="" draggable="false" style="position:absolute;left:0;top:0;max-width:none;pointer-events:none;-webkit-user-drag:none">
+        <div style="position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:16px">
+        <span style="font-size:13px;color:var(--muted)">🔍</span>
+        <input type="range" id="crop-zoom" min="1" max="3" step="0.01" value="1" oninput="cropSetZoom(parseFloat(this.value))" style="flex:1;accent-color:var(--accent)">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn mbtn-cancel" onclick="closeCropModal()">Annuler</button>
+      <button class="mbtn mbtn-save" onclick="applyCrop()">✓ Valider le cadrage</button>
     </div>
   </div>
 </div>
@@ -3558,6 +3585,7 @@ function openAddProduct(){
   document.getElementById('pm-img-preview').style.display='none';
   document.getElementById('pm-img-ph').style.display='block';
   document.getElementById('pm-img-label').style.display='block';
+  refreshProdCropBtn();
   buildProdCatSelect(adminProdCat);
   refreshSectionSuggestions();
   // Reset des sections repliables (toutes fermées pour un nouveau produit)
@@ -3601,6 +3629,7 @@ function openEditProduct(id){
   document.getElementById('pm-del-btn').style.display='block';
   if(img){ document.getElementById('pm-img-preview').src=img; document.getElementById('pm-img-preview').style.display='block'; document.getElementById('pm-img-ph').style.display='none'; document.getElementById('pm-img-label').style.display='none'; }
   else{ document.getElementById('pm-img-preview').style.display='none'; document.getElementById('pm-img-ph').style.display='block'; document.getElementById('pm-img-label').style.display='block'; }
+  refreshProdCropBtn();
   buildProdCatSelect(p.cat);
   refreshSectionSuggestions();
   // Reset sections repliables PUIS auto-expand celles avec contenu
@@ -3652,6 +3681,7 @@ function handleProdImg(e){
       document.getElementById('pm-img-preview').style.display='block';
       document.getElementById('pm-img-ph').style.display='none';
       document.getElementById('pm-img-label').style.display='none';
+      refreshProdCropBtn();
     }; img.src=ev.target.result;
   }; r.readAsDataURL(f);
 }
@@ -6469,11 +6499,13 @@ function pdjLoadProductImg() {
       prev.style.display = 'block';
       ph.style.display = 'none';
       pdjImgData = imgSrc;
+      refreshPdjCropBtn();
       return;
     }
   }
   prev.style.display = 'none';
   ph.style.display = '';
+  refreshPdjCropBtn();
 }
 
 function closePdjModal() {
@@ -6500,6 +6532,7 @@ function handlePdjImg(e) {
       prev.src = pdjImgData;
       prev.style.display = 'block';
       document.getElementById('pdj-img-ph').style.display = 'none';
+      refreshPdjCropBtn();
     };
     img.src = ev.target.result;
   };
@@ -6554,6 +6587,7 @@ async function generatePdjImage() {
     prev.src = pdjImgData;
     prev.style.display = 'block';
     document.getElementById('pdj-img-ph').style.display = 'none';
+    refreshPdjCropBtn();
     status.textContent = '✅ Photo générée (Pollinations) !';
     toast('Photo générée !', 'g');
   } catch (e) {
@@ -6609,6 +6643,144 @@ window.generatePdjDesc = generatePdjDesc;
 window.generatePdjImage = generatePdjImage;
 window.savePlatDuJour = savePlatDuJour;
 window.closePdjDaily = closePdjDaily;
+
+// ═══════════════════════════════════════════════════════════════
+//  RECADRAGE MANUEL DES PHOTOS
+//  Cadre carré = format des vignettes serveur & client (object-fit
+//  cover sur des boîtes carrées). L'utilisateur déplace/zoome la
+//  photo, on exporte le carré visible en JPEG.
+// ═══════════════════════════════════════════════════════════════
+const CROP_OUT = 720;            // côté du carré exporté (px)
+let _crop = null;                // état : {img, el, S, base, zoom, x, y, cb, drag}
+
+function refreshProdCropBtn(){
+  const b = document.getElementById('pm-crop-btn');
+  if(b) b.style.display = editingProdImg ? 'block' : 'none';
+}
+function refreshPdjCropBtn(){
+  const b = document.getElementById('pdj-crop-btn');
+  if(b) b.style.display = pdjImgData ? 'block' : 'none';
+}
+
+function cropEditingProduct(){
+  openCropModal(editingProdImg, url => {
+    editingProdImg = url;
+    const prev = document.getElementById('pm-img-preview');
+    prev.src = url; prev.style.display = 'block';
+    document.getElementById('pm-img-ph').style.display = 'none';
+    document.getElementById('pm-img-label').style.display = 'none';
+    toast('Photo recadrée', 'g');
+  });
+}
+function cropPdjImage(){
+  openCropModal(pdjImgData, url => {
+    pdjImgData = url;
+    const prev = document.getElementById('pdj-img-preview');
+    prev.src = url; prev.style.display = 'block';
+    document.getElementById('pdj-img-ph').style.display = 'none';
+    toast('Photo recadrée', 'g');
+  });
+}
+
+function openCropModal(src, cb){
+  if(!src){ toast('Ajoute d\'abord une photo', 'o'); return; }
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    if(!img.naturalWidth){ toast('Image illisible', 'r'); return; }
+    document.getElementById('crop-modal').classList.add('show');
+    const el = document.getElementById('crop-img');
+    el.src = src;
+    requestAnimationFrame(() => {
+      const stage = document.getElementById('crop-stage');
+      const S = stage.clientWidth || 280;
+      const base = Math.max(S / img.naturalWidth, S / img.naturalHeight);
+      _crop = { img, el, S, base, zoom: 1, x: 0, y: 0, cb, drag: null };
+      _crop.x = (S - img.naturalWidth * base) / 2;
+      _crop.y = (S - img.naturalHeight * base) / 2;
+      document.getElementById('crop-zoom').value = 1;
+      cropRender();
+    });
+  };
+  img.onerror = () => toast('Impossible de charger cette image', 'r');
+  img.src = src;
+}
+
+function closeCropModal(){
+  document.getElementById('crop-modal').classList.remove('show');
+  _crop = null;
+}
+
+function cropRender(){
+  const c = _crop; if(!c) return;
+  const dw = c.img.naturalWidth * c.base * c.zoom;
+  const dh = c.img.naturalHeight * c.base * c.zoom;
+  c.x = Math.min(0, Math.max(c.S - dw, c.x));   // l'image couvre toujours le cadre
+  c.y = Math.min(0, Math.max(c.S - dh, c.y));
+  c.el.style.width = dw + 'px';
+  c.el.style.height = dh + 'px';
+  c.el.style.transform = 'translate(' + c.x + 'px,' + c.y + 'px)';
+}
+
+function cropSetZoom(z){
+  const c = _crop; if(!c) return;
+  const nz = Math.max(1, Math.min(3, z || 1));
+  const r = nz / c.zoom;                        // zoom centré sur le cadre
+  c.x = c.S / 2 - (c.S / 2 - c.x) * r;
+  c.y = c.S / 2 - (c.S / 2 - c.y) * r;
+  c.zoom = nz;
+  cropRender();
+  const s = document.getElementById('crop-zoom');
+  if(s && parseFloat(s.value) !== nz) s.value = nz;
+}
+
+function cropWheel(e){
+  if(!_crop) return;
+  e.preventDefault();
+  cropSetZoom(_crop.zoom * (e.deltaY < 0 ? 1.1 : 0.9));
+}
+
+function cropDragStart(e){
+  const c = _crop; if(!c) return;
+  c.drag = { px: e.clientX, py: e.clientY, x: c.x, y: c.y };
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch(_){}
+  e.currentTarget.style.cursor = 'grabbing';
+}
+function cropDragMove(e){
+  const c = _crop; if(!c || !c.drag) return;
+  c.x = c.drag.x + (e.clientX - c.drag.px);
+  c.y = c.drag.y + (e.clientY - c.drag.py);
+  cropRender();
+}
+function cropDragEnd(e){
+  if(_crop) _crop.drag = null;
+  if(e && e.currentTarget) e.currentTarget.style.cursor = 'grab';
+}
+
+function applyCrop(){
+  const c = _crop; if(!c){ closeCropModal(); return; }
+  const sc = c.base * c.zoom;                   // image naturelle -> écran
+  const srcS = c.S / sc;                        // côté du carré, en px image
+  let srcX = -c.x / sc, srcY = -c.y / sc;
+  srcX = Math.max(0, Math.min(c.img.naturalWidth - srcS, srcX));
+  srcY = Math.max(0, Math.min(c.img.naturalHeight - srcS, srcY));
+  const cb = c.cb;
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = CROP_OUT; cv.height = CROP_OUT;
+    const ctx = cv.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(c.img, srcX, srcY, srcS, srcS, 0, 0, CROP_OUT, CROP_OUT);
+    const out = cv.toDataURL('image/jpeg', 0.85);
+    closeCropModal();
+    if(cb) cb(out);
+  } catch(err){
+    console.error('[crop]', err);
+    toast('Recadrage impossible (image protégée)', 'r');
+    closeCropModal();
+  }
+}
 
 // Déclenche popup quotidienne après chargement
 setTimeout(checkPdjDailyPopup, 2000);
