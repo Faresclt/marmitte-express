@@ -84,15 +84,14 @@ window.initFirebaseListeners = function(){
           changed = true;
         }
       });
-      // Tables présentes localement mais ABSENTES de Firebase = nettoyées →
-      // on les vide aussi localement pour ne pas garder un état fantôme.
-      Object.keys(tableData).forEach(tid => {
-        if(tid === window.currentTableId) return;
-        if(!data[tid] && tableData[tid] && (tableData[tid].ticket||[]).length){
-          tableData[tid] = { persons: [], ticket: [] };
-          changed = true;
-        }
-      });
+      // ⚠️ On ne vide PAS les tables absentes de la collection `tables`.
+      // Une table absente = sa synchro Firebase n'a pas (encore) abouti
+      // (règles, auth, réseau, ou ordre de chargement au démarrage). La vider
+      // ici détruirait une commande tout juste importée mais pas encore
+      // synchronisée : la table redevient "libre" à tort et la commande
+      // disparaît du plan de salle. Le cas légitime « table soldée sur un
+      // autre appareil » est déjà traité par la boucle ci-dessus — le doc
+      // `tables/{id}` existe alors avec un ticket vide, adopté localement.
       if(changed){
         try { window.LS.set('tableData', tableData); } catch(e){}
       }
