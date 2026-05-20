@@ -507,9 +507,13 @@ let pendingOptProduct = null;
 
 function addProduct(pid, price, name){
   const p = (menu.products||[]).find(x=>x.id===pid);
-  // Bloque l'ajout si produit épuisé (stock = 0)
-  // Pollution évitée côté cuisine : on ne fait pas attendre un client pour rien
-  if(p && p.stock !== undefined && p.stock <= 0){
+  // Bloque l'ajout UNIQUEMENT si le produit est explicitement épuisé (stock === 0).
+  // ⚠ La caisse sérialise stock:-1 pour les produits SANS gestion de stock
+  // (marmite-express-caisse.html : p.stock===undefined?-1:p.stock). Tester
+  // `<= 0` attrapait ce -1 sentinelle et bloquait l'ajout de TOUS les produits
+  // non gérés en stock. `=== 0` strict = cohérent avec l'affichage outOfStock
+  // et avec client.html.
+  if(p && p.stock === 0){
     if(window.showServeurNotif) {
       showServeurNotif('🚫 ' + name + ' est épuisé — informe le client');
     } else {

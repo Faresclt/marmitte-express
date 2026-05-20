@@ -4620,6 +4620,54 @@ if(!window._salleResizeAttached){
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Plan de salle — clôture des commandes Firebase
+// ─────────────────────────────────────────────────────────────────────
+// Problème historique : les orders /orders restaient en statut pending/
+// received pour toujours. tableStatus() marquait la table occupée tant
+// qu'un tel order existait, et le garde-fou _importedOrderIds est LOCAL
+// à chaque appareil → un autre téléphone voyait toutes les vieilles
+// commandes comme "non importées" → plan de salle entièrement occupé.
+//
+// Fix : à l'import d'un order dans une table, on pose un flag Firebase
+// `billedToTable:true` (visible par tous les appareils). tableStatus et
+// ordersForTable ignorent les orders facturés. Ceinture supplémentaire :
+// un order pending de plus de 6h est considéré comme oublié/test.
+
+// Marque un order comme facturé à sa table (flag cross-device).
+function markOrderBilled(orderId){
+  if(!orderId) return;
+  try {
+    const p = window.FB.update('orders', orderId, {
+      billedToTable: true,
+      billedAt: window.FB.ts()
+    });
+    if(p && typeof p.catch === 'function'){
+      p.catch(e => console.warn('[billed] échec MAJ '+orderId, e && (e.message||e)));
+    }
+  } catch(e){
+    console.warn('[billed] échec sync '+orderId, e && (e.message||e));
+  }
+}
+
+// Âge d'un order en ms, robuste aux formats de timestamp (Timestamp
+// Firestore, {seconds}, nombre epoch, ISO string, REST timestampValue).
+// Renvoie null si non déterminable → pas de filtre temporel pour cet order.
+function orderAgeMs(o){
+  const s = o && (o.sentAt || o.createdAt);
+  if(!s) return null;
+  let ms = null;
+  if(typeof s.toDate === 'function'){ try { ms = s.toDate().getTime(); } catch(e){} }
+  else if(typeof s.seconds === 'number'){ ms = s.seconds * 1000; }
+  else if(typeof s._seconds === 'number'){ ms = s._seconds * 1000; }
+  else if(typeof s === 'number'){ ms = s; }
+  else if(typeof s === 'string'){ const d = Date.parse(s); if(!isNaN(d)) ms = d; }
+  else if(s.timestampValue){ const d = Date.parse(s.timestampValue); if(!isNaN(d)) ms = d; }
+  if(ms === null || isNaN(ms)) return null;
+  return Date.now() - ms;
+}
+const ORDER_STALE_MS = 6 * 3600 * 1000; // 6h : au-delà, order pending = oublié
+
 function tableStatus(tid){
   // 1) État local : si la table a un état explicite (existe dans tableData),
   //    ce device fait foi pour SES propres modifications récentes.
@@ -4648,14 +4696,23 @@ function tableStatus(tid){
   if(fbT && fbT.status === 'occupied' && (fbT.total || 0) > 0 && (fbT.ticket||[]).length){
     return 'occupied';
   }
-  // 3) Filet : commande en attente non encore importée
+  // 3) Filet : commande en attente non encore facturée à la table.
+  //    Une table n'est "occupée" via ce filet que si un order pending/
+  //    received existe ET n'a pas été facturé (billedToTable, cross-device)
+  //    ET n'a pas été importé localement ET n'est pas trop vieux (>6h).
+  //    Ces gardes évitent que les vieux orders pending jamais clôturés
+  //    polluent le plan de salle en permanence.
   const orders = window.fbOrders || {};
-  const hasUnimportedOrder = Object.values(orders).some(o =>
-    o && o.tableId === tid &&
-    (o.status === 'pending' || o.status === 'received') &&
-    !_importedOrderIds.has(o._id)
-  );
-  if(hasUnimportedOrder) return 'occupied';
+  const hasLiveOrder = Object.values(orders).some(o => {
+    if(!o || o.tableId !== tid) return false;
+    if(o.status !== 'pending' && o.status !== 'received') return false;
+    if(o.billedToTable) return false;              // déjà facturé (cross-device)
+    if(_importedOrderIds.has(o._id)) return false; // déjà importé (local)
+    const age = orderAgeMs(o);
+    if(age !== null && age > ORDER_STALE_MS) return false; // oublié/test
+    return true;
+  });
+  if(hasLiveOrder) return 'occupied';
   return 'free';
 }
 
@@ -4668,7 +4725,10 @@ function ordersForTable(tid){
   Object.values(orders).forEach(o => {
     if(!o || o.tableId !== tid) return;
     if(o.status !== 'pending' && o.status !== 'received') return;
+    if(o.billedToTable) return; // déjà facturé à la table (cross-device)
     if(_importedOrderIds.has(o._id)) return; // déjà importé, skip
+    const age = orderAgeMs(o);
+    if(age !== null && age > ORDER_STALE_MS) return; // order oublié/test
     (o.items || []).forEach(item => {
       out.push({
         rid: 'fb_'+o._id+'_'+(out.length),
@@ -4855,12 +4915,19 @@ function openTableService(tid){
       if(!tableData[tid]) tableData[tid] = {persons:[],ticket:[]};
       tableData[tid].ticket = [...fbItems];
       try { LS.set('tableData', tableData); } catch(e){}
-      // Tente de marquer les orders Firebase correspondants comme reçus
+      // Les items sont désormais dans la table → on facture les orders
+      // Firebase correspondants (billedToTable, cross-device) et on passe
+      // ceux encore 'pending' à 'received'. Un seul updateDoc combiné.
       const orders = window.fbOrders || {};
       Object.values(orders).forEach(o => {
-        if(o && o.tableId === tid && o.status === 'pending'){
-          try { window.FB.update('orders', o._id, {status: 'received'}); } catch(e){}
-        }
+        if(!o || o.tableId !== tid) return;
+        if(o.status !== 'pending' && o.status !== 'received') return;
+        const patch = { billedToTable: true, billedAt: window.FB.ts() };
+        if(o.status === 'pending') patch.status = 'received';
+        try {
+          const pr = window.FB.update('orders', o._id, patch);
+          if(pr && typeof pr.catch === 'function') pr.catch(()=>{});
+        } catch(e){}
       });
       console.log('[openTable] Fallback import: '+fbItems.length+' items depuis Firebase pour '+tid);
     }
@@ -5262,6 +5329,7 @@ function importOrderToTable(order){
     console.warn('[import] order '+order._id+' déjà présente dans tableData, skip');
     _importedOrderIds.add(order._id);
     _saveImportedIds();
+    markOrderBilled(order._id); // clôture cross-device (idempotent)
     return;
   }
   (order.items||[]).forEach(item=>{
@@ -5289,9 +5357,13 @@ function importOrderToTable(order){
   LS.set('tableData', tableData);
   syncTableToFirebase(tid);
   // Marque cette commande comme déjà importée pour ne pas la réimporter
+  // (Set local) ET pose le flag billedToTable dans Firebase pour que tous
+  // les autres appareils sachent que l'order est facturé → ne marquent
+  // plus la table occupée à tort.
   if(order._id){
     _importedOrderIds.add(order._id);
     _saveImportedIds();
+    markOrderBilled(order._id);
   }
   if(typeof renderSalle==='function') renderSalle();
   if(currentTableId===tid){

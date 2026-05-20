@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://cdnjs.cloudflare.com data: blob:">
+<title>Libérer les tables — La Marmite Express</title>
+<link rel="stylesheet" href="./assets/css/design-system.css">
+<style>
+  body { padding: 24px; max-width: 920px; margin: 0 auto; font-family: 'DM Sans', sans-serif; }
+  h1 { font-family: 'Bebas Neue', sans-serif; letter-spacing: 2px; color: var(--accent); margin-bottom: 4px; }
+  .sub { font-size: 13px; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  button { height: 44px; padding: 0 22px; border-radius: 10px; border: none; font-weight: 700; font-size: 14px; cursor: pointer; transition: opacity .15s; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-danger { background: var(--red); color: #fff; }
+  .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .empty { color: var(--muted); padding: 24px; text-align: center; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+  .tag-pending { background: rgba(245,166,35,.14); color: var(--accent); }
+  .tag-received { background: rgba(74,158,255,.14); color: #4a9eff; }
+  .tag-stale { background: rgba(232,64,64,.14); color: var(--red); }
+  #log { font-family: monospace; font-size: 12px; white-space: pre-wrap; color: var(--muted); margin-top: 12px; max-height: 200px; overflow-y: auto; }
+</style>
+</head>
+<body>
+  <h1>🧹 Libérer les tables</h1>
+  <p class="sub">
+    Cet outil clôture les commandes Firebase restées en attente
+    (<code>pending</code> / <code>received</code>) qui maintiennent des tables
+    occupées à tort dans le plan de salle.<br>
+    Les commandes sont passées en statut <code>served</code> — elles restent
+    consultables dans l'historique mais disparaissent du plan et de l'écran cuisine.
+  </p>
+
+  <div class="panel">
+    <div id="status" style="color:var(--muted);font-size:13px">Connexion à Firebase…</div>
+    <div id="list-wrap" style="margin-top:14px"></div>
+    <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn-danger" id="btn-close" disabled>Clôturer les commandes en attente</button>
+      <button class="btn-secondary" id="btn-refresh" disabled>↻ Rafraîchir</button>
+    </div>
+    <div id="log"></div>
+  </div>
+
+<script type="module">
+import { db, collection, getDocs, updateDoc, doc, serverTimestamp, authReady, escHtml }
+  from './assets/js/firebase-sync.js';
+
+const STALE_MS = 6 * 3600 * 1000;
+let pendingOrders = [];
+
+const $ = id => document.getElementById(id);
+function log(msg){
+  const el = $('log');
+  const span = document.createElement('div');
+  span.textContent = '[' + new Date().toLocaleTimeString() + '] ' + String(msg);
+  el.appendChild(span);
+  el.scrollTop = el.scrollHeight;
+}
+
+function orderAgeMs(o){
+  const s = o && (o.sentAt || o.createdAt);
+  if(!s) return null;
+  let ms = null;
+  if(typeof s.toDate === 'function'){ try { ms = s.toDate().getTime(); } catch(e){} }
+  else if(typeof s.seconds === 'number'){ ms = s.seconds * 1000; }
+  else if(typeof s._seconds === 'number'){ ms = s._seconds * 1000; }
+  else if(typeof s === 'number'){ ms = s; }
+  else if(typeof s === 'string'){ const d = Date.parse(s); if(!isNaN(d)) ms = d; }
+  if(ms === null || isNaN(ms)) return null;
+  return Date.now() - ms;
+}
+function ageLabel(ms){
+  if(ms === null) return '—';
+  const h = Math.floor(ms / 3600000);
+  if(h < 1) return Math.floor(ms / 60000) + ' min';
+  if(h < 48) return h + ' h';
+  return Math.floor(h / 24) + ' j';
+}
+
+async function loadOrders(){
+  $('status').textContent = 'Lecture des commandes…';
+  $('btn-close').disabled = true;
+  $('btn-refresh').disabled = true;
+  pendingOrders = [];
+  try {
+    const snap = await getDocs(collection(db, 'orders'));
+    snap.forEach(d => {
+      const o = { _id: d.id, ...d.data() };
+      if(o.status === 'pending' || o.status === 'received'){
+        pendingOrders.push(o);
+      }
+    });
+  } catch(e){
+    $('status').textContent = '❌ Erreur de lecture : ' + (e.message || e);
+    log('Erreur getDocs : ' + (e.message || e));
+    $('btn-refresh').disabled = false;
+    return;
+  }
+  renderList();
+}
+
+function renderList(){
+  const wrap = $('list-wrap');
+  if(!pendingOrders.length){
+    $('status').textContent = '✅ Aucune commande en attente — le plan de salle est propre.';
+    wrap.innerHTML = '<div class="empty">Rien à clôturer.</div>';
+    $('btn-close').disabled = true;
+    $('btn-refresh').disabled = false;
+    return;
+  }
+  $('status').textContent = pendingOrders.length + ' commande(s) en attente bloquent le plan de salle.';
+  let rows = '';
+  pendingOrders
+    .sort((a,b) => (orderAgeMs(b)||0) - (orderAgeMs(a)||0))
+    .forEach(o => {
+      const age = orderAgeMs(o);
+      const stale = age !== null && age > STALE_MS;
+      const itemCount = (o.items || []).reduce((s,i) => s + (Number(i.qty)||0), 0);
+      const tag = stale ? 'tag-stale' : (o.status === 'pending' ? 'tag-pending' : 'tag-received');
+      rows += '<tr>'
+        + '<td>' + escHtml(o.tableNum || o.tableId || '?') + '</td>'
+        + '<td>' + itemCount + ' article(s)</td>'
+        + '<td><span class="tag ' + tag + '">' + escHtml(o.status) + '</span></td>'
+        + '<td>' + ageLabel(age) + (stale ? ' ⚠' : '') + '</td>'
+        + '<td style="color:var(--muted)">' + escHtml(o._id) + '</td>'
+        + '</tr>';
+    });
+  wrap.innerHTML = '<table><thead><tr><th>Table</th><th>Articles</th>'
+    + '<th>Statut</th><th>Âge</th><th>ID</th></tr></thead><tbody>'
+    + rows + '</tbody></table>';
+  $('btn-close').disabled = false;
+  $('btn-refresh').disabled = false;
+}
+
+async function closeAll(){
+  if(!pendingOrders.length) return;
+  if(!confirm('Clôturer ' + pendingOrders.length + ' commande(s) ?\n\n'
+    + 'Elles passeront en statut "served" et libéreront leurs tables. '
+    + 'Action irréversible (mais les commandes restent dans l\'historique).')) return;
+  $('btn-close').disabled = true;
+  $('btn-refresh').disabled = true;
+  let ok = 0, fail = 0;
+  for(const o of pendingOrders){
+    try {
+      await updateDoc(doc(db, 'orders', o._id), {
+        status: 'served',
+        billedToTable: true,
+        billedAt: serverTimestamp(),
+        closedByCleanup: true,
+        closedAt: serverTimestamp()
+      });
+      ok++;
+      log('✓ ' + (o.tableNum || o.tableId || o._id) + ' clôturée');
+    } catch(e){
+      fail++;
+      log('✗ ' + o._id + ' — ' + (e.message || e));
+    }
+  }
+  $('status').textContent = '✅ ' + ok + ' clôturée(s)' + (fail ? ', ' + fail + ' échec(s)' : '') + '.';
+  log('Terminé : ' + ok + ' OK, ' + fail + ' échec.');
+  await loadOrders();
+}
+
+$('btn-close').addEventListener('click', closeAll);
+$('btn-refresh').addEventListener('click', loadOrders);
+
+(async () => {
+  try {
+    await authReady;
+    log('Authentifié à Firebase.');
+    await loadOrders();
+  } catch(e){
+    $('status').textContent = '❌ Échec de connexion Firebase : ' + (e.message || e);
+    log('authReady error : ' + (e.message || e));
+  }
+})();
+</script>
+</body>
+</html>
