@@ -604,7 +604,8 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="admin-panel" id="panel-products">
         <div class="apanel-title">🍽️ Produits</div>
         <div class="apanel-sub">Gérez tous vos articles — cliquez sur une carte pour modifier</div>
-        <button onclick="openPdjModal()" style="height:44px;padding:0 20px;border-radius:var(--radius-sm);background:rgba(245,166,35,.12);color:var(--accent);border:1px solid rgba(245,166,35,.3);font-weight:700;font-size:13px;margin-bottom:12px;width:100%">⭐ Modifier le plat du jour</button>
+        <button onclick="openPdjModal()" style="height:44px;padding:0 20px;border-radius:var(--radius-sm);background:rgba(245,166,35,.12);color:var(--accent);border:1px solid rgba(245,166,35,.3);font-weight:700;font-size:13px;margin-bottom:8px;width:100%">⭐ Modifier le plat du jour</button>
+        <button onclick="resyncFromFirestore()" id="btn-resync" style="height:38px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(74,158,255,.1);color:var(--blue,#4a9eff);border:1px solid rgba(74,158,255,.25);font-weight:700;font-size:12px;margin-bottom:12px;width:100%">↻ Resynchroniser depuis le cloud (écrase les brouillons locaux)</button>
         <div class="cat-tab-list" id="prod-cat-tabs"></div>
         <div id="prod-list"></div>
         <button onclick="openAddProduct()" style="height:44px;padding:0 20px;border-radius:var(--radius-sm);background:rgba(34,201,122,.1);color:var(--green);border:1px solid rgba(34,201,122,.2);font-weight:700;font-size:13px;margin-top:4px">+ Nouveau produit</button>
@@ -3769,6 +3770,36 @@ async function saveProduct(){
 }
 function confirmDelProduct(id){ if(confirm('Supprimer ce produit ?')){ products=products.filter(p=>p.id!==id); saveAll(); renderProdList(); toast('Produit supprimé'); } }
 function deleteProduct(){ if(editingProdId) confirmDelProduct(editingProdId); closeProdModal(); }
+
+// ── Resync produits : Firestore (publié) devient source de vérité locale ──
+// Cas d'usage : un script externe ou un autre poste a modifié config/menu.
+// Le merge auto au boot ne couvre que les AJOUTS — ce bouton couvre les
+// modifications (prix, descriptions, allergènes...) en écrasant le brouillon local.
+function resyncFromFirestore(){
+  const pub = window.publishedMenu;
+  if(!pub || !Array.isArray(pub.products) || pub.products.length === 0){
+    toast('Aucune carte publiée trouvée dans le cloud', 'r');
+    return;
+  }
+  if(!confirm('Remplacer les produits locaux par la version cloud ?\n\n'
+    + pub.products.length + ' produits seront importés.\n'
+    + 'Les brouillons locaux NON publiés (produits désactivés, modifs en cours) seront perdus.')) return;
+  // Produits locaux absents du cloud = brouillons jamais publiés (active:false
+  // exclus du publish) → on les conserve pour ne pas perdre de travail.
+  const cloudIds = new Set(pub.products.map(p => p.id));
+  const draftsOnly = products.filter(p => !cloudIds.has(p.id));
+  products = pub.products.map(p => ({ ...p, active: p.active !== false })).concat(draftsOnly);
+  if(pub.cats && Array.isArray(pub.cats) && pub.cats.length){
+    // Merge cats cloud absentes en local (ne supprime pas les cats locales)
+    const localCatIds = new Set(cats.map(c => c.id));
+    pub.cats.forEach(c => { if(!localCatIds.has(c.id)) cats.push(c); });
+  }
+  saveAll();
+  renderProdList();
+  renderMenu();
+  toast('✓ ' + pub.products.length + ' produits resynchronisés depuis le cloud'
+    + (draftsOnly.length ? ' (' + draftsOnly.length + ' brouillons locaux conservés)' : ''), 'g');
+}
 
 // ── 🤖 Suggérer les allergènes via IA (Pollinations text, gratuit) ──
 // Inspecte le nom + description courte + description longue + garniture/sauce
