@@ -18,11 +18,25 @@
 
   // ── 1. Registration + update périodique ─────────────────────────
   navigator.serviceWorker.register('./sw.js').then(function(reg){
-    // Audit PWA #8 : update périodique pour tablette qui reste allumée 14h
-    // (sans recharger la page, le SW ne checkerait jamais une nouvelle version)
+    // Audit multi-device : 10 min (au lieu de 30) — un service dure ~2h, une
+    // tablette qui traîne 30 min sur une vieille version diverge des téléphones
+    // serveuses (état tables différent constaté en prod le 12/06).
     setInterval(function(){
       reg.update().catch(function(e){ console.warn('[SW] update fail:', e.message); });
-    }, 30 * 60 * 1000); // 30 min
+    }, 10 * 60 * 1000); // 10 min
+
+    // Check aussi à chaque retour de focus (tablette réveillée entre 2 services)
+    document.addEventListener('visibilitychange', function(){
+      if (document.visibilityState === 'visible'){
+        reg.update().catch(function(){});
+      } else if (document.visibilityState === 'hidden'){
+        // Appareil posé / app en arrière-plan : moment idéal pour appliquer
+        // une mise à jour en attente sans déranger personne.
+        if (window._swPendingReg && window._swPendingReg.waiting && !isBusy()){
+          try { window._swPendingReg.waiting.postMessage({ type: 'SKIP_WAITING' }); } catch(e){}
+        }
+      }
+    });
 
     // Audit PWA #2/#3 : prompt utilisateur quand nouvelle version dispo
     // Avant : skipWaiting au install + reload silencieux = panier perdu.
@@ -71,9 +85,11 @@
 
   // ── 4. Banner UI "Nouvelle version dispo" ───────────────────────
   function isBusy(){
-    // Encaissement actif : panier non-vide OU paiement en cours
+    // Activité en cours sur N'IMPORTE quelle page métier :
+    // caisse → ticket non vide / paiement ouvert ; serveur+client → panier non vide
     try {
       if (typeof window.ticket !== 'undefined' && Array.isArray(window.ticket) && window.ticket.length > 0) return true;
+      if (typeof window.cart !== 'undefined' && Array.isArray(window.cart) && window.cart.length > 0) return true;
       if (window._counterBusy) return true;
       // Si modal de paiement ouvert
       var pay = document.getElementById('pay-overlay');
@@ -89,26 +105,54 @@
       setTimeout(function(){ showUpdateBanner(reg); }, 30000);
       return;
     }
+    // Auto-update avec compte à rebours : en prod multi-device le banner passif
+    // était ignoré → les appareils divergeaient (PC vieille version vs tels à
+    // jour, états de tables différents). Maintenant : 20 s puis application
+    // automatique, annulable d'un tap si le moment est mal choisi.
     var banner = document.createElement('div');
     banner.id = 'sw-update-banner';
     banner.setAttribute('role', 'status');
     banner.setAttribute('aria-live', 'polite');
     banner.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:99999;background:#1e2030;border:1px solid #f5a623;border-radius:12px;padding:14px 18px;box-shadow:0 8px 32px rgba(0,0,0,.5);color:#fff;font-family:system-ui,sans-serif;font-size:14px;max-width:340px;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
     banner.innerHTML =
-      '<div style="flex:1;min-width:160px"><strong style="color:#f5a623">🔄 Mise à jour disponible</strong><div style="font-size:12px;opacity:.8;margin-top:2px">Recharge pour appliquer les correctifs.</div></div>' +
-      '<button type="button" id="sw-update-accept" style="background:#f5a623;color:#000;border:none;padding:8px 14px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px">Recharger</button>' +
+      '<div style="flex:1;min-width:160px"><strong style="color:#f5a623">🔄 Mise à jour disponible</strong><div style="font-size:12px;opacity:.8;margin-top:2px">Application automatique dans <span id="sw-countdown">20</span> s…</div></div>' +
+      '<button type="button" id="sw-update-accept" style="background:#f5a623;color:#000;border:none;padding:8px 14px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px">Maintenant</button>' +
       '<button type="button" id="sw-update-defer" style="background:transparent;color:#9ca3af;border:1px solid #374151;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:12px">Plus tard</button>';
     document.body.appendChild(banner);
 
-    document.getElementById('sw-update-accept').onclick = function(){
+    function applyUpdate(){
       if (reg && reg.waiting){
         reg.waiting.postMessage({ type: 'SKIP_WAITING' });
         // controllerchange handler va reload
       } else {
         window.location.reload();
       }
+    }
+
+    var remaining = 20;
+    var countdownTimer = setInterval(function(){
+      remaining--;
+      var el = document.getElementById('sw-countdown');
+      if (el) el.textContent = remaining;
+      // Quelqu'un a commencé une saisie pendant le compte à rebours → on annule
+      if (isBusy()){
+        clearInterval(countdownTimer);
+        banner.remove();
+        setTimeout(function(){ showUpdateBanner(reg); }, 60000);
+        return;
+      }
+      if (remaining <= 0){
+        clearInterval(countdownTimer);
+        applyUpdate();
+      }
+    }, 1000);
+
+    document.getElementById('sw-update-accept').onclick = function(){
+      clearInterval(countdownTimer);
+      applyUpdate();
     };
     document.getElementById('sw-update-defer').onclick = function(){
+      clearInterval(countdownTimer);
       banner.remove();
       // Re-prompt dans 5 min
       setTimeout(function(){ showUpdateBanner(reg); }, 5 * 60 * 1000);
