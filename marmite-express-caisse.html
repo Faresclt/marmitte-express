@@ -76,11 +76,18 @@ window.initFirebaseListeners = function(){
         // les saisies non encore sync).
         if(tid === window.currentTableId) return;
         const localT = tableData[tid];
-        const fbTicket = fbT.ticket || [];
+        // Garde anti-fantôme : doc Firebase pas touché depuis >12h avec un
+        // ticket = service jamais clos → on adopte un état VIDE, pas le vieux
+        // ticket (sinon chaque device ré-importe le fantôme en localStorage).
+        const fbMs = fbT.updatedAt && (fbT.updatedAt.toMillis ? fbT.updatedAt.toMillis()
+                     : (fbT.updatedAt.seconds ? fbT.updatedAt.seconds * 1000 : null));
+        const isStale = fbMs !== null && fbMs !== undefined && (Date.now() - fbMs) > 12 * 3600 * 1000;
+        const fbTicket = isStale ? [] : (fbT.ticket || []);
+        const fbPersons = isStale ? [] : (fbT.persons || []);
         const localTicket = (localT && localT.ticket) || [];
         // Si Firebase a un état différent (par contenu), on l'adopte localement.
         if(JSON.stringify(fbTicket) !== JSON.stringify(localTicket)){
-          tableData[tid] = { persons: fbT.persons || [], ticket: fbTicket };
+          tableData[tid] = { persons: fbPersons, ticket: fbTicket };
           changed = true;
         }
       });
@@ -4753,9 +4760,15 @@ function tableStatus(tid){
   // 2) Pas d'état local pour cette table → consulter Firebase
   //    Source de vérité cross-device : si un autre iPhone/iPad a ouvert la
   //    table, elle apparaît occupée chez tout le monde.
+  //    Garde anti-fantôme : une table "occupied" dont le dernier updatedAt
+  //    remonte à >12h est un service jamais clos (cas réel : t17 du 19 mai
+  //    restée occupée 3 semaines) → traitée comme libre à l'affichage.
   const fbT = (window.fbTables || {})[tid];
   if(fbT && fbT.status === 'occupied' && (fbT.total || 0) > 0 && (fbT.ticket||[]).length){
-    return 'occupied';
+    const fbMs = fbT.updatedAt && (fbT.updatedAt.toMillis ? fbT.updatedAt.toMillis()
+                 : (fbT.updatedAt.seconds ? fbT.updatedAt.seconds * 1000 : null));
+    const isStale = fbMs !== null && fbMs !== undefined && (Date.now() - fbMs) > 12 * 3600 * 1000;
+    if(!isStale) return 'occupied';
   }
   // 3) Filet : commande en attente non encore facturée à la table.
   //    Une table n'est "occupée" via ce filet que si un order pending/

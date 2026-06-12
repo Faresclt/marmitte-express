@@ -7,7 +7,7 @@
 //  - HTML pages dans ASSETS + stale-while-revalidate → cold-boot offline OK
 //  - Timeout 3s sur fetch HTML + fallback cache si 5xx (déploiement en cours)
 //  - Origin check sur les messages (anti-injection)
-const CACHE_NAME = 'marmite-v76-auto-update';
+const CACHE_NAME = 'marmite-v77-anti-ghost-tables';
 
 // HTML pages CRITIQUES — cachées au install pour cold-boot offline.
 // Sans ça : tablette qui ouvre la caisse en wifi down matin = écran blanc.
