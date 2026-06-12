@@ -198,6 +198,35 @@ window.initFirebaseListeners = function(){
   // Listen to menu published by caisse (for waiter app)
   window.FB.listen('config', 'menu', (data) => {
     if(data && data.cats) window.publishedMenu = data;
+    // Merge Firestore products absents en local pour eviter perte au republish.
+    // Cas : un script externe (fix-menu-batch.mjs) a ajoute des items directement
+    // dans Firestore. Caisse local ne les connait pas → republish supprimerait.
+    if(data && Array.isArray(data.products) && typeof products !== 'undefined' && Array.isArray(products)){
+      const localIds = new Set(products.map(p => p.id));
+      const newOnes = data.products.filter(p => p.id && !localIds.has(p.id));
+      if(newOnes.length > 0){
+        newOnes.forEach(p => {
+          // Garde tous les champs Firestore + force active=true pour visibilite admin
+          products.push({ ...p, active: p.active !== false });
+        });
+        if(typeof saveAll === 'function') saveAll();
+        if(typeof renderProdList === 'function') renderProdList();
+        console.log('[caisse] +' + newOnes.length + ' produits sync depuis Firestore (' + newOnes.map(p => p.name).join(', ') + ')');
+      }
+    }
+    // Sync products manquants depuis Firestore vers liste locale caisse
+    // (evite que des items ajoutes par script externe soient perdus au prochain publish)
+    if(data && Array.isArray(data.products) && typeof products !== 'undefined'){
+      const localIds = new Set(products.map(p => p.id));
+      const newItems = data.products.filter(p => p.id && !localIds.has(p.id));
+      if(newItems.length > 0){
+        newItems.forEach(p => products.push({...p, active: p.active !== false}));
+        try { LS.set('products', products); } catch(e) {}
+        if(typeof renderProdList === 'function') renderProdList();
+        if(typeof renderMenu === 'function') renderMenu();
+        console.log('[caisse] sync Firestore: '+newItems.length+' nouveaux produits ajoutes a la liste locale');
+      }
+    }
     // Sync branding cross-device (logo, name, accent, emoji)
     if(data && data.branding){
       const b = data.branding;
