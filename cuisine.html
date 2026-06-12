@@ -276,7 +276,14 @@ onSnapshot(collection(db, 'orders'), snap => {
   snap.forEach(d => nw[d.id] = { ...d.data(), _id: d.id });
 
   const actS = ['pending','received','preparing'];
-  const nA = Object.values(nw).filter(o => actS.includes(o.status)).length;
+  // Compteur "EN COURS" cohérent avec le board : exclut les commandes fantômes >12h
+  const _staleMin = 12 * 60;
+  const _isFresh = o => {
+    if (!o.sentAt) return true;
+    const sent = o.sentAt.toDate ? o.sentAt.toDate() : new Date(o.sentAt.seconds * 1000);
+    return (Date.now() - sent.getTime()) / 60000 < _staleMin;
+  };
+  const nA = Object.values(nw).filter(o => actS.includes(o.status) && _isFresh(o)).length;
 
   // Audit cuisine #4 : détecter les nouvelles commandes via la PRÉSENCE de
   // _id absents de la version précédente, plutôt que via un delta de count.
@@ -393,9 +400,16 @@ function _renderAllImpl() {
   if (sig === _lastRenderSig) return;
   _lastRenderSig = sig;
 
-  const received = all.filter(o => o.status === 'received' || o.status === 'pending');
-  const preparing = all.filter(o => o.status === 'preparing');
-  const ready = all.filter(o => o.status === 'ready');
+  // Audit visuel : exclure les commandes fantômes (>12h) du board.
+  // Cas réel observé : une commande de test restée "pending" 22 jours affichait
+  // "32750 min" en colonne NOUVELLES. Une vraie commande ne survit jamais à un
+  // service — au-delà de 12h c'est un déchet de données, pas un plat à préparer.
+  // On ne supprime rien en base (traçabilité), on masque juste à l'écran.
+  const STALE_MIN = 12 * 60;
+  const fresh = all.filter(o => minsAgo(o) < STALE_MIN);
+  const received = fresh.filter(o => o.status === 'received' || o.status === 'pending');
+  const preparing = fresh.filter(o => o.status === 'preparing');
+  const ready = fresh.filter(o => o.status === 'ready');
 
   const receivedF = received.filter(o => filterCuisineItems(o.items||[]).length > 0);
   const preparingF = preparing.filter(o => filterCuisineItems(o.items||[]).length > 0);
