@@ -453,7 +453,8 @@ document.addEventListener('DOMContentLoaded', () => {
     <button class="pkb" onclick="pinPress('0')">0</button>
     <button class="pkb pkb-ok" onclick="pinPress('ok')">OK</button>
   </div>
-  <div style="margin-top:20px;font-size:11px;color:#3a3d4a">Code par défaut : 1234 — modifiable dans Admin → Paramètres</div>
+  <!-- Audit sécurité : hint "Code par défaut 1234" retiré de l'écran public.
+       Il révélait le PIN d'usine à n'importe quel visiteur de la page. -->
 </div>
 
 
