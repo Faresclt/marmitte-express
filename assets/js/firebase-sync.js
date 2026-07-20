@@ -110,6 +110,72 @@ export function currentUid() {
   return auth.currentUser?.uid || null;
 }
 
+// Token pour les fallbacks REST (orders-rest-poll.js) — rules v4 exigent auth.
+export async function getIdToken() {
+  try {
+    await authReady;
+    return auth.currentUser ? await auth.currentUser.getIdToken() : null;
+  } catch (_) {
+    return null;
+  }
+}
+try { window.__fbGetIdToken = getIdToken; } catch (_) {}
+
+// ═══════════════════════════════════════════════════════════
+// onSnapshot auth-aware — fix critique rules v4
+// ═══════════════════════════════════════════════════════════
+// /orders et /tables exigent request.auth != null depuis rules v4, mais les
+// pages attachent leurs listeners au chargement, souvent AVANT que
+// signInAnonymously (asynchrone) aboutisse. Un listener Firestore qui reçoit
+// permission-denied est TERMINÉ — jamais ré-abonné automatiquement. Symptôme
+// réel constaté : cuisine vide / plan de salle sans tables occupées selon
+// l'appareil (course d'auth gagnée ou perdue au boot).
+// Ce wrapper attend authReady avant d'attacher, puis ré-attache jusqu'à 5 fois
+// (2.5s d'intervalle) sur permission-denied — couvre aussi la propagation du
+// token juste après le sign-in.
+function authAwareOnSnapshot(target, ...cbs) {
+  let next = cbs[0];
+  let errCb = cbs[1];
+  // Forme observer { next, error }
+  if (next && typeof next === "object" && (typeof next.next === "function" || typeof next.error === "function")) {
+    errCb = next.error;
+    next = next.next;
+  }
+  // Forme options ({ includeMetadataChanges }, next, error)
+  else if (next && typeof next === "object" && typeof cbs[1] === "function") {
+    next = cbs[1];
+    errCb = cbs[2];
+  }
+  let unsub = null;
+  let stopped = false;
+  let retries = 0;
+  const attach = () => {
+    if (stopped) return;
+    unsub = onSnapshot(
+      target,
+      (snap) => {
+        retries = 0;
+        if (typeof next === "function") next(snap);
+      },
+      (err) => {
+        if (err && err.code === "permission-denied" && retries < 5) {
+          retries++;
+          console.warn("[firebase-sync] listener permission-denied — retry " + retries + "/5 dans 2.5s (auth pas encore propagée ?)");
+          setTimeout(attach, 2500);
+          return;
+        }
+        if (typeof errCb === "function") errCb(err);
+        else console.error("[firebase-sync] listener mort:", err && (err.code || err.message));
+      }
+    );
+  };
+  authReady.then(attach, attach);
+  return () => {
+    stopped = true;
+    if (unsub) { try { unsub(); } catch (_) {} }
+  };
+}
+
 // ═══════════════════════════════════════════════════════════
 // Multi-tenant scoping — Phase 3 cutover (DESACTIVE temporairement)
 // ═══════════════════════════════════════════════════════════
@@ -150,11 +216,12 @@ function scopedCollection(...args) {
   return collection(...args);
 }
 
-// Re-export : doc/collection sont scopés. Les pages appelantes ne changent pas.
+// Re-export : doc/collection sont scopés, onSnapshot est auth-aware.
+// Les pages appelantes ne changent pas.
 export {
   scopedDoc as doc,
   scopedCollection as collection,
-  onSnapshot,
+  authAwareOnSnapshot as onSnapshot,
   getDoc,
   getDocs,
   getDocFromServer,

@@ -205,33 +205,35 @@ window.initFirebaseListeners = function(){
   // Listen to menu published by caisse (for waiter app)
   window.FB.listen('config', 'menu', (data) => {
     if(data && data.cats) window.publishedMenu = data;
-    // Merge Firestore products absents en local pour eviter perte au republish.
-    // Cas : un script externe (fix-menu-batch.mjs) a ajoute des items directement
-    // dans Firestore. Caisse local ne les connait pas → republish supprimerait.
+    // Merge Firestore → local : produits absents + champs de fiche vides en local.
+    // Incident 12/06 : un appareil au localStorage périmé a republié le menu et
+    // écrasé 6 produits + 110 fiches détail (description/allergènes) côté cloud.
+    // Règle : un champ enrichi cloud n'est adopté que si le local est vide —
+    // une saisie admin locale n'est jamais écrasée.
     if(data && Array.isArray(data.products) && typeof products !== 'undefined' && Array.isArray(products)){
-      const localIds = new Set(products.map(p => p.id));
-      const newOnes = data.products.filter(p => p.id && !localIds.has(p.id));
-      if(newOnes.length > 0){
-        newOnes.forEach(p => {
-          // Garde tous les champs Firestore + force active=true pour visibilite admin
-          products.push({ ...p, active: p.active !== false });
-        });
+      const localById = new Map(products.map(p => [p.id, p]));
+      const newOnes = data.products.filter(p => p.id && !localById.has(p.id));
+      const ENRICH_STR = ['description','sub','garniture','imgUrl','section'];
+      const ENRICH_ARR = ['allergens','sauces'];
+      const ENRICH_BOOL = ['vegetarian','vegan','spicy','glutenFree'];
+      let enriched = 0;
+      data.products.forEach(cp => {
+        const lp = cp.id && localById.get(cp.id);
+        if(!lp) return;
+        ENRICH_STR.forEach(k => { if(cp[k] && !lp[k]){ lp[k] = cp[k]; enriched++; } });
+        ENRICH_ARR.forEach(k => { if(Array.isArray(cp[k]) && cp[k].length && (!Array.isArray(lp[k]) || !lp[k].length)){ lp[k] = cp[k]; enriched++; } });
+        ENRICH_BOOL.forEach(k => { if(cp[k] === true && !lp[k]){ lp[k] = true; enriched++; } });
+      });
+      newOnes.forEach(p => {
+        // Garde tous les champs Firestore + force active=true pour visibilite admin
+        products.push({ ...p, active: p.active !== false });
+      });
+      if(newOnes.length > 0 || enriched > 0){
         if(typeof saveAll === 'function') saveAll();
-        if(typeof renderProdList === 'function') renderProdList();
-        console.log('[caisse] +' + newOnes.length + ' produits sync depuis Firestore (' + newOnes.map(p => p.name).join(', ') + ')');
-      }
-    }
-    // Sync products manquants depuis Firestore vers liste locale caisse
-    // (evite que des items ajoutes par script externe soient perdus au prochain publish)
-    if(data && Array.isArray(data.products) && typeof products !== 'undefined'){
-      const localIds = new Set(products.map(p => p.id));
-      const newItems = data.products.filter(p => p.id && !localIds.has(p.id));
-      if(newItems.length > 0){
-        newItems.forEach(p => products.push({...p, active: p.active !== false}));
-        try { LS.set('products', products); } catch(e) {}
+        else { try { LS.set('products', products); } catch(e) {} }
         if(typeof renderProdList === 'function') renderProdList();
         if(typeof renderMenu === 'function') renderMenu();
-        console.log('[caisse] sync Firestore: '+newItems.length+' nouveaux produits ajoutes a la liste locale');
+        console.log('[caisse] sync menu cloud: +' + newOnes.length + ' produits, ' + enriched + ' champs de fiche récupérés');
       }
     }
     // Sync branding cross-device (logo, name, accent, emoji)

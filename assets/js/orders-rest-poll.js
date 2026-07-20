@@ -51,23 +51,51 @@
     return fields;
   }
 
+  // Rules v4 : /orders exige request.auth != null même en lecture. Le poll
+  // REST doit donc joindre le token Firebase Auth (posé par firebase-sync.js
+  // via window.__fbGetIdToken). Sans token (SDK bloqué → auth impossible),
+  // on skip proprement au lieu de spammer des 403.
+  var _noTokenWarned = false;
+  async function _authHeaders() {
+    try {
+      if (typeof window.__fbGetIdToken === 'function') {
+        var tok = await window.__fbGetIdToken();
+        if (tok) return { Authorization: 'Bearer ' + tok };
+      }
+    } catch (e) {}
+    return null;
+  }
+
   // Marque un order comme reçu via REST PATCH (requires auth, peut échouer
   // silencieusement). Si ça échoue, l'order reste pending et sera réimporté,
   // mais c'est idempotent côté tableData donc OK.
-  function markOrderReceived(orderId) {
+  async function markOrderReceived(orderId) {
+    var auth = await _authHeaders();
+    if (!auth) return;
     var url = BASE + '/orders/' + orderId + '?updateMask.fieldPaths=status';
+    var headers = { 'Content-Type': 'application/json' };
+    headers.Authorization = auth.Authorization;
     return fetch(url, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify({ fields: { status: { stringValue: 'received' } } })
     }).catch(function(e) { /* silent fail */ });
   }
 
   async function pollOrdersViaREST() {
     try {
+      var auth = await _authHeaders();
+      if (!auth) {
+        if (!_noTokenWarned) {
+          _noTokenWarned = true;
+          console.warn('[REST poll] pas de token auth (SDK indispo ?) — poll orders désactivé, rules v4 exigent auth');
+        }
+        return;
+      }
       var res = await fetch(BASE + '/orders?pageSize=200', {
         mode: 'cors',
-        credentials: 'omit'
+        credentials: 'omit',
+        headers: auth
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       var json = await res.json();
