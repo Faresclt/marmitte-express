@@ -205,6 +205,9 @@ window.initFirebaseListeners = function(){
   // Listen to menu published by caisse (for waiter app)
   window.FB.listen('config', 'menu', (data) => {
     if(data && data.cats) window.publishedMenu = data;
+    // Marqueur d'hydratation : publishMenu refuse de publier tant que le
+    // cloud n'a pas été vu une fois (anti-écrasement depuis un état vierge).
+    if(data) window._cloudMenuSeen = true;
     // Merge Firestore → local : produits absents + champs de fiche vides en local.
     // Incident 12/06 : un appareil au localStorage périmé a republié le menu et
     // écrasé 6 produits + 110 fiches détail (description/allergènes) côté cloud.
@@ -5528,6 +5531,15 @@ function showOrderNotif(order){
 // silent=true → pas de toast (utilisé par auto-publish)
 function publishMenu(silent){
   if(!window.FB){ if(!silent) toast('Firebase non connecté','r'); return; }
+  // Garde anti-écrasement (v79) : publier remplace TOUT le menu cloud par
+  // l'état local. Si cet appareil n'a pas encore reçu le menu cloud (boot
+  // frais, localStorage vierge/périmé), publier détruirait produits et
+  // fiches ajoutés ailleurs (incident 12/06). Silent → refus net ;
+  // manuel → confirmation explicite.
+  if(!window._cloudMenuSeen){
+    if(silent){ console.warn('[publish] refusé : menu cloud pas encore hydraté'); return; }
+    if(!confirm('⚠️ Le menu cloud n\'a pas encore été chargé sur cet appareil.\nPublier maintenant risque d\'écraser des produits ou fiches ajoutés depuis un autre appareil.\n\nPublier quand même ?')) return;
+  }
   if(!silent) toast('📤 Publication en cours…','o');
   
   const activeProducts = products.filter(p=>p.active);

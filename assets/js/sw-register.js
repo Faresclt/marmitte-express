@@ -170,10 +170,12 @@
       console.log('[SW] online detected, retry counter sync');
       try { window.syncReceiptCounterAtBoot(); } catch(e){}
     }
-    // Tente aussi de re-push les sales locales non-synchronisées
-    if (typeof window.publishMenu === 'function' && window.FB){
-      try { window.publishMenu(true); } catch(e){}
-    }
+    // SUPPRIMÉ (v79) : publishMenu(true) automatique ici. Il republiait le
+    // menu ENTIER depuis l'état local à chaque focus/online — un appareil au
+    // localStorage vierge ou périmé écrasait le menu cloud enrichi (incident
+    // 12/06 : 6 produits + fiches détail perdus, reproduit le 20/07 par des
+    // contextes de test vierges). La publication du menu est une action
+    // MANUELLE (bouton Publier), jamais un effet de bord.
   }
   window.addEventListener('online', retryPendingSync);
   document.addEventListener('visibilitychange', function(){
