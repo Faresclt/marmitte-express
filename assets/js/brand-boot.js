@@ -43,7 +43,7 @@
     var s = String(u == null ? '' : u).trim();
     if (/^https:\/\//i.test(s)) return s;
     if (/^data:image\/(png|jpe?g|webp|gif|avif);base64,/i.test(s)) return s;
-    if (/^\.{0,2}\/[^/]/.test(s)) return s;
+    if (!/^\/\//.test(s) && /^[a-z0-9_\-./%]+\.(png|jpe?g|webp|gif|avif)(\?[a-z0-9=&_.-]*)?$/i.test(s)) return s;
     return '';
   }
   function safeColor(c) {

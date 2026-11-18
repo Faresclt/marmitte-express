@@ -299,7 +299,9 @@ export function safeUrl(u) {
   if (!s) return "";
   if (/^https:\/\//i.test(s)) return s;
   if (/^data:image\/(png|jpe?g|webp|gif|avif);base64,[a-z0-9+/=\s]+$/i.test(s)) return s;
-  if (/^(\.{0,2}\/|[a-z0-9_-]+\.(png|jpe?g|webp|gif|avif)$)/i.test(s) && !/^\/\//.test(s)) return s;
+  // Chemin relatif du site (ex. « images/soda.png », « ./assets/x.webp ») :
+  // aucun schéma possible (pas de « : »), pas de « // » initial.
+  if (!/^\/\//.test(s) && /^[a-z0-9_\-./%]+\.(png|jpe?g|webp|gif|avif)(\?[a-z0-9=&_.-]*)?$/i.test(s)) return s;
   return "";
 }
 // Couleur CSS sûre (pour --accent etc.) : #hex uniquement.

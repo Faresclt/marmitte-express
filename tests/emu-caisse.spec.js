@@ -223,6 +223,12 @@ test('cartes 2026 appliquées une fois : prix, nouveautés, retraits, cafés, or
   expect(r.cafe).toEqual(['cafes', 1.9, 10]);
   expect(r.cafes.noCuisine).toBe(true);
   expect(r.firstDrinks).toEqual(['Sodas', 'Sirops', 'Jus']);
+  // Photos produits : chemins relatifs du site acceptés, schémas dangereux refusés
+  const urls = await page.evaluate(() => [safeImg('images/soda.png'), safeImg('./assets/x.webp'), safeImg('javascript:alert(1)'),
+    safeImg('//evil.example/x.png'), safeImg('data:image/svg+xml;base64,AAAA'), safeImg('https://firebasestorage.googleapis.com/x.jpg')]);
+  expect(urls).toEqual(['images/soda.png', './assets/x.webp', '', '', '', 'https://firebasestorage.googleapis.com/x.jpg']);
+  await page.evaluate(() => { currentCat = 'softs'; settings.showImg = true; renderMenu(); });
+  expect(await page.locator('.mcard-img img').count()).toBeGreaterThan(3);
   // Rejouée au rechargement ? Non (une seule fois) : un prix modifié à la main reste
   await page.evaluate(() => { products.find(p => p.id === 'p47').price = 18; saveAll(); });
   await page.reload({ waitUntil: 'domcontentloaded' });
