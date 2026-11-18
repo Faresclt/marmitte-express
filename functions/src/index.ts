@@ -13,6 +13,7 @@ import { defineSecret } from 'firebase-functions/params';
 import { logger } from 'firebase-functions/v2';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 
 import { buildPrompt } from './prompts.js';
@@ -111,11 +112,33 @@ export const generateImage = onRequest(
       return;
     }
 
+    // 1b. Appareil du resto uniquement : l'auth anonyme est ouverte à tous,
+    // seul un appareil enregistré (doc staff/{uid}, créé avec le code
+    // d'enregistrement) peut consommer la génération d'images.
+    try {
+      const staffSnap = await getFirestore().collection('staff').doc(uid).get();
+      if (!staffSnap.exists) {
+        logEvent('warn', 'not_staff', { uid });
+        res.status(403).json({ error: 'Device not enrolled', code: 'permission_denied' } satisfies ErrorResponse);
+        return;
+      }
+    } catch (err) {
+      logEvent('error', 'staff_check_failed', { uid, err: err instanceof Error ? err.message : String(err) });
+      res.status(503).json({ error: 'Staff check unavailable', code: 'unavailable' } satisfies ErrorResponse);
+      return;
+    }
+
     // 2. Validation body
     const body = (req.body ?? {}) as GenerateBody;
-    const { productId, style, prompt: customPrompt, productName, isCold, isDrink, plan, forceProvider } = body;
+    // `plan` venant du client est IGNORÉ (toujours 'free') : le palier payant
+    // ne doit pas être choisi par l'appelant. Idem forceProvider 'falai' (payant).
+    const { productId, style, prompt: customPrompt, productName, isCold, isDrink, forceProvider: rawForce } = body;
+    const plan: RestoPlan = 'free';
+    const forceProvider: ProviderId | undefined =
+      rawForce === 'cloudflare' || rawForce === 'pollinations' ? rawForce : undefined;
 
-    if (!productId || typeof productId !== 'string') {
+    // productId sert de nom d'objet Storage (products/{productId}.jpg) : format strict.
+    if (!productId || typeof productId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(productId)) {
       res.status(400).json({ error: 'productId required', code: 'invalid_argument' } satisfies ErrorResponse);
       return;
     }
@@ -141,12 +164,12 @@ export const generateImage = onRequest(
       falai: falApiKey ? { apiKey: falApiKey } : undefined,
     };
 
-    logEvent('info', 'generate_start', { uid, productId, style, plan: plan ?? 'free', forceProvider });
+    logEvent('info', 'generate_start', { uid, productId, style, plan, forceProvider });
 
     let providerResult;
     try {
       providerResult = await routeGenerate(finalPrompt, routerCfg, {
-        plan: plan === 'premium' ? 'premium' : 'free',
+        plan,
         forceProvider,
       });
     } catch (err) {

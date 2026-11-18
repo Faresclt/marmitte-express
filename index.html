@@ -50,6 +50,9 @@
     var lu = read('brand_logoUrl');
     var ln = read('brand_name');
     var la = read('brand_accent');
+    // Cache local = donnée Firestore : couleur #hex et URL https/data:image/relative seulement
+    if (la && !/^#[0-9a-f]{3,8}$/i.test(la)) la = null;
+    if (lu && !/^(https:\/\/|data:image\/(png|jpe?g|webp|gif|avif);base64,|(\.{0,2}\/)?[a-z0-9_-][^:]*$)/i.test(lu)) lu = null;
     if (la) {
       document.documentElement.style.setProperty('--accent', la);
     }
@@ -379,7 +382,7 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
 </div>
 
 <script type="module">
-import { db, doc, onSnapshot } from './assets/js/firebase-sync.js';
+import { db, doc, onSnapshot, escHtml, safeUrl, safeColor } from './assets/js/firebase-sync.js';
 
 try {
   document.getElementById('dot-firebase').classList.add('on');
@@ -396,25 +399,28 @@ try {
       document.getElementById('val-menu').textContent = count+' produits · '+cats+' cat.';
       // Apply branding (logo, name, accent) + persist en cache pour next visit
       const b = data.branding || {};
-      if(b.accent){
-        document.documentElement.style.setProperty('--accent', b.accent);
-        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', b.accent);
+      const accent = safeColor(b.accent);
+      if(accent){
+        document.documentElement.style.setProperty('--accent', accent);
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', accent);
       }
-      if(b.name){
+      if(b.name && typeof b.name === 'string'){
         const txt = document.getElementById('brand-logo-text');
         if(txt){
-          const parts = b.name.trim().split(' ');
+          // Nom venant de Firestore : échappé avant innerHTML
+          const parts = b.name.trim().split(' ').map(escHtml);
           txt.innerHTML = parts.length > 1
             ? parts.slice(0,-1).join(' ') + ' <span>' + parts[parts.length-1] + '</span>'
-            : '<span>' + b.name + '</span>';
+            : '<span>' + escHtml(b.name) + '</span>';
         }
         document.title = b.name;
       }
       const img = document.getElementById('brand-logo-img');
       const svg = document.getElementById('brand-logo-svg');
-      if(b.logoUrl && img && svg){
+      const logo = safeUrl(b.logoUrl);
+      if(logo && img && svg){
         // Évite de réassigner si la src est déjà la bonne (brand-boot l'a déjà fait)
-        if(img.src !== b.logoUrl) img.src = b.logoUrl;
+        if(img.getAttribute('src') !== logo) img.src = logo;
         img.style.display = 'block';
         svg.style.display = 'none';
       } else if(img && svg){

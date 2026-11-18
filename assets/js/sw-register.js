@@ -85,9 +85,13 @@
 
   // ── 4. Banner UI "Nouvelle version dispo" ───────────────────────
   function isBusy(){
-    // Activité en cours sur N'IMPORTE quelle page métier :
-    // caisse → ticket non vide / paiement ouvert ; serveur+client → panier non vide
+    // Activité en cours sur N'IMPORTE quelle page métier.
+    // Chaque page expose window.__isBusy() : `ticket` (caisse) et `cart`
+    // (serveur/client) sont des `let`, donc INVISIBLES via window.* — l'ancien
+    // test renvoyait toujours false et la mise à jour rechargeait la page en
+    // pleine saisie (ticket ou panier perdu).
     try {
+      if (typeof window.__isBusy === 'function' && window.__isBusy()) return true;
       if (typeof window.ticket !== 'undefined' && Array.isArray(window.ticket) && window.ticket.length > 0) return true;
       if (typeof window.cart !== 'undefined' && Array.isArray(window.cart) && window.cart.length > 0) return true;
       if (window._counterBusy) return true;

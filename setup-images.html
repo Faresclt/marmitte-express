@@ -190,24 +190,22 @@ h1{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:v
 </div><!-- /container -->
 
 <script type="module">
-import { db, doc, onSnapshot, escHtml } from './assets/js/firebase-sync.js';
+import { db, doc, onSnapshot, escHtml, safeUrl, safeColor, requireStaff } from './assets/js/firebase-sync.js';
 
-// Whitelist d'URL safe pour <img src>. Bloque javascript:, data:text/html, etc.
-// Accepte uniquement http(s):// et data:image/(png|jpe?g|webp|gif|avif|svg+xml ⛔)
-function safeImgUrl(u) {
-  if (!u || typeof u !== 'string') return '';
-  const t = u.trim();
-  if (/^https?:\/\//i.test(t)) return t;
-  if (/^data:image\/(png|jpe?g|webp|gif|avif|heic|heif);/i.test(t)) return t;
-  return ''; // tout le reste rejeté (data:text/html, javascript:, file:, vbscript:, etc.)
-}
+// Page du personnel : bandeau / écran d'enregistrement si appareil non enregistré.
+requireStaff({ label: 'Images', page: 'setup-images' });
+
+// Whitelist d'URL safe pour <img src> : https, data:image raster, relatif
+// (safeUrl de firebase-sync). Bloque javascript:, data:text/html, svg, etc.
+const safeImgUrl = (u) => safeUrl(typeof u === 'string' ? u : '');
 
 // ── Branding cross-device ──
 onSnapshot(doc(db, 'config', 'menu'), snap => {
   if(!snap.exists()) return;
   const b = snap.data().branding || {};
-  if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
-  if(b.name) document.title = b.name + ' — Setup images';
+  const accent = safeColor(b.accent);
+  if(accent) document.documentElement.style.setProperty('--accent', accent);
+  if(b.name) document.title = String(b.name).slice(0, 80) + ' — Setup images';
 });
 
 // ── LS helpers ──
@@ -330,8 +328,8 @@ function renderGrid() {
     if (!safeId) return '';
     const safeName = escHtml(p.name);
     const safeCat  = escHtml(p.cat);
-    return `<div class="img-card${checked?' selected':''}" id="card-${safeId}" onclick="openImgPreview('${safeId}')" style="cursor:pointer">
-      <div class="check-box" onclick="toggleSelect('${safeId}', event)">${checked ? '✓' : ''}</div>
+    return `<div class="img-card${checked?' selected':''}" id="card-${safeId}" data-pid="${safeId}" style="cursor:pointer">
+      <div class="check-box" data-select="1">${checked ? '✓' : ''}</div>
       ${img ? '<img src="'+escHtml(img)+'" loading="lazy">' : '<div class="img-ph">'+catEmoji+'</div>'}
       <div class="status ${img?'status-ok':'status-miss'}">${img?'✓':'!'}</div>
       <div class="label">${safeName}<small>${safeCat}</small></div>
@@ -344,6 +342,15 @@ function renderGrid() {
   const sb = document.getElementById('select-bar-count');
   if (sb) sb.textContent = selectedIds.size;
 }
+
+// Délégation (plus d'onclick construit avec l'id produit)
+document.getElementById('img-grid').addEventListener('click', (e) => {
+  const card = e.target.closest('[data-pid]');
+  if (!card) return;
+  const id = card.dataset.pid;
+  if (e.target.closest('[data-select]')) window.toggleSelect(id, e);
+  else window.openImgPreview(id);
+});
 
 function normalize(s){ return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
 
@@ -746,12 +753,12 @@ function addLog(logId, msg, type) {
 window.openImgPreview = function(prodId) {
   const p = PRODUCTS.find(x => x.id === prodId);
   if (!p) return;
-  const img = p.imgUrl || getImg(p.id) || getImg(p.name) || importedImages[p.id];
+  const img = safeImgUrl(p.imgUrl || getImg(p.id) || getImg(p.name) || importedImages[p.id]);
   const modal = document.getElementById('img-preview-modal');
   const imgEl = document.getElementById('img-preview-img');
   const phEl = document.getElementById('img-preview-ph');
-  document.getElementById('img-preview-name').textContent = p.name;
-  document.getElementById('img-preview-cat').textContent = p.cat;
+  document.getElementById('img-preview-name').textContent = String(p.name ?? '');
+  document.getElementById('img-preview-cat').textContent = String(p.cat ?? '');
   document.getElementById('img-preview-source').textContent = p.imgUrl ? '☁️ Firebase Storage (publié)' : (getImg(p.id) || getImg(p.name)) ? '💾 localStorage (sauvegardé)' : importedImages[p.id] ? '✨ Généré IA (non sauvegardé)' : '❌ Aucune image';
   if (img) { imgEl.src = img; imgEl.style.display = 'block'; phEl.style.display = 'none'; }
   else { imgEl.style.display = 'none'; phEl.style.display = 'flex'; }

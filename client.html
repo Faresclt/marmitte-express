@@ -41,6 +41,9 @@
     var lu = read('brand_logoUrl');
     var ln = read('brand_name');
     var la = read('brand_accent');
+    // Cache local = donnée Firestore : couleur #hex et URL https/data:image/relative seulement
+    if (la && !/^#[0-9a-f]{3,8}$/i.test(la)) la = null;
+    if (lu && !/^(https:\/\/|data:image\/(png|jpe?g|webp|gif|avif);base64,|(\.{0,2}\/)?[a-z0-9_-][^:]*$)/i.test(lu)) lu = null;
     if (la) document.documentElement.style.setProperty('--accent', la);
     if (lu || ln) {
       window.__brandPreBoot = { logoUrl: lu, name: ln, accent: la };
@@ -50,15 +53,51 @@
 </script>
 
 <script type="module">
-import { db, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp, escHtml } from './assets/js/firebase-sync.js';
+import { db, auth, authReady, doc, onSnapshot, setDoc, collection, getDoc, serverTimestamp, escHtml, safeUrl, safeColor } from './assets/js/firebase-sync.js';
 
 // Get table number from URL: client.html?table=3
+// Valeurs d'URL = données non fiables : toujours des strings bornées (règles
+// Firestore : tableId string ≤ 40), et échappées à l'affichage.
 const params = new URLSearchParams(window.location.search);
-const tableNum = params.get('table') || '?';
-const tableId = params.get('id') || ('t'+tableNum);
+const tableNum = String(params.get('table') || '?').slice(0, 20);
+const tableId = String(params.get('id') || ('t'+tableNum)).slice(0, 40);
 
 let menu = null;
 let cart = [];
+// Idempotence de l'envoi : l'id de la commande est généré côté client et gardé
+// tant que l'envoi n'a pas réussi → un nouvel essai réécrit le MÊME document.
+let _pendingOrderRef = null;
+let _sending = false;
+function cartChanged(){ _pendingOrderRef = null; }
+// Contrat service worker : ne pas recharger la page pendant une saisie.
+window.__isBusy = () => cart.length > 0 || _sending;
+
+// ── Prix / options (même logique que la caisse) ──
+const SIROP_PRICE = 0.5;
+function variantsOf(p){
+  return (p && p.hasVariant && Array.isArray(p.variants))
+    ? p.variants.filter(v => v && typeof v.label === 'string' && Number.isFinite(Number(v.price)))
+    : [];
+}
+function unitPrice(p, variant, sirop){
+  let price = Number(p && p.price) || 0;
+  const v = variantsOf(p).find(x => x.label === variant);
+  if(v) price = Number(v.price) || 0;
+  if(sirop && p && p.hasSirop) price += SIROP_PRICE;
+  return Math.round(price * 100) / 100;
+}
+function needsOptions(p){ return !!(p && (p.hasCuisson || p.hasGarniture || variantsOf(p).length || p.hasSirop)); }
+function lineKey(r){ return [r.pid, r.variant || '', r.cuisson || '', r.garniture || '', r.sirop ? 'sirop' : ''].join('|'); }
+// Prix affiché sur la carte : prix de base, ou « dès » la plus petite variante
+function priceLabel(p){
+  const vs = variantsOf(p);
+  if(vs.length){
+    const min = Math.min(...vs.map(v => Number(v.price) || 0));
+    return 'dès ' + min.toFixed(2).replace('.',',') + ' €';
+  }
+  return (Number(p.price) || 0).toFixed(2).replace('.',',') + ' €';
+}
+function fmtEur(n){ return (Number(n) || 0).toFixed(2).replace('.',','); }
 let productImages = {}; // {productId: base64_thumbnail}
 let activeFilters = new Set(); // tags actifs : 'vegan', 'glutenFree', 'spicy', 'vegetarian'
 let searchQuery = '';
@@ -103,11 +142,13 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
     // Apply branding (le cache localStorage a déjà été appliqué par brand-boot.js)
     const b = menu.branding||{};
     if(b.name) { const safe = escHtml(b.name); document.getElementById('resto-name').innerHTML = safe.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>'); }
-    if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+    const accent = safeColor(b.accent);
+    if(accent) document.documentElement.style.setProperty('--accent', accent);
     const logoImg = document.getElementById('resto-logo');
     if(logoImg){
-      if(b.logoUrl){
-        if(logoImg.src !== b.logoUrl) logoImg.src = b.logoUrl;
+      const logo = safeUrl(b.logoUrl);
+      if(logo){
+        if(logoImg.getAttribute('src') !== logo) logoImg.src = logo;
         logoImg.style.display = 'block';
       } else { logoImg.style.display = 'none'; }
     }
@@ -158,15 +199,21 @@ function renderMenu(){
   const cats = menu.cats||[];
   if(!cats.length) return;
 
-  let activeCat = tabs.dataset.active || cats[0]?.id;
-  tabs.innerHTML = cats.map(c=>`
-    <button class="mtab${activeCat===c.id?' active':''}" onclick="switchTab('${c.id}')" aria-pressed="${activeCat===c.id}">
-      ${c.icon||''} ${c.name}
-    </button>`).join('');
+  let activeCat = tabs.dataset.active || String(cats[0]?.id ?? '');
+  // Catégories venant de Firestore : tout échappé, plus d'onclick construit
+  // avec c.id → data-cat + délégation (listener sur #menu-tabs plus bas).
+  tabs.innerHTML = cats.map(c=>{
+    const cid = String(c.id ?? '');
+    const on = activeCat === cid;
+    return `
+    <button class="mtab${on?' active':''}" data-cat="${escHtml(cid)}" aria-pressed="${on}">
+      ${escHtml(c.icon||'')} ${escHtml(c.name||'')}
+    </button>`;
+  }).join('');
   tabs.dataset.active = activeCat;
 
   // Filtre catégorie + tags + recherche
-  const prods = (menu.products||[]).filter(p=>p.cat===activeCat && matchesFilters(p) && matchesSearch(p));
+  const prods = (menu.products||[]).filter(p=>String(p.cat ?? '')===activeCat && matchesFilters(p) && matchesSearch(p));
   const sections = [];
   prods.forEach(p=>{
     const sec = p.section||'';
@@ -180,9 +227,9 @@ function renderMenu(){
     if(sec.name) html+=`<div class="sec-sep">${escHtml(sec.name.toUpperCase())}</div>`;
     sec.items.forEach(p=>{
       const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
-      const img = (p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null);
-      // Note: src d'image est une URL/data-URI contrôlée par l'admin (Firebase Storage ou base64 local).
-      // alt est échappé pour bloquer toute injection via le nom de produit.
+      const img = safeUrl((p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null));
+      // src filtré par safeUrl (https, data:image raster, relatif) puis échappé ;
+      // alt échappé pour bloquer toute injection via le nom de produit.
       const imgHtml = img
         ? `<div class="prod-img"><img src="${escHtml(img)}" alt="${escHtml(p.name)}" loading="lazy" decoding="async" width="64" height="64"></div>`
         : '';
@@ -202,10 +249,10 @@ function renderMenu(){
         <div class="prod-info">
           <div class="prod-name">${p.pdj?'⭐ ':''}${escHtml(displayName)}</div>
           ${displaySub?`<div class="prod-sub">${escHtml(displaySub)}</div>`:''}
-          ${(p.hasCuisson||p.hasGarniture)?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${p.hasCuisson?'🔥 Cuisson':''}${p.hasCuisson&&p.hasGarniture?' · ':''}${p.hasGarniture?'🍟 Garniture':''}</div>`:''}
+          ${(p.hasCuisson||p.hasGarniture||variantsOf(p).length)?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${[variantsOf(p).length?'📏 Taille':'', p.hasCuisson?'🔥 Cuisson':'', p.hasGarniture?'🍟 Garniture':''].filter(Boolean).join(' · ')}</div>`:''}
           ${allergenHint}
           ${stockWarn}
-          <div class="prod-price">${p.price.toFixed(2).replace('.',',')} €</div>
+          <div class="prod-price">${priceLabel(p)}</div>
         </div>
         <div class="prod-actions">
           ${outOfStock ? `<span class="badge-soldout">Épuisé</span>` :
@@ -242,10 +289,14 @@ document.getElementById('menu-content').addEventListener('click', (e) => {
   if(!p) return;
   if(action === 'add'){
     e.stopPropagation();
-    addProduct(p.id, p.price, p.name);
+    addProduct(p.id);
   } else if(action === 'detail'){
     openProductDetail(pid);
   }
+});
+document.getElementById('menu-tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-cat]');
+  if(b) switchTab(b.dataset.cat);
 });
 
 function clearFilters(){
@@ -354,15 +405,35 @@ window.closeAllergiesModal = closeAllergiesModal;
 window.saveAllergies = saveAllergies;
 window.clearAllergies = clearAllergies;
 
-function changeQty(pid, price, delta, name, cuisson, garniture, tva, cat){
-  // For products with options, find by pid+cuisson+garniture
-  const ex = cart.find(r=>r.pid===pid && (r.cuisson||'')===(cuisson||'') && (r.garniture||'')===(garniture||''));
+// Ligne de panier = {pid, name, price, qty, tva, cuisson, garniture, cat, variant, sirop}
+// (même identité de ligne que la caisse : pid + variante + cuisson + garniture + sirop).
+// Le prix est recalculé depuis le menu (variante / sirop) — la caisse le recalcule aussi.
+function makeLine(p, opts){
+  const o = opts || {};
+  const variant = variantsOf(p).some(v => v.label === o.variant) ? o.variant : null;
+  const sirop = !!(o.sirop && p.hasSirop);
+  return {
+    pid: p.id,
+    name: String(p.name || '') + (variant ? ' — ' + variant : ''),
+    price: unitPrice(p, variant, sirop),
+    tva: Number(p.tva) || 10,
+    cuisson: o.cuisson || null,
+    garniture: o.garniture || null,
+    cat: p.cat || null,
+    variant,
+    sirop
+  };
+}
+function changeQty(line, delta){
+  const key = lineKey(line);
+  const ex = cart.find(r => lineKey(r) === key);
   if(ex){ ex.qty+=delta; if(ex.qty<=0) cart=cart.filter(r=>r!==ex); }
-  else if(delta>0) cart.push({pid,name,price:parseFloat(price),qty:1,tva:parseFloat(tva)||10,cuisson:cuisson||null,garniture:garniture||null,cat:cat||null});
+  else if(delta>0) cart.push({...line, qty:1});
+  cartChanged();
   updateCartBar();
   renderMenu();
-  if(delta > 0) showCartToast('+ ' + name);
-  else if(delta < 0 && !ex) showCartToast('Retiré : ' + name);
+  if(delta > 0) showCartToast('+ ' + line.name);
+  else if(delta < 0 && !ex) showCartToast('Retiré : ' + line.name);
 }
 
 let _cartToastTimer = null;
@@ -385,23 +456,23 @@ window.showCartToast = showCartToast;
 // Options picker for products with cuisson/garniture
 let pendingOptProduct = null;
 
-function addProduct(pid, price, name){
-  const p = (menu.products||[]).find(x=>x.id===pid);
+function addProduct(pid){
+  const p = (menu?.products||[]).find(x=>x.id===pid);
+  if(!p) return;
   // Garde stock : empêche dépassement quand p.stock est un quota fini
-  if(p && typeof p.stock === 'number' && p.stock >= 0){
+  if(typeof p.stock === 'number' && p.stock >= 0){
     const inCart = cart.filter(r => r.pid === pid).reduce((s,r) => s + r.qty, 0);
     if(p.stock === 0 || inCart >= p.stock){
       showCartToast(p.stock === 0 ? '✕ Produit épuisé' : '✕ Stock atteint ('+p.stock+' max)');
       return;
     }
   }
-  if(p && (p.hasCuisson || p.hasGarniture)){
+  // Variante (obligatoire si hasVariant), cuisson, garniture ou sirop → modale
+  if(needsOptions(p)){
     openOptionsModal(p);
     return;
   }
-  const tva = p ? (p.tva||10) : 10;
-  const cat = p ? (p.cat||null) : null;
-  changeQty(pid, price, 1, name, null, null, tva, cat);
+  changeQty(makeLine(p), 1);
 }
 
 // ── Product detail modal (clic plat depuis menu client) ──
@@ -411,7 +482,7 @@ window.openProductDetail = function(pid){
   if(!p) return;
   _detailProduct = p;
   // Image
-  const img = (p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null);
+  const img = safeUrl((p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null));
   const imgEl = document.getElementById('detail-img');
   const phEl = document.getElementById('detail-img-ph');
   if(img){ imgEl.src = img; imgEl.style.display='block'; phEl.style.display='none'; }
@@ -419,7 +490,7 @@ window.openProductDetail = function(pid){
   // Nom + prix
   const displayName = (p.pdj && menu.platDuJour && menu.platDuJour.nom) ? menu.platDuJour.nom : p.name;
   document.getElementById('detail-name').innerHTML = (p.pdj?'⭐ ':'') + escHtml(displayName);
-  document.getElementById('detail-price').textContent = p.price.toFixed(2).replace('.',',') + ' €';
+  document.getElementById('detail-price').textContent = priceLabel(p);
   // Description
   const desc = (p.pdj && menu.platDuJour && menu.platDuJour.desc) ? menu.platDuJour.desc : (p.description || p.sub || '');
   document.getElementById('detail-desc').textContent = desc || 'Aucune description disponible.';
@@ -457,28 +528,46 @@ window.addProductFromDetail = function(){
   if(!_detailProduct) return;
   const p = _detailProduct;
   closeDetail();
-  addProduct(p.id, p.price, p.name);
+  addProduct(p.id);
 };
 
+// Modale d'options : variante (obligatoire si hasVariant), cuisson, garniture,
+// supplément sirop. Tout texte venant du menu est échappé ; les chips portent
+// un index (data-idx) vers les listes ci-dessous, jamais la valeur dans un onclick.
+let _optLists = { variant: [], cuisson: [], garniture: [] };
+const _optLabel = 'font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px';
+function optGroup(id, title, labels){
+  return `<div style="margin-bottom:16px">
+      <div style="${_optLabel}">${title}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px" id="${id}">
+        ${labels.map((l,i)=>`<button type="button" class="opt-chip${i===0?' sel':''}" data-idx="${i}" onclick="selChip(this)">${escHtml(l)}</button>`).join('')}
+      </div>
+    </div>`;
+}
 function openOptionsModal(p){
   pendingOptProduct = p;
   const opts = menu.options||{};
-  const cuissons = opts.cuissons||[];
-  const garnitures = opts.garnitures||[];
-  let html = `<div style="font-size:16px;font-weight:700;margin-bottom:16px">${p.name}</div>`;
-  if(p.hasCuisson && cuissons.length){
-    html+=`<div style="margin-bottom:16px">
-      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🔥 Cuisson</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-cuisson-btns">
-        ${cuissons.map((c,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${c}" onclick="selChip(this,'cuisson')">${c}</button>`).join('')}
-      </div>
-    </div>`;
+  const strs = (a) => (Array.isArray(a) ? a : []).filter(x => typeof x === 'string' && x);
+  const cuissons = strs(opts.cuissons);
+  const garnitures = strs(opts.garnitures);
+  const variants = variantsOf(p);
+  _optLists = {
+    variant: variants.map(v => v.label),
+    cuisson: p.hasCuisson ? cuissons : [],
+    garniture: p.hasGarniture ? garnitures : []
+  };
+  let html = `<div style="font-size:16px;font-weight:700;margin-bottom:16px">${escHtml(p.name)}</div>`;
+  if(variants.length){
+    html += optGroup('opt-variant-btns', '📏 Taille', variants.map(v => v.label + ' — ' + fmtEur(v.price) + '€'));
   }
-  if(p.hasGarniture && garnitures.length){
+  if(_optLists.cuisson.length) html += optGroup('opt-cuisson-btns', '🔥 Cuisson', _optLists.cuisson);
+  if(_optLists.garniture.length) html += optGroup('opt-garniture-btns', '🍟 Garniture', _optLists.garniture);
+  if(p.hasSirop){
     html+=`<div style="margin-bottom:16px">
-      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🍟 Garniture</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-garniture-btns">
-        ${garnitures.map((g,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${g}" onclick="selChip(this,'garniture')">${g}</button>`).join('')}
+      <div style="${_optLabel}">🍯 Supplément</div>
+      <div style="display:flex;gap:6px" id="opt-sirop-btns">
+        <button type="button" class="opt-chip sel" data-sirop="0" onclick="selChip(this)">Sans sirop</button>
+        <button type="button" class="opt-chip" data-sirop="1" onclick="selChip(this)">+ Sirop (+0,50€)</button>
       </div>
     </div>`;
   }
@@ -507,11 +596,20 @@ function confirmOpt(){
       return;
     }
   }
-  const cuissonEl = document.querySelector('#opt-cuisson-btns .opt-chip.sel');
-  const garnitureEl = document.querySelector('#opt-garniture-btns .opt-chip.sel');
-  const cuisson = cuissonEl ? cuissonEl.dataset.val : null;
-  const garniture = garnitureEl ? garnitureEl.dataset.val : null;
-  changeQty(p.id, p.price, 1, p.name, cuisson, garniture, p.tva||10, p.cat||null);
+  const pick = (group) => {
+    const el = document.querySelector('#opt-'+group+'-btns .opt-chip.sel');
+    const i = el ? parseInt(el.dataset.idx, 10) : -1;
+    return (i >= 0 && i < _optLists[group].length) ? _optLists[group][i] : null;
+  };
+  const variant = pick('variant');
+  if(_optLists.variant.length && !variant){ showCartToast('Choisissez une taille'); return; }
+  const siropEl = document.querySelector('#opt-sirop-btns .opt-chip.sel');
+  changeQty(makeLine(p, {
+    variant,
+    cuisson: pick('cuisson'),
+    garniture: pick('garniture'),
+    sirop: !!(siropEl && siropEl.dataset.sirop === '1')
+  }), 1);
   closeOptModal();
 }
 
@@ -545,12 +643,12 @@ function closeCartPanel(){ document.getElementById('cart-panel').style.display='
 function renderCartPanel(){
   const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
   document.getElementById('cp-items').innerHTML = cart.map((r, idx)=>{
-    const optTxt = [r.cuisson, r.garniture].filter(Boolean).join(' · ');
+    const optTxt = [r.cuisson, r.garniture, r.sirop ? '+ sirop' : ''].filter(Boolean).join(' · ');
     return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)">
       <div style="flex:1">
         <div style="font-size:15px;font-weight:600">${escHtml(r.name)}</div>
         ${optTxt?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${escHtml(optTxt)}</div>`:''}
-        <div style="font-size:12px;color:#888">${r.price.toFixed(2).replace('.',',')}€/u</div>
+        <div style="font-size:12px;color:#888">${fmtEur(r.price)}€/u</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         <button data-cart-idx="${idx}" data-cart-delta="-1" aria-label="Retirer un ${escHtml(r.name)}" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
@@ -583,7 +681,7 @@ document.getElementById('cp-items').addEventListener('click', (e) => {
       }
     }
   }
-  changeQty(r.pid, r.price, delta, r.name, r.cuisson, r.garniture, r.tva||10, r.cat);
+  changeQty(r, delta);
   renderCartPanel();
 });
 
@@ -595,7 +693,7 @@ function sendOrder(){
   const count = cart.reduce((s,r) => s+r.qty, 0);
   const total = cart.reduce((s,r) => s+r.qty*r.price, 0);
   const itemsList = cart.map(r => {
-    const opts = [r.cuisson, r.garniture].filter(Boolean).join(' · ');
+    const opts = [r.cuisson, r.garniture, r.sirop ? '+ sirop' : ''].filter(Boolean).join(' · ');
     return `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px">
       <div style="flex:1;min-width:0"><span style="font-weight:700">${r.qty}× ${escHtml(r.name)}</span>${opts?`<div style="color:var(--accent);font-size:11px">${escHtml(opts)}</div>`:''}</div>
       <div style="font-family:'Bebas Neue',sans-serif;color:var(--green);white-space:nowrap">${(r.qty*r.price).toFixed(2).replace('.',',')}€</div>
@@ -623,34 +721,98 @@ function closeConfirmOrderModal(){
 window.closeConfirmOrderModal = closeConfirmOrderModal;
 
 // Étape 2 : envoi réel à Firestore après confirmation explicite.
+// Format strict imposé par les règles : clés ⊆ {tableId, tableNum, items, note,
+// status, source, sentAt, clientUid}, source 'client', status 'pending',
+// clientUid = uid anonyme courant, 1 à 40 lignes, note ≤ 500, tableId string ≤ 40.
+// Idempotence : id généré côté client (doc(collection(...))), conservé tant que
+// l'envoi n'a pas réussi → un nouvel essai réécrit le MÊME document (pas de doublon).
+const MAX_LINES = 40;
+function resetSendButtons(){
+  const confirmBtn = document.getElementById('confirm-send-btn');
+  const cpBtn = document.getElementById('cp-send');
+  if(confirmBtn){ confirmBtn.disabled=false; confirmBtn.textContent='✓ Envoyer'; }
+  if(cpBtn){ cpBtn.disabled=!cart.length; cpBtn.textContent='✅ Confirmer la commande'; }
+}
+function onOrderSent(ref){
+  if(_pendingOrderRef !== ref){ // panier modifié entre-temps : le 1er envoi est quand même arrivé
+    showCartToast('✓ Commande précédente reçue — vérifiez votre panier');
+    return;
+  }
+  _pendingOrderRef = null;
+  cart=[];
+  const noteEl = document.getElementById('cp-note');
+  if(noteEl) noteEl.value = '';
+  updateCartBar();
+  closeCartPanel();
+  closeConfirmOrderModal();
+  resetSendButtons();
+  showConfirmation();
+}
 async function confirmAndSendOrder(){
-  if(!cart.length) return;
+  if(!cart.length || _sending) return;
+  if(cart.length > MAX_LINES){
+    alert('Commande trop longue ('+cart.length+' lignes, '+MAX_LINES+' max). Envoyez-la en deux fois ou appelez un serveur.');
+    return;
+  }
   const confirmBtn = document.getElementById('confirm-send-btn');
   const cpBtn = document.getElementById('cp-send');
   if(confirmBtn){ confirmBtn.disabled=true; confirmBtn.textContent='⏳ Envoi...'; }
   if(cpBtn){ cpBtn.disabled=true; cpBtn.textContent='Envoi en cours...'; }
+  _sending = true;
+  const isRetry = !!_pendingOrderRef;
+  let slowTimer = null;
   try{
-    let note = document.getElementById('cp-note')?.value||'';
+    await authReady;
+    const uid = auth.currentUser && auth.currentUser.uid;
+    if(!uid){ const err = new Error('auth'); err.code = 'unauthenticated'; throw err; }
     // Sanitization de la note : strip HTML/JS/contrôles, normalise espaces, max 500
-    note = sanitizeOrderNote(note);
-    await addDoc(collection(db,'orders'),{
-      tableId,
-      tableNum: tableNum,
-      items: cart.map(r=>({pid:r.pid,name:r.name,price:r.price,qty:r.qty,tva:r.tva||10,cuisson:r.cuisson||null,garniture:r.garniture||null,cat:r.cat||null})),
+    const note = sanitizeOrderNote(document.getElementById('cp-note')?.value||'');
+    if(!_pendingOrderRef) _pendingOrderRef = doc(collection(db,'orders'));
+    const ref = _pendingOrderRef;
+    const data = {
+      tableId: String(tableId || ''),
+      tableNum: String(tableNum),
+      items: cart.map(r=>({
+        pid: r.pid,
+        name: r.name,
+        price: Number(r.price) || 0,
+        qty: Number(r.qty) || 0,
+        tva: Number(r.tva) || 10,
+        cuisson: r.cuisson || null,
+        garniture: r.garniture || null,
+        cat: r.cat || null,
+        variant: r.variant || null,
+        sirop: !!r.sirop
+      })),
       note,
       status: 'pending',
       source: 'client',
-      sentAt: serverTimestamp()
-    });
-    cart=[];
-    updateCartBar();
-    closeCartPanel();
-    closeConfirmOrderModal();
-    showConfirmation();
+      sentAt: serverTimestamp(),
+      clientUid: uid
+    };
+    // Réseau lent / hors ligne : le SDK garde l'écriture en file et la rejouera.
+    // Après 15 s on rend la main (un nouvel essai réutilise le même id).
+    slowTimer = setTimeout(() => {
+      if(_pendingOrderRef !== ref) return;
+      _sending = false;
+      resetSendButtons();
+      alert('Connexion lente : la commande partira dès que le réseau revient. Vous pouvez réessayer sans risque de doublon, ou appeler un serveur.');
+    }, 15000);
+    await setDoc(ref, data);
+    clearTimeout(slowTimer);
+    _sending = false;
+    onOrderSent(ref);
   }catch(e){
-    if(confirmBtn){ confirmBtn.disabled=false; confirmBtn.textContent='✓ Envoyer'; }
-    if(cpBtn){ cpBtn.disabled=false; cpBtn.textContent='✅ Confirmer la commande'; }
-    alert('Erreur de connexion. Réessayez ou appelez un serveur.');
+    clearTimeout(slowTimer);
+    _sending = false;
+    resetSendButtons();
+    console.warn('[client] envoi commande:', e && (e.code || e.message));
+    if(e && e.code === 'permission-denied' && isRetry){
+      // Le document existe déjà (1er essai arrivé) → le public ne peut pas le réécrire.
+      alert('Votre commande a probablement déjà été reçue. Appelez un serveur pour vérifier avant de renvoyer.');
+    } else {
+      alert('Erreur de connexion. Réessayez (sans risque de doublon) ou appelez un serveur.');
+    }
   }
 }
 window.confirmAndSendOrder = confirmAndSendOrder;
@@ -685,7 +847,6 @@ function showConfirmation(){
   }, 3000);
 }
 
-function esc(s){ return String(s||'').replace(/'/g,"\\'"); }
 window.switchTab=switchTab; window.changeQty=changeQty; window.addProduct=addProduct;
 window.openCartPanel=openCartPanel; window.closeCartPanel=closeCartPanel;
 window.renderCartPanel=renderCartPanel; window.sendOrder=sendOrder;

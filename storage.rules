@@ -2,41 +2,50 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Helper : whitelist stricte des types raster (exclut image/svg+xml qui
-    // peut embarquer du JavaScript et déclencher du XSS si servi cross-origin).
+    // Whitelist stricte des types raster (exclut image/svg+xml qui peut
+    // embarquer du JavaScript et déclencher du XSS si servi cross-origin).
     function isRasterImage() {
       return request.resource.contentType.matches('image/(png|jpe?g|webp|gif|avif|heic|heif)');
     }
     function isAuth() {
       return request.auth != null;
     }
+    // v3 (2026-11-18) : mêmes règles « équipe » que Firestore — appareil du
+    // resto enregistré (staff/{uid}), ou tout appareil authentifié tant que la
+    // protection n'est pas activée (security/policy.enforce).
+    function isStaff() {
+      return isAuth()
+        && firestore.exists(/databases/(default)/documents/staff/$(request.auth.uid));
+    }
+    function enforced() {
+      return firestore.exists(/databases/(default)/documents/security/policy)
+        && firestore.get(/databases/(default)/documents/security/policy).data.get('enforce', false) == true;
+    }
+    function isTeam() {
+      return isStaff() || (isAuth() && !enforced());
+    }
 
-    // Images produits : lecture publique (clients QR voient le menu),
-    // écriture authentifiée + format raster strict + max 5MB.
     match /images/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuth()
+      allow write: if isTeam()
                    && request.resource.size < 5 * 1024 * 1024
                    && isRasterImage();
     }
 
-    // Logos/branding : même politique, taille réduite (2MB).
     match /branding/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuth()
+      allow write: if isTeam()
                    && request.resource.size < 2 * 1024 * 1024
                    && isRasterImage();
     }
 
-    // Photos produits : idem images (5MB).
     match /products/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuth()
+      allow write: if isTeam()
                    && request.resource.size < 5 * 1024 * 1024
                    && isRasterImage();
     }
 
-    // Bloquer tout le reste.
     match /{allPaths=**} {
       allow read, write: if false;
     }

@@ -7,7 +7,12 @@
 //  - HTML pages dans ASSETS + stale-while-revalidate → cold-boot offline OK
 //  - Timeout 3s sur fetch HTML + fallback cache si 5xx (déploiement en cours)
 //  - Origin check sur les messages (anti-injection)
-const CACHE_NAME = 'marmite-v79-publish-guard';
+//  v80 (2026-11-18) : cache VERSIONNÉ cohérent — les fichiers de l'app
+//  (ASSETS) ne sont remplis qu'à l'installation de la version, en
+//  contournant le cache HTTP ({cache:'reload'}). Plus de mélange
+//  « HTML neuf + JS ancien » par revalidation en arrière-plan : une nouvelle
+//  version arrive en bloc via le bandeau de mise à jour.
+const CACHE_NAME = 'marmite-v80-securite-ventes';
 
 // HTML pages CRITIQUES — cachées au install pour cold-boot offline.
 // Sans ça : tablette qui ouvre la caisse en wifi down matin = écran blanc.
@@ -47,7 +52,7 @@ self.addEventListener('install', event => {
       // addAll est atomique : si UN asset rate, tout l'install rate.
       // Pour les HTML cross-page on tolère l'échec individuel.
       Promise.all(ASSETS.map(url =>
-        cache.add(url).catch(err => {
+        cache.add(new Request(url, { cache: 'reload' })).catch(err => {
           console.warn('[SW] Skip cache (asset missing):', url, err.message);
         })
       ))
@@ -84,9 +89,30 @@ function timedFetch(request, ms){
   ]);
 }
 
+// Fichiers de l'app (chemins absolus) : servis depuis le cache de LEUR version.
+const APP_PATHS = new Set(ASSETS.filter(u => u.startsWith('./')).map(u => new URL(u, self.location.href).pathname));
+
 // Fetch strategy
 self.addEventListener('fetch', event => {
   const url = event.request.url;
+  if (event.request.method !== 'GET') return;
+
+  // Fichier de l'app précaché → cache de la version installée (cohérent),
+  // réseau seulement s'il manque. Pas de réécriture en arrière-plan.
+  try {
+    const u = new URL(url);
+    if (u.origin === self.location.origin && APP_PATHS.has(u.pathname)) {
+      event.respondWith(
+        caches.open(CACHE_NAME).then(c => c.match(u.pathname, { ignoreSearch: true }).then(hit =>
+          hit || fetch(event.request).then(r => {
+            if (r && r.ok && r.type === 'basic') { const cl = r.clone(); c.put(u.pathname, cl); }
+            return r;
+          }).catch(() => c.match('./index.html'))
+        ))
+      );
+      return;
+    }
+  } catch (e) {}
 
   // Skip Firebase / fonts dynamiques / APIs externes
   if (url.includes('firestore') ||

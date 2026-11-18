@@ -16,8 +16,12 @@
 <script type="module">
 import {
   db, storage, doc, setDoc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, getDoc, getDocs, getDocFromServer, getDocsFromServer, serverTimestamp,
-  storageRef, uploadString, getDownloadURL, deleteObject
+  storageRef, uploadString, uploadBytes, getDownloadURL, deleteObject, requireStaff, runTransaction
 } from './assets/js/firebase-sync.js';
+
+// Appareil du resto : bandeau d'enregistrement / écran bloquant si la
+// protection est activée et que cette tablette n'est pas enregistrée.
+requireStaff({ label: 'Caisse', page: 'caisse' });
 
 // Alias ref pour compat avec le code existant de la caisse
 const ref = storageRef;
@@ -32,10 +36,28 @@ window.FB = {
     const snap = await getDoc(doc(db, path, id));
     return snap.exists() ? snap.data() : null;
   },
+  // One-shot fetch d'une collection (ex: 'sales/2026-11-18/v') → {id: data}
+  getCol: async (path) => {
+    const snap = await getDocs(collection(db, path));
+    const out = {}; snap.forEach(d => { out[d.id] = {...d.data(), _id: d.id}; }); return out;
+  },
   // Listen to entire collection
   listenCol: (path, cb) => onSnapshot(collection(db, path), snap => {
     const docs = {}; snap.forEach(d => docs[d.id] = {...d.data(), _id: d.id}); cb(docs);
   }),
+  // Passe une commande pending → received SEULEMENT si elle est toujours
+  // pending côté serveur (sinon on ferait reculer « en préparation »).
+  markReceived: (id) => runTransaction(db, async (tx) => {
+    const r = doc(db, 'orders', id);
+    const s = await tx.get(r);
+    if(s.exists() && s.data().status === 'pending') tx.update(r, { status: 'received' });
+  }),
+  // Upload d'un Blob (photo IA téléchargée) → URL Storage
+  uploadBlob: async (path, blob) => {
+    const r = ref(storage, path);
+    await uploadBytes(r, blob, { contentType: blob.type || 'image/jpeg' });
+    return await getDownloadURL(r);
+  },
   // Write (overwrite full doc)
   set: (path, id, data) => setDoc(doc(db, path, id), data),
   // Write with merge (preserve other fields)
@@ -91,15 +113,13 @@ window.initFirebaseListeners = function(){
           changed = true;
         }
       });
-      // Tables présentes localement mais ABSENTES de Firebase = nettoyées →
-      // on les vide aussi localement pour ne pas garder un état fantôme.
-      Object.keys(tableData).forEach(tid => {
-        if(tid === window.currentTableId) return;
-        if(!data[tid] && tableData[tid] && (tableData[tid].ticket||[]).length){
-          tableData[tid] = { persons: [], ticket: [] };
-          changed = true;
-        }
-      });
+      // ⚠️ On ne vide PAS les tables absentes de la collection `tables`
+      // (fix b9c30e3 du 20/05, jamais fusionné jusqu'ici). Une table absente =
+      // sa synchro n'a pas (encore) abouti (règles, auth, réseau, ordre de
+      // chargement). La vider détruisait une commande tout juste importée :
+      // table « libre » à tort, commande disparue du plan de salle alors que la
+      // cuisine l'avait. Le cas « table soldée sur un autre appareil » est déjà
+      // couvert ci-dessus : le doc tables/{id} existe alors avec un ticket vide.
       if(changed){
         try { window.LS.set('tableData', tableData); } catch(e){}
       }
@@ -113,12 +133,19 @@ window.initFirebaseListeners = function(){
   window.FB.listenCol('orders', (data) => {
     window.fbOrders = data;
     window.__lastOrdersPoll = Date.now();
+    window.__lastOrdersSnap = Date.now();
     processPendingOrders(data);
   });
 
-  // Polling de secours toutes les 3s : si onSnapshot meurt (iOS Safari)
-  // on continue de récupérer les commandes via getDocs (cache + serveur)
+  // Polling de secours : UNIQUEMENT si le listener temps réel est muet depuis
+  // >20 s (iOS Safari qui tue les websockets). Avant : getDocs toutes les 3 s
+  // + REST toutes les 5 s sans condition = des dizaines de milliers de lectures
+  // par heure (quota gratuit grillé → listeners coupés). L'ancien poll REST
+  // interne était sans jeton → toujours 403 : supprimé (orders-rest-poll.js
+  // garde un filet REST authentifié).
   async function pollOrdersFallback(){
+    if(document.hidden) return;
+    if(window.__lastOrdersSnap && Date.now() - window.__lastOrdersSnap < 20000) return;
     try {
       const snap = await getDocs(collection(db, 'orders'));
       const data = {};
@@ -130,62 +157,18 @@ window.initFirebaseListeners = function(){
     } catch(e) {
       console.warn('[orders poll] error:', e?.message || e);
       window.__lastOrdersPollError = e?.message || String(e);
-      // Fallback ultime : REST API direct sans Firebase SDK
-      pollOrdersViaREST();
     }
   }
-  setInterval(pollOrdersFallback, 3000);
-  setTimeout(pollOrdersFallback, 800);
-  // Aussi un poll REST direct toutes les 5s en parallèle (filet de sécurité
-  // si le Firebase SDK est bloqué par un addon, firewall, etc.)
-  setInterval(pollOrdersViaREST, 5000);
-  setTimeout(pollOrdersViaREST, 1500);
-
-  // Parse une valeur Firestore REST en valeur JS
-  function _parseFsValue(v){
-    if(!v) return null;
-    if(v.stringValue !== undefined) return v.stringValue;
-    if(v.integerValue !== undefined) return parseInt(v.integerValue);
-    if(v.doubleValue !== undefined) return v.doubleValue;
-    if(v.booleanValue !== undefined) return v.booleanValue;
-    if(v.nullValue !== undefined) return null;
-    if(v.timestampValue !== undefined) return v.timestampValue;
-    if(v.arrayValue) return (v.arrayValue.values || []).map(_parseFsValue);
-    if(v.mapValue){
-      const out = {};
-      Object.entries(v.mapValue.fields || {}).forEach(([k, val]) => { out[k] = _parseFsValue(val); });
-      return out;
-    }
-    return null;
-  }
-
-  // Poll via REST API direct (no Firebase SDK) — fallback ultime
-  async function pollOrdersViaREST(){
-    try {
-      const res = await fetch('https://firestore.googleapis.com/v1/projects/la-marmitte-express/databases/(default)/documents/orders?pageSize=200');
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      const json = await res.json();
-      const data = {};
-      (json.documents || []).forEach(doc => {
-        const id = doc.name.split('/').pop();
-        const fields = {};
-        Object.entries(doc.fields || {}).forEach(([k, v]) => { fields[k] = _parseFsValue(v); });
-        data[id] = {...fields, _id: id};
-      });
-      // Merge avec les orders existants (sans écraser si SDK marche)
-      const current = window.fbOrders || {};
-      Object.assign(current, data);
-      window.fbOrders = current;
-      window.__lastRestPoll = Date.now();
-      if(!window.__lastOrdersPoll) window.__lastOrdersPoll = Date.now();
-      processPendingOrders(current);
-    } catch(e){
-      console.warn('[REST poll] error:', e?.message || e);
-      window.__lastRestPollError = e?.message || String(e);
-    }
-  }
+  setInterval(pollOrdersFallback, 10000);
 
   function processPendingOrders(data){
+    // Commandes annulées par la cuisine → retirer leurs lignes de la table
+    // (avant : le plat restait facturé en caisse).
+    Object.values(data).forEach(o => {
+      if(o && o.status === 'cancelled' && typeof window.removeCancelledOrder === 'function'){
+        try { window.removeCancelledOrder(o); } catch(e){ console.error('[cancel] error:', e); }
+      }
+    });
     const pending = Object.values(data).filter(o => o && o.status === 'pending');
     var importedAny = false;
     pending.forEach(order => {
@@ -194,7 +177,7 @@ window.initFirebaseListeners = function(){
       if(typeof fn === 'function'){
         try { fn(order); importedAny = true; } catch(e){ console.error('[import] error:', e); }
       }
-      try { window.FB.update('orders', order._id, {status: 'received'}); } catch(e){}
+      try { window.FB.markReceived(order._id).catch(()=>{}); } catch(e){}
     });
     // À chaque poll/listener, force aussi le re-render pour que les tables
     // se colorent orange via le fallback fbOrders dans tableStatus().
@@ -214,15 +197,31 @@ window.initFirebaseListeners = function(){
     // Règle : un champ enrichi cloud n'est adopté que si le local est vide —
     // une saisie admin locale n'est jamais écrasée.
     if(data && Array.isArray(data.products) && typeof products !== 'undefined' && Array.isArray(products)){
+      // Id produit = identifiant technique utilisé dans des onclick : on
+      // n'accepte que [A-Za-z0-9_-] (un id piégé venu du cloud = XSS caisse).
+      const okId = (id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(id);
+      const cloudProducts = data.products.filter(p => p && okId(p.id));
       const localById = new Map(products.map(p => [p.id, p]));
-      const newOnes = data.products.filter(p => p.id && !localById.has(p.id));
+      const newOnes = cloudProducts.filter(p => !localById.has(p.id));
       const ENRICH_STR = ['description','sub','garniture','imgUrl','section'];
       const ENRICH_ARR = ['allergens','sauces'];
       const ENRICH_BOOL = ['vegetarian','vegan','spicy','glutenFree'];
-      let enriched = 0;
-      data.products.forEach(cp => {
-        const lp = cp.id && localById.get(cp.id);
+      let enriched = 0, adopted = 0;
+      cloudProducts.forEach(cp => {
+        const lp = localById.get(cp.id);
         if(!lp) return;
+        // Version cloud plus récente (ou égale, cloud = maître) → on l'adopte
+        // entièrement : prix, actif, TVA, variantes, stock… (bug H3).
+        if((cp.updatedAt||0) >= (lp.updatedAt||0) && typeof window.productCloudView === 'function'
+           && JSON.stringify(window.productCloudView(cp)) !== JSON.stringify(window.productCloudView(lp))){
+          // Seuls les champs publiés sont repris (les champs purement locaux,
+          // ex. `active`, ne sont jamais touchés). stock -1 = illimité.
+          const CORE = ['cat','name','sub','price','section','pdj','hasCuisson','hasGarniture','hasVariant','hasSirop','variants','tva','stock','imgUrl','description','garniture','sauces','allergens','vegetarian','vegan','glutenFree','spicy','alcohol','updatedAt'];
+          CORE.forEach(k => { if(k in cp) lp[k] = cp[k]; });
+          if(lp.stock === -1) lp.stock = undefined;
+          adopted++;
+          return;
+        }
         ENRICH_STR.forEach(k => { if(cp[k] && !lp[k]){ lp[k] = cp[k]; enriched++; } });
         ENRICH_ARR.forEach(k => { if(Array.isArray(cp[k]) && cp[k].length && (!Array.isArray(lp[k]) || !lp[k].length)){ lp[k] = cp[k]; enriched++; } });
         ENRICH_BOOL.forEach(k => { if(cp[k] === true && !lp[k]){ lp[k] = true; enriched++; } });
@@ -231,39 +230,51 @@ window.initFirebaseListeners = function(){
         // Garde tous les champs Firestore + force active=true pour visibilite admin
         products.push({ ...p, active: p.active !== false });
       });
-      if(newOnes.length > 0 || enriched > 0){
+      if(newOnes.length > 0 || enriched > 0 || adopted > 0){
         if(typeof saveAll === 'function') saveAll();
         else { try { LS.set('products', products); } catch(e) {} }
         if(typeof renderProdList === 'function') renderProdList();
         if(typeof renderMenu === 'function') renderMenu();
-        console.log('[caisse] sync menu cloud: +' + newOnes.length + ' produits, ' + enriched + ' champs de fiche récupérés');
+        console.log('[caisse] sync menu cloud: +' + newOnes.length + ' produits, ' + adopted + ' mis à jour, ' + enriched + ' champs de fiche récupérés');
       }
     }
     // Sync branding cross-device (logo, name, accent, emoji)
     if(data && data.branding){
       const b = data.branding;
       if(typeof branding !== 'undefined'){
-        if(b.name) branding.name = b.name;
-        if(b.tagline) branding.tagline = b.tagline;
-        if(b.emoji) branding.emoji = b.emoji;
-        if(b.accent) branding.accent = b.accent;
-        if(b.logoUrl){ branding.logoUrl = b.logoUrl; LS.set('brand_logoUrl', b.logoUrl); }
+        // Valeurs venues du cloud = non fiables : texte borné, couleur #hex,
+        // URL https/data:image seulement (sinon XSS sur la tablette caisse).
+        const S = window.__safe || {};
+        if(b.name) branding.name = String(b.name).slice(0, 60);
+        if(b.tagline) branding.tagline = String(b.tagline).slice(0, 120);
+        if(b.emoji) branding.emoji = String(b.emoji).slice(0, 8);
+        if(b.accent && S.safeColor && S.safeColor(b.accent)) branding.accent = S.safeColor(b.accent);
+        const lu = S.safeUrl ? S.safeUrl(b.logoUrl) : '';
+        if(lu){ branding.logoUrl = lu; LS.set('brand_logoUrl', lu); }
         if(typeof applyBranding === 'function') applyBranding();
       }
     }
     // Sync settings cross-device (avis, worker email, infos légales)
     if(data && data.settings && typeof settings !== 'undefined'){
       const s = data.settings;
-      if(s.googleReviewUrl) settings.googleReviewUrl = s.googleReviewUrl;
-      if(s.tripadvisorUrl)  settings.tripadvisorUrl  = s.tripadvisorUrl;
-      if(s.mailWorkerUrl)   settings.mailWorkerUrl   = s.mailWorkerUrl;
-      if(s.mailSender)      settings.mailSender      = s.mailSender;
+      const httpsOnly = (u) => (typeof u === 'string' && /^https:\/\/[^\s"'<>]+$/i.test(u)) ? u : '';
+      if(httpsOnly(s.googleReviewUrl)) settings.googleReviewUrl = httpsOnly(s.googleReviewUrl);
+      if(httpsOnly(s.tripadvisorUrl))  settings.tripadvisorUrl  = httpsOnly(s.tripadvisorUrl);
+      // Le worker mail reçoit e-mails clients + tickets : n'accepter qu'un
+      // worker Cloudflare (sinon un attaquant redirige tout vers son serveur).
+      if(typeof s.mailWorkerUrl === 'string' && /^https:\/\/[a-z0-9.-]+\.(workers\.dev|pages\.dev)(\/[^\s"'<>]*)?$/i.test(s.mailWorkerUrl)) settings.mailWorkerUrl = s.mailWorkerUrl;
+      if(s.mailSender)      settings.mailSender      = String(s.mailSender).slice(0, 80);
+      // Toggles d'affichage cross-device (booléens : tester le type, pas la valeur)
+      if(typeof s.showStockBadge === 'boolean') settings.showStockBadge = s.showStockBadge;
+      if(typeof s.pdjPromptDaily === 'boolean') settings.pdjPromptDaily = s.pdjPromptDaily;
       if(s.legal && typeof s.legal === 'object'){
         settings.legal = { ...(settings.legal||{}), ...s.legal };
       }
       LS.set('settings', settings);
       if(typeof updateMailWorkerStatus === 'function') updateMailWorkerStatus();
       if(typeof updateLegalStatus === 'function') updateLegalStatus();
+      // Applique les toggles d'affichage reçus d'un autre appareil
+      if(typeof window.renderMenu === 'function') { try { window.renderMenu(); } catch(e){} }
     }
     // Sync salle layout : Firebase = source de vérité.
     // IMPORTANT : on accède aux globals via window.* car ce script est en
@@ -294,6 +305,64 @@ window.initFirebaseListeners = function(){
     }
   });
 
+  // ── Ventes cross-device : listener sales/{aujourd'hui} ──
+  // Importe dans le localStorage les ventes encaissées sur les AUTRES
+  // appareils (dédup par cloudKey) → l'historique, les stats et l'export CSV
+  // existants voient le CA complet du resto sans refactor. Import one-way :
+  // les ventes de CET appareil restent la source locale (jamais réimportées).
+  // Ventes v5 : sales/{jour}/v/{cloudKey} (1 doc par vente, inaltérable) et
+  // sales/{jour}/cancel/{cloudKey} (annulations). Le listener suit la journée
+  // de SERVICE et se ré-abonne quand elle change (service qui passe minuit).
+  (function(){
+    let curDay = null, unsubV = null, unsubC = null;
+    const SALE_FIELDS = ['id','ts','time','date','label','tableId','items','total','totalHT','totalTVA','tvaRates','payType','receiptNumber','tip','note','cancelled','device','cloudKey','hash','prevHash','offered','offeredValue'];
+    function attach(){
+      const day = serviceDayKey();
+      if(day === curDay) return;
+      curDay = day;
+      try { unsubV && unsubV(); unsubC && unsubC(); } catch(e){}
+      const lsKey = 'sales_'+day;
+      unsubV = window.FB.listenCol('sales/'+day+'/v', (docs) => {
+        const local = LS.get(lsKey, []);
+        const known = new Set(local.map(s => s.cloudKey).filter(Boolean));
+        const knownTs = new Set(local.map(s => s.ts).filter(Boolean));
+        let imported = 0;
+        Object.keys(docs).forEach(k => {
+          if(known.has(k)) { const l = local.find(s => s.cloudKey === k); if(l && !l._synced){ l._synced = true; imported++; } return; }
+          const s = docs[k];
+          if(!s || typeof s.ts !== 'number' || typeof s.total !== 'number') return;
+          if(knownTs.has(s.ts) && local.some(x => x.ts === s.ts && x.device === s.device)) return;
+          // Ne garder que les champs connus, typés (une vente injectée ne
+          // doit pas pouvoir placer du HTML dans l'historique).
+          const clean = {};
+          SALE_FIELDS.forEach(f => { if(f in s) clean[f] = s[f]; });
+          clean.items = Array.isArray(s.items) ? s.items.slice(0, 200).map(r => ({ name: String(r && r.name || '').slice(0, 80), qty: Number(r && r.qty) || 0, price: Number(r && r.price) || 0, tva: tvaOf(r) })) : [];
+          clean.payType = String(s.payType || 'cb').slice(0, 20);
+          clean.cloudKey = k; clean._synced = true; clean._fromCloud = true;
+          local.push(clean);
+          imported++;
+        });
+        if(imported > 0){
+          local.sort((a,b) => (a.ts||0) - (b.ts||0));
+          LS.set(lsKey, local);
+          console.log('[sales<-FB] '+imported+' vente(s) importée(s)/confirmée(s)');
+          if(typeof window.renderHistorique === 'function') { try { window.renderHistorique(); } catch(e){} }
+        }
+      });
+      unsubC = window.FB.listenCol('sales/'+day+'/cancel', (docs) => {
+        const local = LS.get(lsKey, []);
+        let changed = 0;
+        Object.keys(docs).forEach(k => {
+          const s = local.find(x => x.cloudKey === k);
+          if(s && !s.cancelled){ s.cancelled = true; s.cancelledAt = docs[k].ts || Date.now(); changed++; }
+        });
+        if(changed){ LS.set(lsKey, local); if(typeof window.renderHistorique === 'function') { try { window.renderHistorique(); } catch(e){} } }
+      });
+    }
+    attach();
+    setInterval(attach, 5 * 60 * 1000);
+  })();
+
   // ── BOOTSTRAP : pull initial via getDoc/getDocs standard ──
   // Sans attendre onSnapshot (qui peut être lent à fire). Tolère un cache stale ;
   // le polling 3s ramène la fraîcheur ensuite.
@@ -310,8 +379,13 @@ window.initFirebaseListeners = function(){
           if(typeof window.renderSalle === 'function') window.renderSalle();
           console.log('[Bootstrap] Salle pull OK ('+data.salleLayout.length+' éléments)');
         }
-        if(data.branding && typeof window.branding !== 'undefined'){
-          Object.assign(window.branding, data.branding);
+        if(data.branding && typeof branding !== 'undefined'){
+          const S = window.__safe || {}, b = data.branding;
+          if(b.name) branding.name = String(b.name).slice(0, 60);
+          if(b.tagline) branding.tagline = String(b.tagline).slice(0, 120);
+          if(b.emoji) branding.emoji = String(b.emoji).slice(0, 8);
+          if(S.safeColor && S.safeColor(b.accent)) branding.accent = S.safeColor(b.accent);
+          if(S.safeUrl && S.safeUrl(b.logoUrl)) branding.logoUrl = S.safeUrl(b.logoUrl);
           if(typeof window.applyBranding === 'function') window.applyBranding();
         }
       }
@@ -631,6 +705,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="toggle-row"><span class="toggle-lbl">Afficher les photos sur les cartes</span><label class="toggle"><input type="checkbox" id="s-showimg" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
         <div class="toggle-row"><span class="toggle-lbl">Mode table activé par défaut</span><label class="toggle"><input type="checkbox" id="s-tablemode" onchange="saveSettings()"><div class="toggle-track"></div></label></div>
         <div class="toggle-row"><span class="toggle-lbl">Afficher les descriptions courtes</span><label class="toggle"><input type="checkbox" id="s-showsub" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
+        <div class="toggle-row"><span class="toggle-lbl">Afficher le stock restant sur les cartes <span style="font-size:10px;color:var(--muted)">(le badge ÉPUISÉ reste toujours visible)</span></span><label class="toggle"><input type="checkbox" id="s-showstock" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
+        <div class="toggle-row"><span class="toggle-lbl">Popup "Plat du jour" à la première ouverture du jour</span><label class="toggle"><input type="checkbox" id="s-pdjprompt" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
         <div class="form-group" style="margin-top:8px"><label class="form-label">Devise</label>
           <select class="form-input" id="s-currency" onchange="saveSettings()"><option value="€">€ Euro</option><option value="$">$ Dollar</option><option value="£">£ Livre</option><option value="CHF">CHF Franc suisse</option><option value="XPF">XPF Franc CFP</option></select>
         </div>
@@ -729,6 +805,18 @@ document.addEventListener('DOMContentLoaded', () => {
             <button onclick="saveServeurPin()" style="height:44px;padding:0 18px;border-radius:var(--radius-sm);background:rgba(74,158,255,.1);color:var(--blue);border:1px solid rgba(74,158,255,.2);font-weight:700;font-size:13px">✓ Enregistrer</button>
           </div>
           <div id="serveur-pin-msg" style="font-size:12px;margin-top:8px;height:16px"></div>
+        </div>
+        <!-- Sécurité v5 : appareils du resto enregistrés -->
+        <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🔒 Sécurité des appareils</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.5">Chaque appareil du resto (caisse, cuisine, téléphones) s'enregistre une fois avec le code d'enregistrement. Quand ils le sont tous, active la protection : plus personne d'autre ne pourra lire ou modifier la caisse, les tables ou les commandes.</div>
+          <div id="sec-status" style="font-size:13px;margin-bottom:10px">Chargement…</div>
+          <div id="sec-devices" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button id="sec-enforce-btn" onclick="toggleEnforce()" style="height:44px;padding:0 16px;border-radius:var(--radius-sm);font-weight:800;font-size:13px;border:1px solid var(--border);background:var(--card);color:var(--text)">…</button>
+            <button onclick="rotateEnrollCodeUI()" style="height:44px;padding:0 16px;border-radius:var(--radius-sm);font-weight:700;font-size:12px;border:1px solid var(--border);background:none;color:var(--muted)">🔑 Changer le code d'enregistrement</button>
+            <button onclick="renderSecurityPanel()" style="height:44px;padding:0 12px;border-radius:var(--radius-sm);font-size:12px;border:1px solid var(--border);background:none;color:var(--muted)">↻</button>
+          </div>
         </div>
       </div>
 
@@ -1062,6 +1150,23 @@ document.addEventListener('DOMContentLoaded', () => {
         <span class="iu-txt" id="pm-img-label">Ajouter une photo</span>
         <span class="iu-hint">JPG / PNG — max 15 Mo</span>
       </div>
+      <!-- Génération IA intégrée : photo produit sans quitter la fiche.
+           (setup-images.html reste pour la génération en lot) -->
+      <div style="margin:-4px 0 14px">
+        <button type="button" onclick="togglePmAI()" id="pm-ai-btn" style="width:100%;height:38px;border-radius:var(--radius-sm);background:rgba(155,107,255,.10);border:1px dashed rgba(155,107,255,.35);color:#b18cff;font-weight:700;font-size:12px;cursor:pointer">🎨 Générer une photo avec l'IA</button>
+        <div id="pm-ai-panel" style="display:none;margin-top:10px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px">
+          <label class="form-label" style="font-size:10px">Description de la photo (modifiable avant de générer)</label>
+          <textarea class="form-textarea" id="pm-ai-prompt" style="min-height:54px;font-size:12px" placeholder="Ex : assiette de bavette grillée, sauce échalote…"></textarea>
+          <div id="pm-ai-preview-wrap" style="display:none;margin:10px 0;text-align:center">
+            <img id="pm-ai-preview" style="max-width:100%;max-height:220px;border-radius:8px;border:1px solid var(--border)" alt="Aperçu IA">
+            <div id="pm-ai-status" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button type="button" onclick="genProdImageAI()" id="pm-ai-gen" style="flex:1;height:36px;border-radius:var(--radius-sm);background:#9b6bff;color:#fff;font-weight:700;font-size:12px;border:none;cursor:pointer">✨ Générer</button>
+            <button type="button" onclick="usePmAIImage()" id="pm-ai-use" style="flex:1;height:36px;border-radius:var(--radius-sm);background:var(--green);color:#000;font-weight:700;font-size:12px;border:none;cursor:pointer;display:none">✓ Utiliser cette photo</button>
+          </div>
+        </div>
+      </div>
       <div class="form-group"><label class="form-label">Nom du produit *</label><input class="form-input" id="pm-name" placeholder="Ex: Burger Maison"></div>
       <div class="form-group"><label class="form-label">Description courte</label><textarea class="form-textarea" id="pm-sub" placeholder="Ingrédients, précisions…"></textarea></div>
       <div class="form-row">
@@ -1276,10 +1381,70 @@ const ACCENT_COLORS = ['#f5a623','#22c97a','#4a9eff','#e84040','#9b6bff','#ff6ba
 
 const LS = {
   get(k,def){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):def; }catch(e){return def;} },
-  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){ toast('Stockage plein','r'); } },
+  // Renvoie true/false : un appelant critique (encaissement) DOIT vérifier le
+  // résultat — avant, une écriture refusée (stockage plein) ne faisait qu'un
+  // toast et la vente était perdue.
+  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); return true; }catch(e){ try{ toast('⚠️ Stockage plein — appelle Farès','r'); }catch(_){} return false; } },
 };
 // Expose à window pour que les listeners Firebase (script type=module) puissent y accéder
 window.LS = LS;
+// Demande au navigateur de ne pas purger le stockage de la caisse (Safari/Chrome).
+try { if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
+
+// ── Journée de service ──
+// Un service qui passe minuit appartient à la journée de la veille : avant
+// 5 h du matin, on compte sur la date d'hier. Sans ça, le Z fait à 00h30 ne
+// voyait que les ventes d'après minuit et le fond de caisse repartait à 0.
+const SERVICE_DAY_CUTOFF_H = 5;
+function serviceDate(d){
+  const x = new Date(d || Date.now());
+  if(x.getHours() < SERVICE_DAY_CUTOFF_H) x.setDate(x.getDate() - 1);
+  return x;
+}
+function serviceDayKey(d){
+  const x = serviceDate(d);
+  return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+}
+window.serviceDayKey = serviceDayKey;
+
+// Saisie en cours ? (lu par sw-register.js : pas de rechargement automatique
+// de mise à jour pendant un ticket, un paiement ou une fiche ouverte).
+window.__isBusy = function(){
+  try {
+    if(typeof ticket !== 'undefined' && ticket.length) return true;
+    return !!document.querySelector('#pay-overlay.show, #table-overlay.show, #prod-modal.show, #options-modal.show');
+  } catch(e){ return false; }
+};
+
+// Une seule caisse ouverte par appareil : deux onglets s'écrasaient
+// mutuellement les tables et importaient deux fois les commandes.
+(function(){
+  try {
+    const ch = new BroadcastChannel('marmite-caisse');
+    const me = Math.random().toString(36).slice(2);
+    let blocked = false;
+    ch.onmessage = (ev) => {
+      const m = ev.data || {};
+      if(m.type === 'hello' && m.id !== me && !blocked) ch.postMessage({ type: 'here', id: me, to: m.id });
+      if(m.type === 'here' && m.to === me && !blocked){
+        blocked = true;
+        const show = () => {
+          const w = document.createElement('div');
+          w.setAttribute('style', 'position:fixed;inset:0;z-index:2147483001;background:rgba(5,6,8,.97);color:#fff;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;font-family:system-ui,sans-serif');
+          w.innerHTML = '<div style="max-width:380px"><div style="font-size:40px">⚠️</div><div style="font-size:18px;font-weight:800;margin:10px 0">La caisse est déjà ouverte dans un autre onglet</div><div style="font-size:14px;opacity:.8">Ferme cet onglet et utilise l\'autre : deux caisses ouvertes en même temps sur le même appareil s\'écrasent les tables.</div></div>';
+          document.body.appendChild(w);
+        };
+        if(document.body) show(); else document.addEventListener('DOMContentLoaded', show);
+      }
+    };
+    ch.postMessage({ type: 'hello', id: me });
+  } catch(e){}
+})();
+
+// Arrondi monétaire au centime (évite 0.1+0.2 = 0.30000000000000004)
+function r2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+// TVA d'une ligne : 0 est un taux valide, seul « absent » prend 10 par défaut.
+function tvaOf(x){ const t = Number(x && x.tva); return Number.isFinite(t) && x.tva !== null && x.tva !== '' ? t : 10; }
 
 function imgKey(n){ return 'img_'+n.toLowerCase().replace(/[^a-z0-9]/g,'_').slice(0,40); }
 function getImg(n){ return LS.get(imgKey(n),null); }
@@ -1545,7 +1710,26 @@ let products = LS.get('products', DEFAULT_PRODUCTS);
 var branding = LS.get('branding', {name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'});
 let settings = LS.get('settings', {showImg:true,tableMode:false,showSub:true,currency:'€',tva:5.5,cuissons:'Bleu,Saignant,À point,Bien cuit',garnitures:'Frites maison,Salade,Pommes de terre sautées,Pâtes'});
 
+// Horodate les produits modifiés LOCALEMENT (différents de la dernière version
+// cloud reçue). Le listener menu adopte une version cloud seulement si elle est
+// plus récente → un prix changé sur un autre appareil n'est plus ré-écrasé par
+// la tablette caisse au prochain auto-publish (bug H3 audit 18/11).
+function stampChangedProducts(){
+  const cloud = (window.publishedMenu && Array.isArray(window.publishedMenu.products)) ? window.publishedMenu.products : null;
+  if(!cloud) return;
+  const byId = new Map(cloud.map(p => [p.id, p]));
+  const view = (p) => JSON.stringify(productCloudView(p));
+  products.forEach(p => {
+    if(!p.active) return; // seuls les produits actifs sont publiés
+    const cp = byId.get(p.id);
+    if(!cp || view(cp) !== view(p)){
+      if(!p.updatedAt || (cp && (cp.updatedAt||0) >= p.updatedAt)) p.updatedAt = Date.now();
+    }
+  });
+}
+
 function saveAll(){
+  try { stampChangedProducts(); } catch(e){ console.warn('[stamp] ', e); }
   LS.set('cats',cats);
   LS.set('products',products);
   LS.set('branding',branding);
@@ -1642,7 +1826,8 @@ function applyBranding(){
       pimg.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:16px;display:block';
       pinLogoEl.appendChild(pimg);
     } else {
-      pinLogoEl.innerHTML = `<span class="pin-logo-default" style="width:100%;height:100%;background:linear-gradient(135deg,${branding.accent||'#f5a623'},${shadeColor(branding.accent||'#f5a623',-20)});border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:32px">${branding.emoji||'🍲'}</span>`;
+      const acc = (window.__safe && window.__safe.safeColor(branding.accent, '#f5a623')) || '#f5a623';
+      pinLogoEl.innerHTML = `<span class="pin-logo-default" style="width:100%;height:100%;background:linear-gradient(135deg,${acc},${shadeColor(acc,-20)});border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:32px">${esc(branding.emoji||'🍲')}</span>`;
     }
   }
   // Sauvegarde dans localStorage pour le pre-boot de la prochaine visite
@@ -1848,7 +2033,7 @@ function renderMenu(){
     html+='</div>';
   }
   sections.forEach(sec=>{
-    if(sec.name) html+=`<div class="sec-hdr"><span class="sec-line"></span><span class="sec-title">${sec.name.toUpperCase()}</span><span class="sec-line"></span></div>`;
+    if(sec.name) html+=`<div class="sec-hdr"><span class="sec-line"></span><span class="sec-title">${esc(String(sec.name).toUpperCase())}</span><span class="sec-line"></span></div>`;
     const items=sec.items.filter(p=>!p.pdj);
     if(items.length){ html+='<div class="menu-grid">'; items.forEach(p=>html+=cardHTML(p)); html+='</div>'; }
   });
@@ -1856,20 +2041,22 @@ function renderMenu(){
 }
 
 function cardHTML(p){
-  const img=p.imgUrl||getImg(p.id)||getImg(p.name);
+  const img=safeImg(p.imgUrl||getImg(p.id)||getImg(p.name));
   const imgZone=settings.showImg
     ?(img?`<div class="mcard-img"><img src="${img}" alt="${esc(p.name)}" loading="lazy"><div class="img-grad"></div></div>`
         :`<div class="mcard-img"><div class="mcard-ph">🍽️</div></div>`)
     :'';
   const sub=settings.showSub&&p.sub?`<div class="mcard-sub">${esc(p.sub)}</div>`:'';
   const isOutOfStock = p.stock!==undefined && p.stock>=0 && p.stock===0;
+  // Badge ÉPUISÉ toujours affiché (info critique). Le compteur "STOCK: n"
+  // est désactivable via Réglages → Affichage (settings.showStockBadge).
   const stockBadge = isOutOfStock ? '<span style="position:absolute;top:6px;right:6px;background:var(--red);color:#fff;font-size:8px;font-weight:800;padding:2px 7px;border-radius:20px;letter-spacing:.5px;z-index:2">ÉPUISÉ</span>' :
-    (p.stock!==undefined && p.stock>=0 && p.stock<=5) ? `<span style="position:absolute;top:6px;right:6px;background:rgba(245,166,35,.9);color:#000;font-size:8px;font-weight:800;padding:2px 7px;border-radius:20px;letter-spacing:.5px;z-index:2">STOCK: ${p.stock}</span>` : '';
-  return `<div class="mcard${p.pdj?' pdj':''}${isOutOfStock?' out-of-stock':''}" onclick="${isOutOfStock?'toast(\'Produit épuisé\',\'r\')':'addToTicket(\''+p.id+'\')'}">
+    (settings.showStockBadge!==false && p.stock!==undefined && p.stock>=0 && p.stock<=5) ? `<span style="position:absolute;top:6px;right:6px;background:rgba(245,166,35,.9);color:#000;font-size:8px;font-weight:800;padding:2px 7px;border-radius:20px;letter-spacing:.5px;z-index:2">STOCK: ${p.stock}</span>` : '';
+  return `<div class="mcard${p.pdj?' pdj':''}${isOutOfStock?' out-of-stock':''}" onclick="${isOutOfStock?'toast(\'Produit épuisé\',\'r\')':'addToTicket('+jsArg(p.id)+')'}">
     ${p.pdj?'<span class="pdj-tag">Aujourd\'hui</span>':''}
     ${stockBadge}
     ${imgZone}
-    <button class="mcard-86" onclick="event.stopPropagation();toggle86('${p.id}')" title="${isOutOfStock?'Remettre disponible':'Marquer épuisé (86)'}" style="position:absolute;top:6px;left:6px;width:28px;height:28px;border-radius:50%;background:${isOutOfStock?'rgba(34,201,122,.95)':'rgba(0,0,0,.6)'};border:1px solid ${isOutOfStock?'var(--green)':'rgba(255,255,255,.2)'};color:#fff;font-size:13px;font-weight:800;cursor:pointer;z-index:3;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)">${isOutOfStock?'✓':'86'}</button>
+    <button class="mcard-86" onclick="event.stopPropagation();toggle86(${jsArg(p.id)})" title="${isOutOfStock?'Remettre disponible':'Marquer épuisé (86)'}" style="position:absolute;top:6px;left:6px;width:28px;height:28px;border-radius:50%;background:${isOutOfStock?'rgba(34,201,122,.95)':'rgba(0,0,0,.6)'};border:1px solid ${isOutOfStock?'var(--green)':'rgba(255,255,255,.2)'};color:#fff;font-size:13px;font-weight:800;cursor:pointer;z-index:3;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)">${isOutOfStock?'✓':'86'}</button>
     <div class="mcard-body">
       <div class="mcard-name">${esc(p.name)}</div>${sub}
       <div class="mcard-foot"><div class="mcard-price">${fmt(p.price)}</div>${isOutOfStock?'':'<div class="mcard-add">+</div>'}</div>
@@ -1897,7 +2084,12 @@ function toggle86(pid){
 }
 window.toggle86 = toggle86;
 
-function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Pour une valeur placée dans un onclick="f('…')" : JSON (guillemets doubles
+// échappés) puis échappement HTML de l'attribut. Ex: onclick="f(${jsArg(id)})"
+function jsArg(v){ return esc(JSON.stringify(String(v??''))); }
+// URL d'image sûre (https, data:image raster, chemin relatif) sinon ''
+function safeImg(u){ return (window.__safe && window.__safe.safeUrl) ? window.__safe.safeUrl(u) : ''; }
 
 // ═══════════════════════════════════════════════════════════════
 //  TICKET
@@ -1928,17 +2120,28 @@ function addToTicketDirect(pid, cuisson, garniture, variantLabel, addSirop){
   // Match existing row
   const matchKey = pid+'|'+(variantLabel||'')+'|'+(cuisson||'')+'|'+(garniture||'')+'|'+(addSirop?'sirop':'');
   const ex=ticket.find(r=>r._matchKey===matchKey&&r.personId===(activePerson||null));
-  if(ex) ex.qty++;
+  // Stock décrémenté → la ligne le note pour pouvoir le rendre si on la retire
+  const tookStock = (p.stock!==undefined && p.stock!==null && p.stock>0);
+  if(ex){
+    ex.qty++;
+    if(tookStock) ex._stockTaken = (ex._stockTaken||0) + 1;
+    // Le supplément sirop suit la quantité (avant : le 2e sirop n'était jamais facturé)
+    if(addSirop){
+      const sup = ticket.find(r=>r._matchKey===matchKey+'_sirop'&&r.personId===(activePerson||null));
+      if(sup) sup.qty++;
+      else ticket.push({rid:uid(),pid:pid+'_sirop',name:'  + Supp. Sirop',price:0.50,tva:tvaOf(p),qty:1,personId:activePerson||null,_matchKey:matchKey+'_sirop',_isSupplement:true});
+    }
+  }
   else {
-    const row = {rid:uid(),pid,name:displayName,price:finalPrice,tva:p.tva||10,qty:1,personId:activePerson||null,cuisson:cuisson||null,garniture:garniture||null,_matchKey:matchKey};
+    const row = {rid:uid(),pid,name:displayName,price:finalPrice,tva:tvaOf(p),qty:1,personId:activePerson||null,cuisson:cuisson||null,garniture:garniture||null,variant:variantLabel||null,_matchKey:matchKey,_stockTaken:tookStock?1:0};
     ticket.push(row);
     // Add sirop supplement as separate line
     if(addSirop){
-      ticket.push({rid:uid(),pid:pid+'_sirop',name:'  + Supp. Sirop',price:0.50,tva:p.tva||10,qty:1,personId:activePerson||null,_matchKey:matchKey+'_sirop',_isSupplement:true});
+      ticket.push({rid:uid(),pid:pid+'_sirop',name:'  + Supp. Sirop',price:0.50,tva:tvaOf(p),qty:1,personId:activePerson||null,_matchKey:matchKey+'_sirop',_isSupplement:true});
     }
   }
   // Decrement stock
-  if(p.stock!==undefined && p.stock>0){ p.stock--; saveAll(); }
+  if(tookStock){ p.stock--; saveAll(); }
   renderTicket(); renderMenu();
   autoSaveTable();
 }
@@ -1955,7 +2158,7 @@ function openOptionsModal(pid){
     html+=`<div style="margin-bottom:16px">
       <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">📏 Taille</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-variant-btns">
-        ${p.variants.map((v,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${esc(v.label)}" data-price="${v.price}" onclick="selectOptChip(this,'variant')">${v.label} — ${v.price.toFixed(2)}€</button>`).join('')}
+        ${p.variants.map((v,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${esc(v.label)}" data-price="${Number(v.price)||0}" onclick="selectOptChip(this,'variant')">${esc(v.label)} — ${(Number(v.price)||0).toFixed(2)}€</button>`).join('')}
       </div>
     </div>`;
   }
@@ -1963,7 +2166,7 @@ function openOptionsModal(pid){
     html+=`<div style="margin-bottom:16px">
       <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🔥 Cuisson</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-cuisson-btns">
-        ${cuissons.map((c,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${esc(c)}" onclick="selectOptChip(this,'cuisson')">${c}</button>`).join('')}
+        ${cuissons.map((c,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${esc(c)}" onclick="selectOptChip(this,'cuisson')">${esc(c)}</button>`).join('')}
       </div>
     </div>`;
   }
@@ -1971,7 +2174,7 @@ function openOptionsModal(pid){
     html+=`<div style="margin-bottom:16px">
       <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🍟 Garniture</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-garniture-btns">
-        ${garnitures.map((g,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${esc(g)}" onclick="selectOptChip(this,'garniture')">${g}</button>`).join('')}
+        ${garnitures.map((g,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${esc(g)}" onclick="selectOptChip(this,'garniture')">${esc(g)}</button>`).join('')}
       </div>
     </div>`;
   }
@@ -2013,12 +2216,30 @@ function closeOptionsModal(){
   document.getElementById('options-modal').classList.remove('show');
   pendingOptionsPid = null;
 }
-function removeRow(rid){ ticket=ticket.filter(r=>r.rid!==rid); renderTicket(); autoSaveTable(); }
+// Rend au stock ce qu'une ligne avait pris (avant : stock jamais rendu au
+// retrait/annulation d'une ligne → « ÉPUISÉ » affiché à tort).
+function giveBackStock(row, qty){
+  if(!row || !row._stockTaken) return;
+  const n = Math.min(qty, row._stockTaken);
+  const p = products.find(x=>x.id===row.pid);
+  if(p && p.stock!==undefined && p.stock!==null && p.stock>=0){ p.stock += n; saveAll(); }
+  row._stockTaken -= n;
+}
+function removeRow(rid){
+  const row = ticket.find(r=>r.rid===rid);
+  if(row){
+    giveBackStock(row, row.qty);
+    // Retirer un plat retire aussi son supplément sirop
+    if(row._matchKey && !row._isSupplement) ticket = ticket.filter(r=>r._matchKey!==row._matchKey+'_sirop' || r.personId!==row.personId);
+  }
+  ticket=ticket.filter(r=>r.rid!==rid); renderTicket(); renderMenu(); autoSaveTable();
+}
 function undoLast(){
   if(!ticket.length) return;
   const l=ticket[ticket.length-1];
+  giveBackStock(l, 1);
   if(l.qty>1) l.qty--; else ticket.pop();
-  renderTicket();
+  renderTicket(); renderMenu();
   autoSaveTable();
 }
 function clearTicket(){
@@ -2027,7 +2248,8 @@ function clearTicket(){
   const count = ticket.length;
   const total = ticket.reduce((s,r)=>s+r.qty*r.price,0);
   if(!confirm(`Vider le ticket en cours ?\n\n${count} article(s) — ${fmt(total)}\n\nCette action est irréversible.`)) return;
-  ticket=[]; renderTicket(); autoSaveTable();
+  ticket.forEach(r => giveBackStock(r, r.qty));
+  ticket=[]; renderTicket(); renderMenu(); autoSaveTable();
   toast('Ticket vidé','o');
 }
 
@@ -2043,19 +2265,24 @@ function autoSaveTable(){
 function calculateTVADetails(items){
   const rates = {}; // {rate: {ttc, ht, tva}}
   let totalTTC = 0;
+  // TTC cumulé par taux, PUIS TVA calculée et arrondie au centime par taux
+  // (méthode du ticket) : HT + TVA = TTC exactement, sans écart d'un centime.
   items.forEach(r=>{
-    const rate = r.tva || 10;
-    const ttc = r.qty * r.price;
-    const ht = ttc / (1 + rate/100);
-    const tvaAmount = ttc - ht;
+    const rate = tvaOf(r);
+    const ttc = (Number(r.qty)||0) * (Number(r.price)||0);
     totalTTC += ttc;
     if(!rates[rate]) rates[rate] = {ttc:0, ht:0, tva:0};
     rates[rate].ttc += ttc;
-    rates[rate].ht += ht;
-    rates[rate].tva += tvaAmount;
   });
-  const totalHT = Object.values(rates).reduce((s,r)=>s+r.ht,0);
-  const totalTVA = Object.values(rates).reduce((s,r)=>s+r.tva,0);
+  Object.keys(rates).forEach(k => {
+    const x = rates[k], rate = Number(k);
+    x.ttc = r2(x.ttc);
+    x.tva = r2(x.ttc - x.ttc / (1 + rate/100));
+    x.ht = r2(x.ttc - x.tva);
+  });
+  totalTTC = r2(totalTTC);
+  const totalHT = r2(Object.values(rates).reduce((s,r)=>s+r.ht,0));
+  const totalTVA = r2(Object.values(rates).reduce((s,r)=>s+r.tva,0));
   return {rates, totalTTC, totalHT, totalTVA};
 }
 
@@ -2105,13 +2332,13 @@ function renderTicket(){
   // Filter by person if active
   c.innerHTML=rows.map(r=>{
     const prod=products.find(x=>x.id===r.pid);
-    const img=(prod&&prod.imgUrl)||getImg(r.pid)||getImg(r.name);
-    const th=img?`<div class="trow-thumb"><img src="${img}" alt="${esc(r.name)}"></div>`:`<div class="trow-thumb">🍽️</div>`;
+    const img=safeImg((prod&&prod.imgUrl)||getImg(r.pid)||getImg(r.name));
+    const th=img?`<div class="trow-thumb"><img src="${esc(img)}" alt="${esc(r.name)}"></div>`:`<div class="trow-thumb">🍽️</div>`;
     const person=persons.find(p=>p.id===r.personId);
-    const dot=person?`<span class="trow-who" style="background:${person.color}"></span>`:'<span class="trow-who" style="background:transparent"></span>';
+    const dot=person?`<span class="trow-who" style="background:${esc(person.color)}"></span>`:'<span class="trow-who" style="background:transparent"></span>';
     const optTxt = [r.cuisson, r.garniture].filter(Boolean).join(' · ');
     const optHtml = optTxt ? `<div style="font-size:9px;color:var(--accent);font-weight:600;margin-top:1px">${esc(optTxt)}</div>` : '';
-    return `<div class="trow">${th}${dot}<span class="trow-qty">${r.qty}×</span><span class="trow-name">${esc(r.name)}${optHtml}</span><span class="trow-price">${fmt(r.qty*r.price)}</span><button class="trow-del" onclick="removeRow('${r.rid}')">✕</button></div>`;
+    return `<div class="trow">${th}${dot}<span class="trow-qty">${Number(r.qty)||0}×</span><span class="trow-name">${esc(r.name)}${optHtml}</span><span class="trow-price">${fmt(r.qty*r.price)}</span><button class="trow-del" onclick="removeRow(${jsArg(r.rid)})">✕</button></div>`;
   }).join('');
   c.scrollTop=c.scrollHeight;
 }
@@ -2157,8 +2384,15 @@ function saveTableNote(value){
 }
 window.saveTableNote = saveTableNote;
 function closeTableModal(){
-  // Save state back to tableData
-  if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); }
+  // Save state back to tableData — ET pousse vers Firebase (avant : local
+  // seulement → un autre appareil ou le listener réinjectait l'ancien ticket).
+  if(currentTableId){
+    const note = tableData[currentTableId] && tableData[currentTableId].note;
+    tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};
+    if(note) tableData[currentTableId].note = note;
+    LS.set('tableData',tableData);
+    syncTableToFirebase(currentTableId);
+  }
   document.getElementById('table-overlay').classList.remove('show');
   renderSalle();
 }
@@ -2217,7 +2451,7 @@ function renderPersonBar(){
   if(!persons.length){ bar.classList.remove('show'); activePerson=null; return; }
   bar.classList.add('show');
   bar.innerHTML=`<span style="font-size:11px;color:var(--muted);font-weight:700;flex-shrink:0">Pour :</span>`
-    +persons.map(p=>`<button class="pbtn${activePerson===p.id?' active':''}" style="${activePerson===p.id?'border-color:'+p.color+';color:'+p.color:''}" onclick="setActivePerson('${p.id}')">${p.name}</button>`).join('')
+    +persons.map(p=>`<button class="pbtn${activePerson===p.id?' active':''}" style="${activePerson===p.id?'border-color:'+esc(p.color)+';color:'+esc(p.color):''}" onclick="setActivePerson(${jsArg(p.id)})">${esc(p.name)}</button>`).join('')
     +`<button class="pbtn add-p" onclick="addPerson()">+ Ajouter</button>`;
 }
 
@@ -2228,9 +2462,9 @@ function renderTableModal(){
     const items=ticket.filter(r=>r.personId===p.id);
     const total=items.reduce((s,r)=>s+r.qty*r.price,0);
     const count=items.reduce((s,r)=>s+r.qty,0);
-    return `<div class="pcard${activePerson===p.id?' active-p':''}" onclick="setActivePerson('${p.id}')" style="${activePerson===p.id?'border-color:'+p.color:''}">
-      <button class="pcard-del" onclick="event.stopPropagation();removePerson('${p.id}')">✕</button>
-      <div class="pcard-name" style="color:${p.color}">${esc(p.name)}</div>
+    return `<div class="pcard${activePerson===p.id?' active-p':''}" onclick="setActivePerson(${jsArg(p.id)})" style="${activePerson===p.id?'border-color:'+esc(p.color):''}">
+      <button class="pcard-del" onclick="event.stopPropagation();removePerson(${jsArg(p.id)})">✕</button>
+      <div class="pcard-name" style="color:${esc(p.color)}">${esc(p.name)}</div>
       <div class="pcard-total">${fmt(total)}</div>
       <div class="pcard-count">${count} article${count>1?'s':''}</div>
       ${activePerson===p.id?'<div style="font-size:9px;color:var(--green);font-weight:700;margin-top:2px">✓ SÉLECTIONNÉ</div>':''}
@@ -2254,13 +2488,13 @@ function renderTableModal(){
       html+=persons.map(p=>{
         const items=ticket.filter(r=>r.personId===p.id);
         const total=items.reduce((s,r)=>s+r.qty*r.price,0);
-        const iList=items.slice(0,3).map(r=>r.qty+'× '+r.name).join(', ')+(items.length>3?'…':'');
+        const iList=esc(items.slice(0,3).map(r=>r.qty+'× '+r.name).join(', ')+(items.length>3?'…':''));
         return `<div class="tm-summary-row">
-          <div class="ts-dot" style="background:${p.color}"></div>
+          <div class="ts-dot" style="background:${esc(p.color)}"></div>
           <div class="ts-name">${esc(p.name)}</div>
           <div class="ts-items">${iList||'—'}</div>
           <div class="${p.paid?'ts-paid':'ts-total'}">${fmt(total)}</div>
-          <button class="ts-pay-btn${p.paid?' paid':''}" onclick="payPerson('${p.id}')"${total===0?' disabled':''}>${p.paid?'✓ Payé':'Encaisser'}</button>
+          <button class="ts-pay-btn${p.paid?' paid':''}" onclick="payPerson(${jsArg(p.id)})"${total===0?' disabled':''}>${p.paid?'✓ Payé':'Encaisser'}</button>
         </div>`;
       }).join('');
     }
@@ -2294,7 +2528,7 @@ function renderTableModal(){
             <span style="color:var(--muted)">${r.qty}×</span>
             <span style="flex:1;font-weight:600">${esc(r.name)}</span>
             <span style="color:var(--green);font-size:11px;font-weight:700">${fmt(r.qty*r.price)}</span>
-            ${persons.map(p=>`<button onclick="assignItemToPerson('${r.rid}','${p.id}')" style="height:24px;padding:0 8px;border-radius:12px;background:none;border:1px solid ${p.color};color:${p.color};font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap" title="Attribuer à ${esc(p.name)}">→ ${esc(p.name).slice(0,6)}</button>`).join('')}
+            ${persons.map(p=>`<button onclick="assignItemToPerson(${jsArg(r.rid)},${jsArg(p.id)})" style="height:24px;padding:0 8px;border-radius:12px;background:none;border:1px solid ${p.color};color:${p.color};font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap" title="Attribuer à ${esc(p.name)}">→ ${esc(p.name).slice(0,6)}</button>`).join('')}
           </div>`;
         });
         html+=`</div>`;
@@ -2328,16 +2562,18 @@ function payPerson(pid){
   const total=items.reduce((s,r)=>s+r.qty*r.price,0);
   if(total===0){ toast('Aucun article pour '+p.name,'o'); return; }
   openPayFor(total, ()=>{
-    const tip = (window.lastReceipt && window.lastReceipt.tip) || 0;
-    saveToHistory({tableId: currentTableId, label: p.name, items:[...items], total: total + tip, payType: currentPayType, tip});
+    // lastReceipt est rempli par validatePay() AVANT ce callback : c'est la
+    // seule source fiable du mode de paiement (closePay() a déjà remis
+    // currentPayType à '' → avant, tout était enregistré en CB).
+    if(!recordSale({tableId: currentTableId, label: p.name, items:[...items]})) return;
     p.paid=true;
     ticket=ticket.filter(r=>r.personId!==pid);
-    if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); }
+    if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); syncTableToFirebase(currentTableId); }
     renderTicket(); renderPersonBar();
-    toast('✓ '+p.name+' — '+fmt(total)+' encaissé');
+    toast('✓ '+p.name+' — '+fmt(window.lastReceipt ? window.lastReceipt.total : total)+' encaissé');
     checkAutoClose();
     if(ticket.length>0) renderTableModal();
-  });
+  }, items);
 }
 
 function payUnassigned(){
@@ -2345,29 +2581,43 @@ function payUnassigned(){
   const total=items.reduce((s,r)=>s+r.qty*r.price,0);
   if(!total){ toast('Rien à encaisser','o'); return; }
   openPayFor(total,()=>{
-    const tip = (window.lastReceipt && window.lastReceipt.tip) || 0;
-    saveToHistory({tableId: currentTableId, label:'Non attribués', items:[...items], total: total + tip, payType: currentPayType, tip});
+    if(!recordSale({tableId: currentTableId, label:'Non attribués', items:[...items]})) return;
     ticket=ticket.filter(r=>r.personId);
-    if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); }
+    if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); syncTableToFirebase(currentTableId); }
     renderTicket();
-    toast('✓ Articles encaissés — '+fmt(total));
+    toast('✓ Articles encaissés — '+fmt(window.lastReceipt ? window.lastReceipt.total : total));
     checkAutoClose();
     if(ticket.length>0) renderTableModal();
+  }, items);
+}
+
+// Enregistre la vente à partir de lastReceipt (montant réellement encaissé,
+// mode de paiement, pourboire, offert, n° de note). Renvoie false si
+// l'enregistrement local a échoué (stockage plein) → l'appelant NE libère PAS
+// la table : la vente n'est jamais perdue en silence.
+function recordSale(base){
+  const lr = window.lastReceipt || {};
+  return saveToHistory({
+    ...base,
+    total: lr.total ?? 0,
+    payType: lr.payType || 'cb',
+    tip: lr.tip || 0,
+    offert: !!lr.offert,
+    offertGrossValue: lr.offertGrossValue || 0,
+    receiptNumber: lr.number || null
   });
 }
 
 function payAllAndClose(){
   const total=ticket.reduce((s,r)=>s+r.qty*r.price,0);
   if(!total){ toast('Rien à encaisser','o'); return; }
-  // Audit salle #8 : si certains convives ont déjà payé (split partiel), alerter
-  // l'utilisateur avant d'encaisser le total — sinon double-encaissement silencieux.
+  // Les convives déjà encaissés individuellement ont leurs articles retirés du
+  // ticket (et synchronisés) : « Tout encaisser » ne prend que le reste.
   const paidCount = Array.isArray(persons) ? persons.filter(p => p.paid).length : 0;
   if(paidCount > 0){
     const ok = confirm(
-      `⚠ Attention : ${paidCount} convive(s) ont déjà été encaissés individuellement.\n\n` +
-      `"Tout encaisser" va débiter le TOTAL de la table (${fmt(total)}), ` +
-      `pas seulement la part restante.\n\n` +
-      `Continuer ?`
+      `${paidCount} convive(s) ont déjà payé leur part.\n\n` +
+      `Encaisser le RESTE de la table : ${fmt(total)} ?`
     );
     if(!ok) return;
   }
@@ -2375,8 +2625,8 @@ function payAllAndClose(){
   // (allergies, anniversaire, demandes spéciales — utile pour SAV / réclamations).
   const tableNote = (currentTableId && tableData[currentTableId] && tableData[currentTableId].note) || '';
   openPayFor(total,()=>{
+    if(!recordSale({tableId: currentTableId, items:[...ticket], note: tableNote})) return;
     const tip = (window.lastReceipt && window.lastReceipt.tip) || 0;
-    saveToHistory({tableId: currentTableId, items:[...ticket], total: total + tip, payType: currentPayType, tip, note: tableNote});
     ticket=[]; persons=[]; activePerson=null;
     if(currentTableId){
       tableData[currentTableId]={persons:[],ticket:[]};
@@ -2405,16 +2655,8 @@ function openPay(){
     // window.lastReceipt est rempli par validatePay() AVANT le callback (cf. L2517+)
     // donc on récupère ici tip + payType + montant réellement encaissé.
     const lr = window.lastReceipt || {};
-    const tip = lr.tip || 0;
-    const realTotal = lr.total ?? (total + tip); // 0 si "Offert", sinon total+tip
-    saveToHistory({
-      tableId: currentTableId||'direct',
-      items:[...ticket],
-      total: realTotal,
-      payType: lr.payType || currentPayType,
-      tip,
-      offert: !!lr.offert
-    });
+    const realTotal = lr.total ?? total; // 0 si "Offert", sinon total+tip
+    if(!recordSale({ tableId: currentTableId||'direct', items:[...ticket] })) return;
     ticket=[]; persons=[]; activePerson=null;
     if(currentTableId){
       tableData[currentTableId]={persons:[],ticket:[]};
@@ -2429,10 +2671,13 @@ function openPay(){
     toast(msg, 'g');
   });
 }
-function openPayFor(amount, cb){
+function openPayFor(amount, cb, items){
   // Fix #4 : reset complet de l'état entre 2 paiements (anciennement
   // _currentTip pouvait être hérité d'une session précédente)
   payCallback=cb; cashStr='0'; hasDot=false; currentPayType=''; splitN=1;
+  // Articles réellement encaissés (convive / non attribués) : le ticket
+  // imprimé doit correspondre au montant payé, pas à toute la table (M3).
+  window._payItems = Array.isArray(items) ? items.map(r=>({...r})) : null;
   isValidating=false;
   window._currentTip = 0;
   window._baseAmount = amount; // sans pourboire
@@ -2462,12 +2707,14 @@ function openPayFor(amount, cb){
   });
   // TVA summary in payment modal
   const payTvaSumEl=document.getElementById('pay-tva-summary');
-  if(payTvaSumEl) payTvaSumEl.innerHTML = ticket.length ? renderTVASummaryHTML(ticket) : '';
+  const payItems = window._payItems || ticket;
+  if(payTvaSumEl) payTvaSumEl.innerHTML = payItems.length ? renderTVASummaryHTML(payItems) : '';
   document.getElementById('pay-overlay').classList.add('show');
 }
 function closePay(){
   document.getElementById('pay-overlay').classList.remove('show');
   payCallback=null; currentPayType=''; splitN=1; isValidating=false;
+  window._payItems = null;
   // Fix #15 : libère le scroll du body
   document.body.style.overflow = '';
 }
@@ -2715,10 +2962,12 @@ function validatePay(){
     return;
   }
   isValidating = true;
-  // Store receipt data BEFORE clearing ticket
-  const items = ticket.map(r=>({...r}));
+  // Store receipt data BEFORE clearing ticket — uniquement les articles
+  // effectivement encaissés (part d'un convive, non attribués, ou tout).
+  const items = (window._payItems || ticket).map(r=>({...r}));
+  window._payItems = null;
   const tvaDetails = calculateTVADetails(items);
-  const tip = (currentPayType === 'cb') ? (parseFloat(window._currentTip) || 0) : 0;
+  const tip = (currentPayType === 'cb') ? r2(parseFloat(window._currentTip) || 0) : 0;
   // Mode "Offert" (cf. audit #12) : le client ne paie rien donc le total
   // encaissé est 0. On garde tvaDetails comme référence comptable (matière
   // première TVA-récupérable) mais le receipt indique 0€ encaissé.
@@ -2726,7 +2975,7 @@ function validatePay(){
   lastReceipt = {
     number: nextReceiptNumber(),
     items,
-    total: isOffert ? 0 : (tvaDetails.totalTTC + tip), // facturé client
+    total: isOffert ? 0 : r2(tvaDetails.totalTTC + tip), // facturé client
     subtotal: isOffert ? 0 : tvaDetails.totalTTC,      // hors pourboire
     tip: isOffert ? 0 : tip,
     totalHT: isOffert ? 0 : tvaDetails.totalHT,
@@ -3012,8 +3261,8 @@ function buildReceiptContent(r){
 function sendReceiptByEmail(){
   if(!lastReceipt) return;
   const workerUrl = (settings.mailWorkerUrl || '').trim().replace(/\/$/, '');
-  const sender    = (settings.mailSender    || '').trim();
-  const isConfigured = !!(workerUrl && sender);
+  // L'expéditeur est désormais fixé côté worker (SENDER_EMAIL) : seule l'URL compte.
+  const isConfigured = !!workerUrl && !!window.FB;
   openContactModal({
     kind: 'email',
     title: '📧 Envoyer le ticket par email',
@@ -3030,17 +3279,14 @@ function sendReceiptByEmail(){
       if(isConfigured){
         try{
           toast('📤 Envoi en cours…','o');
+          // Nouveau contrat du worker : {ticketId, to}. Le worker relit le
+          // ticket dans Firestore et construit le mail lui-même (avant : il
+          // relayait n'importe quel HTML vers n'importe qui = relais de spam).
+          const ticketId = await createReceiptTicket(lastReceipt);
           const res = await fetch(workerUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              to: addr,
-              subject: content.subject,
-              html: content.html,
-              text: content.text,
-              fromName: content.restoName,
-              fromEmail: sender
-            })
+            body: JSON.stringify({ ticketId, to: addr })
           });
           const data = await res.json().catch(()=>({}));
           if(!res.ok || data.ok === false){
@@ -3104,7 +3350,23 @@ window.sendReceiptBySMS = sendReceiptBySMS;
 async function shareReceiptByQR(){
   if(!lastReceipt) return;
   if(!window.FB){ toast('Firebase requis pour le QR code', 'r'); return; }
-  const r = lastReceipt;
+  try{
+    toast('📤 Création du lien…','o');
+    const id = await createReceiptTicket(lastReceipt);
+    const base = window.location.origin + window.location.pathname.replace(/[^\/]+$/, '');
+    const url = base + 'ticket.html?id=' + id;
+    showQRModal(url);
+  }catch(err){
+    console.error('[qr]', err);
+    toast('Erreur création QR : '+(err.message||'inconnue'),'r');
+  }
+}
+window.shareReceiptByQR = shareReceiptByQR;
+
+// Crée le ticket public tickets/{id} (lisible par son seul id, jamais listable)
+// et renvoie l'id. Sert au QR code ET à l'envoi par mail (le worker relit le
+// ticket lui-même : il n'accepte plus de HTML venant du navigateur).
+async function createReceiptTicket(r){
   const tbl = r.tableId ? salleElements.find(e=>e.id===r.tableId) : null;
   const tableNum = tbl ? (tbl.number||tbl.id) : null;
   const id = generateShortId();
@@ -3136,30 +3398,22 @@ async function shareReceiptByQR(){
       ...(settings.googleReviewUrl && { google: settings.googleReviewUrl }),
       ...(settings.tripadvisorUrl && { tripadvisor: settings.tripadvisorUrl })
     },
-    mail: {
-      ...(settings.mailWorkerUrl && { workerUrl: settings.mailWorkerUrl }),
-      ...(settings.mailSender && { sender: settings.mailSender })
-    },
     legal: settings.legal || {},
     createdAt: window.FB.ts()
   };
-  try{
-    toast('📤 Création du lien…','o');
-    await window.FB.set('tickets', id, payload);
-    const base = window.location.origin + window.location.pathname.replace(/[^\/]+$/, '');
-    const url = base + 'ticket.html?id=' + id;
-    showQRModal(url);
-  }catch(err){
-    console.error('[qr]', err);
-    toast('Erreur création QR : '+(err.message||'inconnue'),'r');
-  }
+  await window.FB.set('tickets', id, payload);
+  return id;
 }
-window.shareReceiptByQR = shareReceiptByQR;
+window.createReceiptTicket = createReceiptTicket;
 
+// Id de ticket imprévisible (aléa cryptographique, 10 caractères) : le ticket
+// n'est lisible que par qui connaît son id.
 function generateShortId(){
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const a = new Uint32Array(10);
+  crypto.getRandomValues(a);
   let s = '';
-  for(let i=0; i<8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  for(let i=0; i<10; i++) s += chars[a[i] % chars.length];
   return s;
 }
 
@@ -3238,7 +3492,7 @@ window.openContactModal = openContactModal;
 function updateMailWorkerStatus(){
   const el = document.getElementById('mail-worker-status');
   if(!el) return;
-  const ok = settings.mailWorkerUrl && settings.mailSender;
+  const ok = !!settings.mailWorkerUrl; // expéditeur fixé côté worker désormais
   if(ok){
     el.innerHTML = '<span style="color:#22c97a">✓ Configuré — envoi 100% auto activé (9000/mois)</span>';
   } else {
@@ -3253,23 +3507,23 @@ async function testMailWorker(){
     toast('Entrez une adresse email valide pour tester','r'); return;
   }
   const workerUrl = ((document.getElementById('s-mail-worker-url')||{}).value || settings.mailWorkerUrl || '').trim().replace(/\/$/, '');
-  const sender    = ((document.getElementById('s-mail-sender')    ||{}).value || settings.mailSender    || '').trim();
-  if(!workerUrl || !sender){
-    toast('Remplissez l\'URL du worker ET l\'email expéditeur','r'); return;
+  if(!workerUrl){
+    toast('Remplissez l\'URL du worker','r'); return;
   }
+  if(!window.FB){ toast('Firebase requis','r'); return; }
   toast('📤 Test en cours…','o');
   try{
+    // Le worker n'envoie plus que des tickets existants : on crée un ticket
+    // de test à 0 € et on l'envoie.
+    const ticketId = await createReceiptTicket({
+      number: 'TEST', items: [{ name: 'Test de configuration', qty: 1, price: 0, tva: 10 }],
+      total: 0, totalHT: 0, totalTVA: 0, tvaRates: {}, payType: 'test',
+      date: new Date().toLocaleDateString('fr-FR'), time: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})
+    });
     const res = await fetch(workerUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        to: addr,
-        subject: '✅ Test de configuration — '+(branding.name||'La Marmite Express'),
-        html: '<div style="font-family:Arial;padding:20px"><h2>✅ Ça marche !</h2><p>Votre Worker Brevo est correctement configuré pour <strong>'+esc(branding.name||'La Marmite Express')+'</strong>. Vos clients recevront leurs tickets automatiquement.</p></div>',
-        text: 'Test Worker email réussi pour '+(branding.name||'La Marmite Express'),
-        fromName: branding.name || 'La Marmite Express',
-        fromEmail: sender
-      })
+      body: JSON.stringify({ ticketId, to: addr })
     });
     const data = await res.json().catch(()=>({}));
     if(!res.ok || data.ok === false){
@@ -3370,10 +3624,10 @@ function applyBrandingForm(){
   document.getElementById('b-tagline').value=branding.tagline||'';
   // emoji picker
   const ep=document.getElementById('emoji-picker');
-  ep.innerHTML=EMOJIS.map(e=>`<span style="font-size:24px;cursor:pointer;padding:4px;border-radius:8px;border:2px solid ${e===branding.emoji?'var(--accent)':'transparent'};transition:border-color .15s" onclick="selectEmoji(this,'${e}')">${e}</span>`).join('');
+  ep.innerHTML=EMOJIS.map(e=>`<span style="font-size:24px;cursor:pointer;padding:4px;border-radius:8px;border:2px solid ${e===branding.emoji?'var(--accent)':'transparent'};transition:border-color .15s" onclick="selectEmoji(this,${jsArg(e)})">${e}</span>`).join('');
   // color picker
   const cp=document.getElementById('color-picker');
-  cp.innerHTML=ACCENT_COLORS.map(c=>`<div class="color-swatch${c===branding.accent?' selected':''}" style="background:${c}" onclick="selectColor(this,'${c}')"></div>`).join('');
+  cp.innerHTML=ACCENT_COLORS.map(c=>`<div class="color-swatch${c===branding.accent?' selected':''}" style="background:${c}" onclick="selectColor(this,${jsArg(c)})"></div>`).join('');
   // logo preview
   const logoImg=LS.get('brand_logo',null);
   applyLogoPreview(logoImg);
@@ -3429,8 +3683,8 @@ function renderCatList(){
     div.innerHTML=`<span class="sec-card-icon">${c.icon||'📂'}</span><span class="sec-card-name">${esc(c.name)}</span>
       <span class="sec-card-count">${total} produit(s)${isEmpty?' <span title="Pas de produit actif → la catégorie n\'est PAS publiée côté client" style="color:var(--accent);font-size:10px;font-weight:800;margin-left:6px">• VIDE — NON PUBLIÉE</span>':''}</span>
       <div class="acard-actions">
-        <button class="aact aact-edit" onclick="openEditCat('${c.id}')" aria-label="Modifier ${esc(c.name)}">✏️</button>
-        <button class="aact aact-del" onclick="confirmDelCat('${c.id}')" aria-label="Supprimer ${esc(c.name)}">🗑️</button>
+        <button class="aact aact-edit" onclick="openEditCat(${jsArg(c.id)})" aria-label="Modifier ${esc(c.name)}">✏️</button>
+        <button class="aact aact-del" onclick="confirmDelCat(${jsArg(c.id)})" aria-label="Supprimer ${esc(c.name)}">🗑️</button>
       </div>`;
     el.appendChild(div);
   });
@@ -3439,7 +3693,7 @@ function renderCatList(){
 function openAddCat(){ editingCatId=null; document.getElementById('cm-title').textContent='Nouvelle catégorie'; document.getElementById('cm-name').value=''; document.getElementById('cm-del-btn').style.display='none'; buildCatEmojiPicker(null); document.getElementById('cat-modal').classList.add('show'); }
 function openEditCat(id){ editingCatId=id; const c=cats.find(x=>x.id===id); if(!c) return; document.getElementById('cm-title').textContent='Modifier — '+c.name; document.getElementById('cm-name').value=c.name; document.getElementById('cm-del-btn').style.display='block'; buildCatEmojiPicker(c.icon); document.getElementById('cat-modal').classList.add('show'); }
 function closeCatModal(){ document.getElementById('cat-modal').classList.remove('show'); }
-function buildCatEmojiPicker(sel){ document.getElementById('cm-emoji-picker').innerHTML=EMOJIS.map(e=>`<span style="font-size:24px;cursor:pointer;padding:4px;border-radius:8px;border:2px solid ${e===sel?'var(--accent)':'transparent'}" onclick="this.parentNode.dataset.sel='${e}';this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='var(--accent)'">${e}</span>`).join('')+'<input type="text" placeholder="🍜" style="width:48px;height:40px;background:var(--card);border:1.5px solid var(--border);border-radius:8px;text-align:center;font-size:22px;color:var(--text)" id="cat-emoji-custom">'; }
+function buildCatEmojiPicker(sel){ document.getElementById('cm-emoji-picker').innerHTML=EMOJIS.map(e=>`<span style="font-size:24px;cursor:pointer;padding:4px;border-radius:8px;border:2px solid ${e===sel?'var(--accent)':'transparent'}" onclick="this.parentNode.dataset.sel=${jsArg(e)};this.parentNode.querySelectorAll('span').forEach(s=>s.style.borderColor='transparent');this.style.borderColor='var(--accent)'">${e}</span>`).join('')+'<input type="text" placeholder="🍜" style="width:48px;height:40px;background:var(--card);border:1.5px solid var(--border);border-radius:8px;text-align:center;font-size:22px;color:var(--text)" id="cat-emoji-custom">'; }
 function getCatEmoji(){ const sel=document.querySelector('#cm-emoji-picker [style*="var(--accent)"]'); return sel?sel.textContent.trim():(document.getElementById('cat-emoji-custom').value||'📂'); }
 function saveCat(){
   const raw = document.getElementById('cm-name').value;
@@ -3529,7 +3783,7 @@ function renderProdList(){
   ps.forEach(p=>{
     const img=p.imgUrl||getImg(p.id)||getImg(p.name);
     const div=document.createElement('div'); div.className='acard';
-    div.innerHTML=`<div class="acard-img" onclick="openEditProduct('${p.id}')">
+    div.innerHTML=`<div class="acard-img" onclick="openEditProduct(${jsArg(p.id)})">
         ${img?`<img src="${img}" alt="">`:'<span style="font-size:22px">🍽️</span>'}
         <div class="img-hover">✏️</div>
       </div>
@@ -3539,8 +3793,8 @@ function renderProdList(){
       </div>
       <div class="acard-price">${fmt(p.price)}</div>
       <div class="acard-actions">
-        <button class="aact aact-edit" onclick="openEditProduct('${p.id}')">✏️</button>
-        <button class="aact aact-del" onclick="confirmDelProduct('${p.id}')">🗑️</button>
+        <button class="aact aact-edit" onclick="openEditProduct(${jsArg(p.id)})">✏️</button>
+        <button class="aact aact-del" onclick="confirmDelProduct(${jsArg(p.id)})">🗑️</button>
       </div>`;
     el.appendChild(div);
   });
@@ -3610,6 +3864,7 @@ function openAddProduct(){
     if(el) el.style.display = 'none';
     if(chev) chev.textContent = '▼';
   });
+  resetPmAI(); // panneau photo IA remis à zéro à chaque ouverture (sinon la photo IA d'une fiche annulée s'appliquait au produit suivant)
   document.getElementById('prod-modal').classList.add('show');
 }
 function openEditProduct(id){
@@ -3654,6 +3909,7 @@ function openEditProduct(id){
     if(chev) chev.textContent = '▼';
   });
   autoExpandPmSections(p);
+  resetPmAI(); // panneau photo IA remis à zéro à chaque ouverture (sinon la photo IA d'une fiche annulée s'appliquait au produit suivant)
   document.getElementById('prod-modal').classList.add('show');
 }
 function buildProdCatSelect(sel){ const s=document.getElementById('pm-cat'); s.innerHTML=cats.map(c=>`<option value="${c.id}"${c.id===sel?' selected':''}>${c.icon} ${c.name}</option>`).join(''); }
@@ -3679,7 +3935,7 @@ function showSectionSuggest(val){
 }
 function hideSectionSuggest(){ document.getElementById('section-suggest').style.display='none'; }
 
-function closeProdModal(){ document.getElementById('prod-modal').classList.remove('show'); }
+function closeProdModal(){ resetPmAI(); document.getElementById('prod-modal').classList.remove('show'); }
 function handleProdImg(e){
   const f=e.target.files[0]; if(!f) return;
   if(f.size>15*1024*1024){ toast('Image trop lourde (max 15 Mo)','r'); return; }
@@ -3698,6 +3954,72 @@ function handleProdImg(e){
     }; img.src=ev.target.result;
   }; r.readAsDataURL(f);
 }
+
+// ── Génération IA intégrée à la fiche produit ──
+// Praticité : plus besoin d'aller dans setup-images.html pour UNE photo.
+// Prompt pré-rempli depuis nom+description, modifiable, preview avant adoption.
+let _pmAIUrl=null;        // dernière URL générée (preview)
+let _pmImgUrlDraft=null;  // URL validée par "Utiliser" → appliquée au save
+function resetPmAI(){
+  _pmAIUrl=null; _pmImgUrlDraft=null;
+  const panel=document.getElementById('pm-ai-panel');
+  if(panel) panel.style.display='none';
+  const prompt=document.getElementById('pm-ai-prompt'); if(prompt) prompt.value='';
+  const wrap=document.getElementById('pm-ai-preview-wrap'); if(wrap) wrap.style.display='none';
+  const gen=document.getElementById('pm-ai-gen'); if(gen){ gen.disabled=false; gen.textContent='✨ Générer'; }
+  const use=document.getElementById('pm-ai-use'); if(use) use.style.display='none';
+}
+function togglePmAI(){
+  const panel=document.getElementById('pm-ai-panel');
+  const open=panel.style.display==='none';
+  panel.style.display=open?'block':'none';
+  if(open && !document.getElementById('pm-ai-prompt').value.trim()){
+    const nm=document.getElementById('pm-name').value.trim();
+    const sub=document.getElementById('pm-sub').value.trim();
+    document.getElementById('pm-ai-prompt').value=nm?(nm+(sub?', '+sub:'')):'';
+  }
+}
+function genProdImageAI(){
+  const desc=document.getElementById('pm-ai-prompt').value.trim()||document.getElementById('pm-name').value.trim();
+  if(!desc){ toast('Renseigne d\'abord le nom du produit','o'); return; }
+  // Même style que les photos existantes du menu (cohérence visuelle)
+  const prompt=desc+', professional food photography, dark slate background, moody studio lighting, restaurant menu photo, no text';
+  _pmAIUrl='https://image.pollinations.ai/prompt/'+encodeURIComponent(prompt)+'?width=1024&height=1024&nologo=true&model=flux&seed='+Math.floor(Math.random()*1e9);
+  const img=document.getElementById('pm-ai-preview');
+  const wrap=document.getElementById('pm-ai-preview-wrap');
+  const status=document.getElementById('pm-ai-status');
+  const genBtn=document.getElementById('pm-ai-gen');
+  const useBtn=document.getElementById('pm-ai-use');
+  wrap.style.display='block'; img.style.opacity='.35';
+  status.textContent='⏳ Génération en cours (10-30 s)…';
+  genBtn.disabled=true; genBtn.textContent='⏳ Génération…';
+  useBtn.style.display='none';
+  img.onload=()=>{
+    img.style.opacity='1';
+    status.textContent='Pas satisfait ? Modifie la description et régénère.';
+    genBtn.disabled=false; genBtn.textContent='↻ Régénérer';
+    useBtn.style.display='block';
+  };
+  img.onerror=()=>{
+    status.textContent='❌ Échec de génération — réessaie dans quelques secondes.';
+    genBtn.disabled=false; genBtn.textContent='✨ Générer';
+  };
+  img.src=_pmAIUrl;
+}
+function usePmAIImage(){
+  if(!_pmAIUrl) return;
+  _pmImgUrlDraft=_pmAIUrl;
+  // La photo IA remplace tout upload en attente — sinon le bloc upload
+  // Storage du save réécraserait p.imgUrl avec l'ancienne image.
+  editingProdImg=null;
+  const prev=document.getElementById('pm-img-preview');
+  prev.src=_pmAIUrl; prev.style.display='block';
+  document.getElementById('pm-img-ph').style.display='none';
+  document.getElementById('pm-img-label').style.display='none';
+  toast('🎨 Photo IA sélectionnée — enregistre le produit pour valider','g');
+}
+window.togglePmAI=togglePmAI; window.genProdImageAI=genProdImageAI; window.usePmAIImage=usePmAIImage;
+
 async function saveProduct(){
   const nm=document.getElementById('pm-name').value.trim(); if(!nm) return toast('Nom requis','r');
   const price=parseFloat(document.getElementById('pm-price').value); if(isNaN(price)||price<0) return toast('Prix invalide','r');
@@ -3759,6 +4081,31 @@ async function saveProduct(){
     products.push({id:prodId,cat,name:nm,sub:document.getElementById('pm-sub').value.trim(),price,section,pdj,active:document.getElementById('pm-active').checked,hasCuisson,hasGarniture,tva,stock,description,garniture:garnitureText,sauces,allergens,vegetarian,vegan,glutenFree,spicy,alcohol});
   }
   
+  // Photo IA validée dans la fiche → URL directe (même pattern que la
+  // génération en lot de setup-images). Prioritaire sur l'ancien imgUrl.
+  if(_pmImgUrlDraft){
+    const p=products.find(x=>x.id===prodId);
+    const draft=_pmImgUrlDraft;
+    _pmImgUrlDraft=null;
+    // On rapatrie l'image dans notre Storage : sinon chaque client chargerait
+    // la photo chez un service tiers (IP + n° de table transmis) et elle
+    // disparaîtrait le jour où ce service change. Repli sur l'URL directe.
+    let finalUrl = draft;
+    try {
+      if(window.FB && window.FB.uploadBlob){
+        toast('📤 Enregistrement de la photo…','o');
+        const res = await fetch(draft);
+        if(res.ok){
+          const blob = await res.blob();
+          if(/^image\/(png|jpe?g|webp)$/.test(blob.type) && blob.size < 5*1024*1024){
+            finalUrl = await window.FB.uploadBlob('products/'+prodId+'_ai_'+Date.now()+(blob.type==='image/png'?'.png':'.jpg'), blob);
+          }
+        }
+      }
+    } catch(e){ console.warn('[photo IA] upload Storage impossible, URL directe conservée:', e?.code || e?.message || e); }
+    if(p){ p.imgUrl=finalUrl; p.updatedAt=Date.now(); }
+  }
+
   // Upload image to Firebase Storage if new image
   if(editingProdImg && window.FB && window.FB.uploadImage){
     toast('📤 Upload image…','o');
@@ -3928,9 +4275,12 @@ document.addEventListener('change', (e) => {
 
 // ── SETTINGS ──
 function applySettingsForm(){
+  try { renderSecurityPanel(); } catch(e){}
   document.getElementById('s-showimg').checked=settings.showImg!==false;
   document.getElementById('s-tablemode').checked=!!settings.tableMode;
   document.getElementById('s-showsub').checked=settings.showSub!==false;
+  document.getElementById('s-showstock').checked=settings.showStockBadge!==false;
+  document.getElementById('s-pdjprompt').checked=settings.pdjPromptDaily!==false;
   document.getElementById('s-currency').value=settings.currency||'€';
   document.getElementById('s-tva').value=settings.tva||5.5;
   document.getElementById('s-cuissons').value=settings.cuissons||'Bleu,Saignant,À point,Bien cuit';
@@ -3954,6 +4304,8 @@ function saveSettings(){
   settings.showImg=document.getElementById('s-showimg').checked;
   settings.tableMode=document.getElementById('s-tablemode').checked;
   settings.showSub=document.getElementById('s-showsub').checked;
+  settings.showStockBadge=document.getElementById('s-showstock').checked;
+  settings.pdjPromptDaily=document.getElementById('s-pdjprompt').checked;
   settings.currency=document.getElementById('s-currency').value;
   settings.tva=parseFloat(document.getElementById('s-tva').value)||5.5;
   settings.cuissons=document.getElementById('s-cuissons').value.trim();
@@ -3978,7 +4330,9 @@ function saveSettings(){
   if(la) settings.legal.adresse  = la.value.trim();
   if(lt) settings.legal.tvaIntra = lt.value.replace(/\s/g,'').trim().toUpperCase();
   if(lp) settings.legal.ape      = lp.value.trim().toUpperCase();
-  LS.set('settings',settings); updateMailWorkerStatus(); updateLegalStatus(); toast('Paramètres sauvegardés');
+  LS.set('settings',settings); updateMailWorkerStatus(); updateLegalStatus();
+  if(typeof renderMenu==='function') renderMenu(); // applique les toggles d'affichage immédiatement
+  toast('Paramètres sauvegardés');
 }
 
 function savePIN(){
@@ -3999,7 +4353,8 @@ function saveServeurPin(){
   const msg=document.getElementById('serveur-pin-msg');
   if(!/^\d{4}$/.test(n)){ msg.style.color='var(--red)'; msg.textContent='Le code doit contenir exactement 4 chiffres'; return; }
   LS.set('serveur_pin',n);
-  msg.style.color='var(--green)'; msg.textContent='✓ Code serveur enregistré — pensez à Publier pour l\'envoyer aux serveurs';
+  publishStaffConfig();
+  msg.style.color='var(--green)'; msg.textContent='✓ Code serveur enregistré et envoyé aux téléphones';
   setTimeout(()=>msg.textContent='',5000);
 }
 
@@ -4039,15 +4394,11 @@ async function backupToFirebase(){
   statusEl.style.color='var(--accent)';
   
   try{
-    // Collect all sales history keys
-    const salesData = {};
-    for(let i=0; i<localStorage.length; i++){
-      const key = localStorage.key(i);
-      if(key && key.startsWith('sales_')){
-        salesData[key] = LS.get(key, []);
-      }
-    }
-    
+    // Les VENTES ne sont plus dans ce backup : elles partent une par une dans
+    // sales/{jour}/v (inaltérables). Avant, tout l'historique tenait dans UN
+    // document → au-delà d'1 Mo (~1 mois de service) le backup échouait en
+    // silence. Les PIN ne sont plus jamais envoyés dans le cloud.
+    syncUnsyncedSales();
     const backup = {
       cats,
       products,
@@ -4055,18 +4406,15 @@ async function backupToFirebase(){
       settings,
       salleLayout: LS.get('salleLayout', []),
       tableData: LS.get('tableData', {}),
-      caisse_pin: LS.get('caisse_pin', '1234'),
-      serveur_pin: LS.get('serveur_pin', '0000'),
-      salesHistory: salesData,
+      device: deviceId(),
       backupDate: new Date().toISOString(),
       backupLabel: new Date().toLocaleString('fr-FR')
     };
-    
-    // Save backup
-    await window.FB.set('config', 'backup', backup);
-    // Also save a timestamped copy (keep last 5)
-    await window.FB.set('config', 'backup_'+new Date().toISOString().slice(0,10), backup);
-    
+
+    // Dernier état + une copie par jour
+    await window.FB.set('backups', 'latest', backup);
+    await window.FB.set('backups', serviceDayKey(), backup);
+
     statusEl.textContent='✅ Sauvegardé le '+backup.backupLabel;
     statusEl.style.color='var(--green)';
     toast('☁️ Backup cloud effectué !','g');
@@ -4087,11 +4435,11 @@ async function restoreFromFirebase(){
   statusEl.style.color='var(--accent)';
   
   try{
-    // Use getDocs to get the backup document
-    const snap = await getDocs(collection(window.FB.db, 'config'));
-    let backup = null;
-    snap.forEach(d => { if(d.id === 'backup') backup = d.data(); });
-    
+    // Avant : getDocs/collection appelés depuis ce script classique →
+    // ReferenceError, la restauration n'a JAMAIS fonctionné. Passe par window.FB.
+    let backup = await window.FB.getOnce('backups', 'latest');
+    if(!backup) backup = await window.FB.getOnce('config', 'backup').catch(()=>null); // ancien format
+
     if(!backup){ statusEl.textContent='❌ Aucun backup trouvé sur Firebase'; statusEl.style.color='var(--red)'; toast('Aucun backup trouvé','r'); return; }
     
     // Restore data
@@ -4105,16 +4453,26 @@ async function restoreFromFirebase(){
     if(backup.settings) { settings=backup.settings; }
     if(backup.salleLayout) { LS.set('salleLayout', backup.salleLayout); }
     if(backup.tableData) { LS.set('tableData', backup.tableData); }
-    if(backup.caisse_pin) { LS.set('caisse_pin', backup.caisse_pin); }
-    if(backup.serveur_pin) { LS.set('serveur_pin', backup.serveur_pin); }
-    
-    // Restore sales history
+    // Ancien format uniquement : historique embarqué dans le backup
     if(backup.salesHistory){
       Object.entries(backup.salesHistory).forEach(([key, data]) => {
-        LS.set(key, data);
+        if(/^sales_\d{4}-\d{2}-\d{2}$/.test(key) && Array.isArray(data)) LS.set(key, mergeSales(LS.get(key, []), data));
       });
     }
-    
+    // Ventes des 62 derniers jours depuis sales/{jour}/v (fusion, sans doublon)
+    statusEl.textContent='⬇️ Récupération des ventes…';
+    let restoredSales = 0;
+    for(let i=0; i<62; i++){
+      const day = serviceDayKey(Date.now() - i*86400000);
+      const remote = await fetchSalesFromFirebase(day);
+      if(remote && remote.length){
+        const k = 'sales_'+day, before = LS.get(k, []);
+        const merged = mergeSales(before, remote);
+        if(merged.length !== before.length){ LS.set(k, merged); restoredSales += merged.length - before.length; }
+      }
+    }
+    console.log('[restore] '+restoredSales+' vente(s) récupérée(s) depuis le cloud');
+
     saveAll();
     refreshAdmin();
     applyBranding();
@@ -4146,7 +4504,7 @@ window.restoreFromFirebase = restoreFromFirebase;
 // ═══════════════════════════════════════════════════════════════
 //  UTILS
 // ═══════════════════════════════════════════════════════════════
-function fmt(n){ return n.toFixed(2).replace('.',',')+(settings.currency||'€'); }
+function fmt(n){ return (Number(n)||0).toFixed(2).replace('.',',')+(settings.currency||'€'); }
 
 let toastTimer;
 function toast(msg,type='g'){ const t=document.getElementById('toast'); t.textContent=msg; t.className=type; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2600); }
@@ -4252,9 +4610,13 @@ async function showSalleRecovery(){
   if(!window.FB || !window.FB.db){ toast('Firebase non connecté','r'); return; }
   toast('🔍 Scan des backups…','o');
   try {
-    const snap = await getDocs(collection(window.FB.db, 'config'));
+    // Avant : getDocs/collection hors module → ReferenceError systématique.
+    const docs = await window.FB.getCol('backups');
+    const menu = await window.FB.getOnce('config', 'menu');
+    if(menu) docs['menu'] = menu;
     const candidates = [];
-    snap.forEach(d => {
+    Object.keys(docs).forEach(id => {
+      const d = { id, data: () => docs[id] };
       const data = d.data();
       if(data && data.salleLayout && Array.isArray(data.salleLayout) && data.salleLayout.length > 0){
         candidates.push({
@@ -4282,9 +4644,9 @@ async function showSalleRecovery(){
       html += `<button onclick="restoreSalleFromBackup(${i})" style="width:100%;text-align:left;padding:14px;margin-bottom:8px;border-radius:10px;background:var(--card);border:1px solid var(--border);color:var(--text);cursor:pointer;display:flex;align-items:center;gap:10px">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:var(--accent);min-width:48px;text-align:center">${c.count}</div>
         <div style="flex:1">
-          <div style="font-size:14px;font-weight:700">${c.id}</div>
+          <div style="font-size:14px;font-weight:700">${esc(c.id)}</div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px">${tables} table${tables>1?'s':''} · ${bars} bar${bars>1?'s':''} · ${c.layout.length} éléments</div>
-          ${dateStr ? `<div style="font-size:10px;color:var(--muted-2);margin-top:2px">${dateStr}</div>` : ''}
+          ${dateStr ? `<div style="font-size:10px;color:var(--muted-2);margin-top:2px">${esc(dateStr)}</div>` : ''}
         </div>
         <div style="font-size:14px;color:var(--purple)">→</div>
       </button>`;
@@ -5267,8 +5629,8 @@ function updateDetailPanel(tid){
       }).join('');
   footer.innerHTML=total>0
     ?`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:11px;color:var(--muted)">Total table</span><span style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--accent)">${fmt(total)}</span></div>
-      <button onclick="openTableService('${tid}')" style="width:100%;height:40px;border-radius:var(--radius-sm);background:var(--accent);color:#000;font-weight:800;font-size:13px">Gérer le service →</button>`
-    :`<button onclick="openTableService('${tid}')" style="width:100%;height:40px;border-radius:var(--radius-sm);background:rgba(34,201,122,.15);color:var(--green);border:1px solid rgba(34,201,122,.25);font-weight:800;font-size:13px">Ouvrir la table</button>`;
+      <button onclick="openTableService(${jsArg(tid)})" style="width:100%;height:40px;border-radius:var(--radius-sm);background:var(--accent);color:#000;font-weight:800;font-size:13px">Gérer le service →</button>`
+    :`<button onclick="openTableService(${jsArg(tid)})" style="width:100%;height:40px;border-radius:var(--radius-sm);background:rgba(34,201,122,.15);color:var(--green);border:1px solid rgba(34,201,122,.25);font-weight:800;font-size:13px">Ouvrir la table</button>`;
 }
 
 // Click on canvas background = deselect
@@ -5296,7 +5658,9 @@ function syncTableToFirebase(tableId){
   const d = tableData[tableId]||{};
   // Sanity check : cap qty à 100 par item (anti-doublons à répétition).
   // Si un item dépasse, on log et on cap (préserve les ventes légitimes).
-  const cleanTicket = (d.ticket||[]).map(item => {
+  // JSON aller-retour : retire les champs `undefined` (Firestore refuse tout
+  // le document sinon → table jamais synchronisée).
+  const cleanTicket = (d.ticket||[]).map(it => JSON.parse(JSON.stringify(it))).map(item => {
     const qty = parseInt(item.qty) || 0;
     if(qty > 100){
       console.warn('[syncTable] qty>100 détecté sur '+tableId+', cap à 100:', item.name, qty);
@@ -5309,7 +5673,7 @@ function syncTableToFirebase(tableId){
     tableId,
     number: el.number || tableId,
     seats: el.seats || 0,
-    persons: d.persons || [],
+    persons: JSON.parse(JSON.stringify(d.persons || [])),
     ticket: cleanTicket,
     note: d.note || '',
     total,
@@ -5411,28 +5775,51 @@ function importOrderToTable(order){
     markOrderBilled(order._id); // clôture cross-device (idempotent)
     return;
   }
-  (order.items||[]).forEach(item=>{
-    const incomingQty = Math.min(parseInt(item.qty) || 0, 50); // cap import à 50/item
+  let unknownCount = 0;
+  (order.items||[]).slice(0, 40).forEach(item=>{
+    const incomingQty = Math.min(parseInt(item && item.qty) || 0, 50); // cap import à 50/item
     if(incomingQty <= 0) return;
-    const ex = tkt.find(r=>r.pid===item.pid && !r.personId && !r._orderId);
-    if(ex){
-      // Cap qty totale à 100 par item (anti-explosion)
-      ex.qty = Math.min((ex.qty||0) + incomingQty, 100);
+    // PRIX ET NOM = ceux du MENU de la caisse, jamais ceux envoyés par le
+    // téléphone (un client pouvait commander une côte de bœuf à 0,01 € via la
+    // console). Variante et supplément sirop recalculés ici aussi.
+    const p = products.find(x => x.id === item.pid);
+    const cuisson = item.cuisson ? String(item.cuisson).slice(0, 40) : null;
+    const garniture = item.garniture ? String(item.garniture).slice(0, 60) : null;
+    let price, name, tva, variant = null;
+    if(p){
+      price = p.price; name = p.name; tva = tvaOf(p);
+      if(item.variant && Array.isArray(p.variants)){
+        const v = p.variants.find(x => x.label === item.variant);
+        if(v){ price = v.price; name = p.name+' — '+v.label; variant = v.label; }
+      }
     } else {
-      tkt.push({
-        rid: uid(),
-        pid: item.pid || 'ext',
-        name: item.name,
-        price: item.price,
-        tva: item.tva || 10,
-        qty: incomingQty,
-        personId: null,
-        cuisson: item.cuisson || null,
-        garniture: item.garniture || null,
-        _orderId: order._id
-      });
+      // Article inconnu du menu (supprimé ?) : commande serveuse → prix
+      // envoyé ; commande client QR → 0 € + alerte (prix à saisir).
+      unknownCount++;
+      name = String(item.name || 'Article inconnu').slice(0, 80);
+      tva = tvaOf(item);
+      price = (order.source === 'serveur') ? (Number(item.price) || 0) : 0;
+    }
+    // Chaque ligne importée garde son _orderId (jamais fusionnée) : options
+    // (cuisson/garniture/variante) conservées et annulation cuisine possible.
+    const row = {
+      rid: uid(), pid: item.pid || 'ext', name, price: Number(price) || 0, tva,
+      qty: incomingQty, personId: null, cuisson, garniture, variant,
+      _orderId: order._id
+    };
+    if(!p) row._unknown = true;
+    // Stock : décrémenté aussi pour les commandes serveuse/client
+    if(p && p.stock!==undefined && p.stock!==null && p.stock>0){
+      const take = Math.min(p.stock, incomingQty);
+      p.stock -= take; row._stockTaken = take;
+    }
+    tkt.push(row);
+    if(item.sirop === true && p && p.hasSirop){
+      tkt.push({ rid: uid(), pid: p.id+'_sirop', name: '  + Supp. Sirop', price: 0.50, tva, qty: incomingQty, personId: null, _isSupplement: true, _orderId: order._id });
     }
   });
+  if(unknownCount) setTimeout(()=>toast('⚠️ '+unknownCount+' article(s) inconnu(s) du menu — vérifie le prix','r'), 1200);
+  saveAll();
   LS.set('tableData', tableData);
   syncTableToFirebase(tid);
   // Marque cette commande comme déjà importée pour ne pas la réimporter
@@ -5452,7 +5839,7 @@ function importOrderToTable(order){
   // Notification avec le vrai nom de table
   const notifEl = matchEl || salleElements.find(e=>e.id===tid);
   const notifName = notifEl ? 'Table '+(notifEl.number||tid) : (order.tableNum ? 'Table '+order.tableNum : tid);
-  const notifCount = (order.items||[]).reduce((s,i)=>s+i.qty,0);
+  const notifCount = (order.items||[]).reduce((s,i)=>s+(parseInt(i && i.qty)||0),0);
   toast(`🔔 Nouvelle commande — ${notifName} · ${notifCount} article(s)`, 'o');
   try{
     const ctx=new AudioContext();
@@ -5468,6 +5855,32 @@ function importOrderToTable(order){
 // Expose explicitement à window pour que le listener Firebase (module scope)
 // puisse appeler la fonction de manière robuste.
 window.importOrderToTable = importOrderToTable;
+
+// Commande annulée par la cuisine → retire ses lignes NON encaissées des
+// tables (avant : le plat restait facturé). Traité une seule fois par commande.
+var _cancelledOrderIds = new Set(LS.get('_cancelled_order_ids', []));
+function removeCancelledOrder(order){
+  if(!order || !order._id || _cancelledOrderIds.has(order._id)) return;
+  _cancelledOrderIds.add(order._id);
+  LS.set('_cancelled_order_ids', [..._cancelledOrderIds].slice(-2000));
+  let removed = 0;
+  Object.keys(tableData).forEach(tid => {
+    const t = tableData[tid]; if(!t || !Array.isArray(t.ticket)) return;
+    const keep = [];
+    t.ticket.forEach(r => { if(r._orderId === order._id){ giveBackStock(r, r.qty); removed++; } else keep.push(r); });
+    if(keep.length !== t.ticket.length){
+      t.ticket = keep;
+      if(currentTableId === tid){ ticket = [...keep]; renderTicket(); }
+      syncTableToFirebase(tid);
+    }
+  });
+  if(removed){
+    LS.set('tableData', tableData);
+    if(typeof renderSalle === 'function') renderSalle();
+    toast('🚫 Commande annulée en cuisine — '+removed+' ligne(s) retirée(s) de l\'addition', 'o');
+  }
+}
+window.removeCancelledOrder = removeCancelledOrder;
 
 // Diagnostic complet — l'utilisateur tape `diagOrders()` dans la console pour
 // voir d'un coup l'état de Firebase, les orders, le plan de salle, etc.
@@ -5529,6 +5942,88 @@ function showOrderNotif(order){
 
 // Publish menu to Firebase so waiter app can use it
 // silent=true → pas de toast (utilisé par auto-publish)
+// Vue « cloud » d'un produit (exactement ce qui est publié dans config/menu).
+// Sert aussi à détecter une modification locale (stampChangedProducts).
+function productCloudView(p){
+  return {
+    id:p.id, cat:p.cat, name:p.name, sub:p.sub||'', price:Number(p.price)||0,
+    section:p.section||'', pdj:!!p.pdj,
+    hasCuisson:!!p.hasCuisson, hasGarniture:!!p.hasGarniture,
+    hasVariant:!!p.hasVariant, hasSirop:!!p.hasSirop,
+    variants:p.variants||null, tva:tvaOf(p),
+    stock:(p.stock===undefined||p.stock===null)?-1:p.stock, imgUrl:p.imgUrl||null,
+    // Fiche détaillée client (affichage modal QR)
+    description: p.description || '',
+    garniture: p.garniture || '',
+    sauces: p.sauces || '',
+    allergens: Array.isArray(p.allergens) ? p.allergens : [],
+    vegetarian: !!p.vegetarian,
+    vegan: !!p.vegan,
+    glutenFree: !!p.glutenFree,
+    spicy: !!p.spicy,
+    alcohol: !!p.alcohol
+  };
+}
+window.productCloudView = productCloudView;
+
+// ── Sécurité des appareils (Admin → Paramètres) ──
+async function renderSecurityPanel(){
+  const st = document.getElementById('sec-status'), list = document.getElementById('sec-devices'), btn = document.getElementById('sec-enforce-btn');
+  if(!st || !window.__staff) return;
+  try {
+    await window.__staff.ready();
+    const s = window.__staff.status();
+    let devices = [];
+    if(s.isStaff){ try { devices = await window.__staff.list(); } catch(e){} }
+    st.innerHTML = (s.isStaff ? '✅ Cette caisse est enregistrée.' : '⚠️ Cette caisse n\'est PAS enregistrée (bandeau en haut de l\'écran).')
+      + '<br>' + (s.enforced ? '<b style="color:var(--green)">🔒 Protection ACTIVE</b> — seuls les appareils enregistrés ont accès.' : '<b style="color:var(--accent)">🔓 Protection pas encore activée</b> — tout appareil connecté a accès (comme avant).');
+    list.innerHTML = devices.length ? devices.map(d => `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px">
+        <span style="flex:1"><b>${esc(d.label || d.page || 'Appareil')}</b>${d.me?' <span style="color:var(--green)">(cet appareil)</span>':''}<br><span style="color:var(--muted);font-size:10px">${esc(d.page)} · enregistré le ${d.enrolledAt ? new Date(d.enrolledAt).toLocaleString('fr-FR') : '?'}</span></span>
+        ${d.me ? '' : `<button onclick="revokeDevice(${jsArg(d.uid)}, ${jsArg(d.label||d.page||'cet appareil')})" style="height:30px;padding:0 10px;border-radius:6px;border:1px solid rgba(232,64,64,.3);background:rgba(232,64,64,.08);color:var(--red);font-size:11px;font-weight:700">Retirer</button>`}
+      </div>`).join('') : (s.isStaff ? '<div style="font-size:12px;color:var(--muted)">Aucun autre appareil enregistré.</div>' : '');
+    btn.textContent = s.enforced ? '🔓 Désactiver la protection' : '🔒 Activer la protection';
+    btn.style.background = s.enforced ? 'none' : 'var(--green)';
+    btn.style.color = s.enforced ? 'var(--muted)' : '#000';
+    btn.disabled = !s.isStaff;
+    btn.title = s.isStaff ? '' : 'Enregistre d\'abord cette caisse';
+  } catch(e){ st.textContent = 'Erreur : '+(e && (e.code || e.message)); }
+}
+window.renderSecurityPanel = renderSecurityPanel;
+async function toggleEnforce(){
+  const s = window.__staff && window.__staff.status(); if(!s || !s.isStaff) return;
+  if(!requireAdminPin(s.enforced ? 'Désactiver la protection' : 'Activer la protection')) return;
+  if(!s.enforced){
+    let n = 0; try { n = (await window.__staff.list()).length; } catch(e){}
+    if(!confirm(`Activer la protection ?\n\n${n} appareil(s) enregistré(s). Tout appareil NON enregistré (cuisine, téléphone serveuse…) sera bloqué jusqu'à ce qu'on y saisisse le code.\n\nLa carte QR des clients continue de marcher.`)) return;
+  }
+  try { await window.__staff.setEnforce(!s.enforced); toast(!s.enforced ? '🔒 Protection activée' : '🔓 Protection désactivée', 'g'); }
+  catch(e){ toast('Échec : '+(e.code || e.message), 'r'); }
+  renderSecurityPanel();
+}
+window.toggleEnforce = toggleEnforce;
+async function revokeDevice(uid, label){
+  if(!requireAdminPin('Retirer un appareil')) return;
+  if(!confirm('Retirer « '+label+' » ? Il devra ressaisir le code d\'enregistrement.')) return;
+  try { await window.__staff.revoke(uid); toast('Appareil retiré', 'o'); } catch(e){ toast('Échec : '+(e.code || e.message), 'r'); }
+  renderSecurityPanel();
+}
+window.revokeDevice = revokeDevice;
+async function rotateEnrollCodeUI(){
+  if(!requireAdminPin('Changer le code d\'enregistrement')) return;
+  const c = prompt('Nouveau code d\'enregistrement (8 caractères minimum).\nLes appareils déjà enregistrés ne sont pas affectés.');
+  if(c === null) return;
+  if(c.trim().length < 8){ toast('8 caractères minimum', 'r'); return; }
+  try { await window.__staff.rotateCode(c.trim()); toast('✓ Code changé — note-le !', 'g'); } catch(e){ toast('Échec : '+(e.code || e.message), 'r'); }
+}
+window.rotateEnrollCodeUI = rotateEnrollCodeUI;
+
+// PIN serveur → config/staffcfg (lisible par les appareils du resto seulement)
+function publishStaffConfig(){
+  if(!(window.FB && window.FB.set)) return;
+  window.FB.set('config', 'staffcfg', { serveurPin: LS.get('serveur_pin','0000'), updatedAt: Date.now() })
+    .catch(e => console.warn('[staffcfg]', e?.code || e?.message || e));
+}
+
 function publishMenu(silent){
   if(!window.FB){ if(!silent) toast('Firebase non connecté','r'); return; }
   // Garde anti-écrasement (v79) : publier remplace TOUT le menu cloud par
@@ -5545,24 +6040,9 @@ function publishMenu(silent){
   const activeProducts = products.filter(p=>p.active);
   const menuData = {
     cats: cats.filter(c=>activeProducts.some(p=>p.cat===c.id)),
-    products: activeProducts.map(p=>({
-      id:p.id, cat:p.cat, name:p.name, sub:p.sub||'', price:p.price,
-      section:p.section||'', pdj:!!p.pdj,
-      hasCuisson:!!p.hasCuisson, hasGarniture:!!p.hasGarniture,
-      hasVariant:!!p.hasVariant, hasSirop:!!p.hasSirop,
-      variants:p.variants||null, tva:p.tva||10,
-      stock:p.stock===undefined?-1:p.stock, imgUrl:p.imgUrl||null,
-      // Fiche détaillée client (affichage modal QR)
-      description: p.description || '',
-      garniture: p.garniture || '',
-      sauces: p.sauces || '',
-      allergens: Array.isArray(p.allergens) ? p.allergens : [],
-      vegetarian: !!p.vegetarian,
-      vegan: !!p.vegan,
-      glutenFree: !!p.glutenFree,
-      spicy: !!p.spicy,
-      alcohol: !!p.alcohol
-    })),
+    // updatedAt par produit : permet aux autres appareils de savoir quelle
+    // version est la plus récente (sinon la caisse ré-écrasait un prix changé ailleurs).
+    products: activeProducts.map(p=>({ ...productCloudView(p), updatedAt: p.updatedAt || 0 })),
     branding: {
       name: branding.name,
       tagline: branding.tagline || '',
@@ -5581,12 +6061,17 @@ function publishMenu(silent){
       tripadvisorUrl: settings.tripadvisorUrl || '',
       mailWorkerUrl: settings.mailWorkerUrl || '',
       mailSender: settings.mailSender || '',
-      legal: settings.legal || {}
+      legal: settings.legal || {},
+      // Préférences d'affichage cross-device (toggles Admin → Paramètres)
+      showStockBadge: settings.showStockBadge !== false,
+      pdjPromptDaily: settings.pdjPromptDaily !== false
     },
     salleLayout: salleElements,
-    serveurPin: LS.get('serveur_pin','0000'),
+    // serveurPin N'EST PLUS publié ici : config/menu est lisible par tout le
+    // monde (carte QR). Il part dans config/staffcfg (réservé au personnel).
     publishedAt: window.FB.ts()
   };
+  publishStaffConfig();
   
   // ── Compress & publish images ──
   const imgMap = {};
@@ -5655,17 +6140,8 @@ function compressAllImages(imgMap, maxW, quality){
   });
 }
 
-// Override closeTableModal to also sync Firebase
-const _origCloseTableModal = closeTableModal;
-window.closeTableModal = function(){
-  if(currentTableId){
-    tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};
-    LS.set('tableData',tableData);
-    syncTableToFirebase(currentTableId);
-  }
-  document.getElementById('table-overlay').classList.remove('show');
-  renderSalle();
-};
+// (ancien override de closeTableModal supprimé : il remplaçait la version
+// canonique et perdait la note de table. La version canonique synchronise.)
 
 // (l'override "to also sync" a été supprimé : il écrasait la version avec
 // confirmation + sync — qui appelle DÉJÀ syncTableToFirebase. La version
@@ -5720,21 +6196,30 @@ function updatePinDots(){
   }
 }
 
+// Le compteur d'échecs et le blocage survivent au rechargement de la page
+// (avant : recharger remettait le compteur à zéro → essais illimités).
+pinFailedAttempts = parseInt(LS.get('pin_fail_count', 0), 10) || 0;
+pinLockUntil = parseInt(LS.get('pin_lock_until', 0), 10) || 0;
 function checkPin(){
   if(Date.now() < pinLockUntil){ pinEntry=''; updatePinDots(); return; }
   if(pinEntry===getPin()){
     pinFailedAttempts = 0;
+    LS.set('pin_fail_count', 0);
+    if(getPin() === DEFAULT_PIN) setTimeout(()=>toast('⚠️ Code PIN par défaut (1234) : change-le dans Admin → Paramètres','o'), 800);
     const screen=document.getElementById('pin-screen');
     screen.style.transition='opacity .3s';
     screen.style.opacity='0';
     setTimeout(()=>screen.style.display='none', 300);
   } else {
     pinFailedAttempts++;
+    LS.set('pin_fail_count', pinFailedAttempts);
     const dots=document.getElementById('pin-dots');
     dots.classList.add('shake');
     const err=document.getElementById('pin-error');
     if(pinFailedAttempts >= 3){
       pinLockUntil = Date.now() + 5 * 60 * 1000;
+      LS.set('pin_lock_until', pinLockUntil);
+      LS.set('pin_fail_count', 0);
       pinEntry=''; updatePinDots();
       err.textContent='Trop de tentatives. Réessayez dans 5:00';
       err.style.opacity='1';
@@ -5776,7 +6261,8 @@ function lockCaisse(){
 // ═══════════════════════════════════════════════════════════════
 //  HISTORIQUE DES VENTES
 // ═══════════════════════════════════════════════════════════════
-function getTodayKey(){ return 'sales_'+localDateKey(new Date()); }
+// Journée de SERVICE (avant 5 h = veille) — voir serviceDayKey() plus haut.
+function getTodayKey(){ return 'sales_'+serviceDayKey(); }
 
 // Audit stats #10 : helper timezone-safe pour clé de jour.
 // Avant : toISOString().slice(0,10) renvoyait l'UTC. À Paris (UTC+1/+2),
@@ -5790,47 +6276,157 @@ function localDateKey(date){
   return `${y}-${m}-${d}`;
 }
 
+// Enregistre une vente. Renvoie true si elle est bien stockée sur la tablette,
+// false sinon (stockage plein) → l'appelant ne libère pas la table.
 function saveToHistory(entry){
-  if(!entry.total || entry.total===0) return;
-  const key=getTodayKey();
+  const isOffert = !!entry.offert;
+  if(!isOffert && (!entry.total || entry.total===0)) return true; // rien à tracer
+  const now = new Date();
+  const dayKey = serviceDayKey(now);
+  const key='sales_'+dayKey;
   const history=LS.get(key,[]);
   const tbl=salleElements.find(e=>e.id===entry.tableId);
   const tvaDetails = calculateTVADetails(entry.items||[]);
+  const ts = Date.now();
   const sale = {
-    time: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),
-    tableLabel: tbl ? 'Table '+(tbl.number||tbl.id) : (entry.label||entry.tableId||'—'),
-    items: (entry.items||[]).map(r=>({name:r.name, qty:r.qty, price:r.price, tva:r.tva||10})),
-    total: entry.total,
-    totalHT: tvaDetails.totalHT,
-    totalTVA: tvaDetails.totalTVA,
-    tvaRates: tvaDetails.rates,
+    time: now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),
+    date: dayKey,
+    tableLabel: String(tbl ? 'Table '+(tbl.number||tbl.id) : (entry.label||entry.tableId||'—')).slice(0, 60),
+    items: (entry.items||[]).map(r=>({name:r.name, qty:r.qty, price:r.price, tva:tvaOf(r)})),
+    total: r2(entry.total || 0),
+    totalHT: isOffert ? 0 : tvaDetails.totalHT,
+    totalTVA: isOffert ? 0 : tvaDetails.totalTVA,
+    tvaRates: isOffert ? {} : tvaDetails.rates,
     payType: entry.payType||'cb',
     // Numéro de note (NF525 partiel) — récupéré depuis lastReceipt si dispo
     receiptNumber: entry.receiptNumber || (window.lastReceipt && window.lastReceipt.number) || null,
-    tip: entry.tip || 0,
+    tip: r2(entry.tip || 0),
+    // Offert : tracé (valeur du cadeau) au lieu d'être silencieusement ignoré
+    // (avant : aucun enregistrement + trou dans la numérotation des notes).
+    offered: isOffert,
+    offeredValue: isOffert ? r2(entry.offertGrossValue || tvaDetails.totalTTC) : 0,
     // Audit salle #8 : note de table (allergies, anniversaire, etc.) tracée
     // pour SAV / réclamations. Vide par défaut, max 500 chars côté saveTableNote.
-    note: entry.note || '',
+    note: String(entry.note || '').slice(0, 500),
     cancelled: false,
-    ts: Date.now()
+    device: deviceId(),
+    ts
   };
+  // Clé cloud DÉTERMINISTE (ts + id d'appareil stable) : un re-push de la
+  // même vente vise le même document → pas de doublon.
+  sale.cloudKey = 't'+ts+'_'+sale.device;
   history.push(sale);
-  LS.set(key, history);
-  // Push immédiat vers Firebase /sales/{date} (cross-device, instantané)
-  // L'utilisateur peut voir le CA depuis n'importe quel device sans manip.
-  if(window.FB && window.FB.setMerge){
-    try {
-      const today = localDateKey(new Date()); // #10 timezone-safe
-      // On utilise un timestamp comme clé d'item pour permettre des écritures
-      // concurrentes depuis plusieurs devices sans collisions.
-      const saleKey = 't'+sale.ts+'_'+Math.random().toString(36).slice(2,6);
-      window.FB.setMerge('sales', today, { [saleKey]: sale })
-        .catch(err => console.warn('[sales->FB] error:', err?.message || err));
-    } catch(e){ console.warn('[sales->FB] error:', e); }
+  if(!LS.set(key, history)){
+    // Stockage plein : on libère les vieux jours DÉJÀ sauvegardés dans le cloud,
+    // puis on réessaie. Si ça échoue encore, on bloque l'encaissement.
+    purgeOldSyncedSales(30);
+    if(!LS.set(key, history)){
+      alert('⚠️ Impossible d\'enregistrer la vente : la mémoire de la tablette est pleine.\n\nLa table n\'a PAS été libérée. Note la vente sur papier et appelle Farès.');
+      return false;
+    }
   }
+  // Envoi au cloud (1 doc inaltérable par vente, chaîné par empreinte).
+  syncUnsyncedSales();
   // Schedule auto-backup (full snapshot) — 30s après dernier paiement
   if(typeof scheduleAutoBackup==='function') scheduleAutoBackup();
+  return true;
 }
+
+// Id d'appareil stable (6 chars, généré une fois) — sert aux clés de vente
+// cloud pour éviter les collisions entre appareils encaissant à la même ms.
+function deviceId(){
+  let d = LS.get('device_id', null);
+  if(!d){ d = Math.random().toString(36).slice(2,8); LS.set('device_id', d); }
+  return d;
+}
+
+// Libère la mémoire : supprime les jours de ventes plus vieux que `keepDays`
+// UNIQUEMENT si toutes leurs ventes sont confirmées dans le cloud.
+function purgeOldSyncedSales(keepDays){
+  const limit = serviceDayKey(Date.now() - keepDays*86400000);
+  let freed = 0;
+  try {
+    Object.keys(localStorage).forEach(k => {
+      const m = /^sales_(\d{4}-\d{2}-\d{2})$/.exec(k);
+      if(!m || m[1] >= limit) return;
+      const arr = LS.get(k, []);
+      if(Array.isArray(arr) && arr.every(s => s && s._synced)){ localStorage.removeItem(k); freed++; }
+    });
+  } catch(e){}
+  if(freed) console.log('[sales] '+freed+' ancien(s) jour(s) déjà sauvegardé(s) libéré(s) de la tablette');
+  return freed;
+}
+
+// Empreinte SHA-256 (hex) — chaînage des ventes : chaque vente porte
+// l'empreinte de la précédente de l'appareil → toute modification ou
+// suppression a posteriori devient détectable (inaltérabilité NF525).
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function saleCanonical(s){
+  return JSON.stringify([s.cloudKey, s.ts, s.date, s.receiptNumber, s.total, s.tip, s.payType, s.offered, s.offeredValue,
+    (s.items||[]).map(i=>[i.name, i.qty, i.price, i.tva]), s.prevHash]);
+}
+
+// Pousse vers le cloud toutes les ventes locales (tous jours) non confirmées.
+// Séquentiel (une seule passe à la fois) pour que le chaînage reste ordonné.
+// Idempotent : si le doc existe déjà (envoi réussi mais confirmation perdue),
+// on le constate et on marque la vente comme synchronisée.
+let _salesSyncRunning = false, _salesSyncAgain = false;
+async function syncUnsyncedSales(){
+  if(!(window.FB && window.FB.set)) return;
+  if(_salesSyncRunning){ _salesSyncAgain = true; return; }
+  _salesSyncRunning = true;
+  try {
+    do {
+      _salesSyncAgain = false;
+      const dayKeys = Object.keys(localStorage).filter(k => /^sales_\d{4}-\d{2}-\d{2}$/.test(k)).sort();
+      for(const k of dayKeys){
+        const day = k.slice(6);
+        const pending = LS.get(k, []).filter(s => s && !s._synced && !s._fromCloud && s.ts);
+        for(const p0 of pending){
+          // Relire à chaque vente : une vente encaissée pendant l'attente réseau
+          // ne doit JAMAIS être écrasée par une liste périmée (bug H2).
+          let h = LS.get(k, []);
+          let s = h.find(x => x.ts === p0.ts && (x.cloudKey === p0.cloudKey || !p0.cloudKey));
+          if(!s || s._synced) continue;
+          if(!s.cloudKey) s.cloudKey = 't'+s.ts+'_'+(s.device || deviceId());
+          if(!s.date) s.date = day;
+          if(!s.hash){
+            s.prevHash = LS.get('sales_chain_last', 'GENESIS');
+            s.hash = await sha256Hex(saleCanonical(s));
+            h = LS.get(k, []); const s2 = h.find(x => x.ts === s.ts && x.cloudKey === s.cloudKey) || h.find(x => x.ts === s.ts);
+            if(s2){ Object.assign(s2, {cloudKey:s.cloudKey, date:s.date, prevHash:s.prevHash, hash:s.hash}); LS.set(k, h); }
+            LS.set('sales_chain_last', s.hash);
+          }
+          const payload = {...s}; delete payload._synced; delete payload._fromCloud;
+          let ok = false;
+          try {
+            await window.FB.set('sales/'+day+'/v', s.cloudKey, payload);
+            ok = true;
+          } catch(err){
+            // Déjà présent (create-only) → c'est un succès antérieur non confirmé
+            try { ok = !!(await window.FB.getOnce('sales/'+day+'/v', s.cloudKey)); } catch(_){ ok = false; }
+            if(!ok){ console.warn('[sales->FB] échec, nouvel essai plus tard :', err?.code || err?.message || err); return; }
+          }
+          if(ok){
+            h = LS.get(k, []);
+            const s3 = h.find(x => x.cloudKey === s.cloudKey);
+            if(s3 && !s3._synced){ s3._synced = true; LS.set(k, h); }
+          }
+        }
+      }
+    } while(_salesSyncAgain);
+  } finally { _salesSyncRunning = false; }
+}
+window.syncUnsyncedSales = syncUnsyncedSales;
+window.syncTodaySalesToCloud = syncUnsyncedSales; // compat
+window.addEventListener('online', function(){ setTimeout(syncUnsyncedSales, 2000); });
+// Boot : laisse le temps à l'auth anonyme puis rattrape (tous jours confondus :
+// encaissements offline de la veille compris), puis toutes les 2 minutes.
+setTimeout(syncUnsyncedSales, 6000);
+setInterval(syncUnsyncedSales, 120000);
 
 // Audit stats #1 : "Effacer" doit être derrière PIN admin (avant : n'importe
 // quel serveur pouvait wipe le CA du jour). On archive sous une clé
@@ -5860,9 +6456,19 @@ function clearHistory(){
 function mergeSales(local, remote){
   const seenReceipts = new Set();
   const seenComposite = new Set();
+  const seenCloud = new Map();
   const out = [];
   function add(s){
-    if(!s || !s.total) return;
+    if(!s || (!s.total && !s.offered)) return;
+    // Clé cloud = identité exacte d'une vente (appareil + horodatage). Une
+    // annulation connue d'un côté s'applique à l'autre.
+    if(s.cloudKey){
+      const prev = seenCloud.get(s.cloudKey);
+      if(prev){ if(s.cancelled && !prev.cancelled){ prev.cancelled = true; prev.cancelledAt = s.cancelledAt || Date.now(); } return; }
+      seenCloud.set(s.cloudKey, s);
+      out.push(s);
+      return;
+    }
     if(s.receiptNumber){
       if(seenReceipts.has(s.receiptNumber)) return;
       seenReceipts.add(s.receiptNumber);
@@ -5883,13 +6489,22 @@ function mergeSales(local, remote){
 // Fetch ventes du jour depuis Firebase + merge avec local
 // Permet au CA de s'afficher peu importe le device qui a encaissé.
 async function fetchSalesFromFirebase(dateKey){
-  if(!window.FB || !window.FB.getOnce) return null;
+  if(!window.FB || !window.FB.getCol) return null;
   try {
-    const today = dateKey || localDateKey(new Date()); // #10 timezone-safe
-    const data = await window.FB.getOnce('sales', today);
-    if(!data) return [];
-    // Convertit l'objet {key1: sale1, key2: sale2} en array
-    return Object.values(data).filter(v => v && typeof v === 'object' && v.total);
+    const day = dateKey || serviceDayKey();
+    const [v, c] = await Promise.all([window.FB.getCol('sales/'+day+'/v'), window.FB.getCol('sales/'+day+'/cancel')]);
+    // Ventes cloud nettoyées (une vente injectée ne place pas de HTML ici)
+    return Object.keys(v).map(k => {
+      const s = v[k] || {};
+      if(typeof s.ts !== 'number' || typeof s.total !== 'number') return null;
+      return {
+        ...s, cloudKey: k, _synced: true, _fromCloud: true,
+        cancelled: !!c[k] || !!s.cancelled,
+        tableLabel: String(s.tableLabel||'—').slice(0,60),
+        payType: String(s.payType||'cb').slice(0,20),
+        items: Array.isArray(s.items) ? s.items.slice(0,200).map(r=>({name:String(r&&r.name||'').slice(0,80), qty:Number(r&&r.qty)||0, price:Number(r&&r.price)||0, tva:tvaOf(r)})) : []
+      };
+    }).filter(Boolean);
   } catch(e){
     console.warn('[sales fetch] error:', e?.message || e);
     return null;
@@ -5915,15 +6530,19 @@ function renderHistorique(){
   // Filtre : on EXCLUT les ventes annulées du calcul du CA (mais on les garde
   // visibles dans le tableau pour traçabilité).
   const active = history.filter(e => !e.cancelled);
-  const totalJour=active.reduce((s,e)=>s+e.total,0);
-  const totalHT=active.reduce((s,e)=>s+(e.totalHT||e.total/(1.1)),0);
-  const totalTips=active.reduce((s,e)=>s+(e.tip||0),0);
+  // CA = encaissé HORS pourboires (le pourboire n'est pas une vente : avant,
+  // il gonflait le CA et faisait TTC ≠ HT + TVA). Les montants par mode de
+  // paiement restent les sommes réellement encaissées (pourboire CB compris).
+  const totalJour=r2(active.reduce((s,e)=>s+(e.total||0)-(e.tip||0),0));
+  const totalHT=r2(active.reduce((s,e)=>s+(e.totalHT ?? ((e.total||0)-(e.tip||0))/1.1),0));
+  const totalTips=r2(active.reduce((s,e)=>s+(e.tip||0),0));
+  const totalOffert=r2(active.reduce((s,e)=>s+(e.offeredValue||0),0));
   const nbTransac=active.length;
   const nbCancelled=history.length - active.length;
   const payTypes={cb:0,cash:0,off:0};
   const tvaGlobal={};
   active.forEach(e=>{
-    if(payTypes[e.payType]!==undefined) payTypes[e.payType]+=e.total;
+    if(payTypes[e.payType]!==undefined) payTypes[e.payType]=r2(payTypes[e.payType]+(e.total||0));
     if(e.tvaRates){ Object.entries(e.tvaRates).forEach(([rate,v])=>{ if(!tvaGlobal[rate]) tvaGlobal[rate]={tva:0,ht:0,ttc:0}; tvaGlobal[rate].tva+=v.tva; tvaGlobal[rate].ht+=v.ht; tvaGlobal[rate].ttc+=v.ttc; }); }
   });
 
@@ -5946,6 +6565,7 @@ function renderHistorique(){
       <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🧾 Encaissements</div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:var(--accent)">${nbTransac}</div>
       ${nbCancelled>0?`<div style="font-size:10px;color:var(--red);margin-top:2px">⚠ ${nbCancelled} annulée${nbCancelled>1?'s':''}</div>`:''}
+      ${totalOffert>0?`<div style="font-size:10px;color:var(--muted);margin-top:2px">🎁 Offerts : ${fmt(totalOffert)}</div>`:''}
     </div>
     ${totalTips>0?`<div style="background:rgba(255,107,170,.08);border:1px solid rgba(255,107,170,.2);border-radius:var(--radius);padding:14px 20px;min-width:120px">
       <div style="font-size:10px;font-weight:700;color:#ff6baa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🎁 Pourboires</div>
@@ -5987,16 +6607,16 @@ function renderHistorique(){
           const isCancelled = e.cancelled === true;
           return `
           <tr style="border-bottom:1px solid rgba(255,255,255,.04);transition:background .1s;${isCancelled?'opacity:.45;text-decoration:line-through':''}" onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background=''">
-            <td style="padding:10px 6px;color:var(--muted);font-size:12px;white-space:nowrap">${e.time}${e.receiptNumber?'<br><span style="font-size:9px;color:var(--muted)">N° '+esc(e.receiptNumber)+'</span>':''}</td>
+            <td style="padding:10px 6px;color:var(--muted);font-size:12px;white-space:nowrap">${esc(e.time)}${e.receiptNumber?'<br><span style="font-size:9px;color:var(--muted)">N° '+esc(e.receiptNumber)+'</span>':''}</td>
             <td style="padding:10px 6px;font-weight:700;color:var(--accent)">${esc(e.tableLabel)}</td>
-            <td style="padding:10px 6px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(e.items||[]).map(i=>i.qty+'× '+esc(i.name)).join(', ')}</td>
-            <td style="padding:10px 6px;text-align:right">${e.payType==='cb'?'💳':e.payType==='cash'?'💵':'🎁'}${e.tip?` <span title="Pourboire" style="color:var(--accent);font-size:10px">+${fmt(e.tip)}</span>`:''}</td>
-            <td style="padding:10px 6px;text-align:right;font-family:'Bebas Neue',sans-serif;font-size:18px;color:${isCancelled?'var(--muted)':'var(--green)'}">${fmt(e.total)}</td>
+            <td style="padding:10px 6px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(e.items||[]).map(i=>(Number(i.qty)||0)+'× '+esc(i.name)).join(', ')}</td>
+            <td style="padding:10px 6px;text-align:right">${e.payType==='cb'?'💳':e.payType==='cash'?'💵':'🎁'}${e.tip?` <span title="Pourboire" style="color:var(--accent);font-size:10px">+${fmt(Number(e.tip)||0)}</span>`:''}</td>
+            <td style="padding:10px 6px;text-align:right;font-family:'Bebas Neue',sans-serif;font-size:18px;color:${isCancelled?'var(--muted)':'var(--green)'}">${e.offered?'<span style="font-size:12px;color:var(--muted)">offert '+fmt(Number(e.offeredValue)||0)+'</span>':fmt(Number(e.total)||0)}</td>
             <td style="padding:10px 6px;text-align:right;white-space:nowrap">
               ${isCancelled
                 ? '<span style="font-size:10px;color:var(--red);font-weight:700">ANNULÉE</span>'
                 : `<button onclick="reprintFromHistory(${realIdx})" title="Réimprimer le ticket" style="height:28px;width:28px;padding:0;border-radius:6px;background:rgba(74,158,255,.1);border:1px solid rgba(74,158,255,.2);color:var(--blue);cursor:pointer;font-size:13px;margin-right:4px">🖨️</button>
-                   <button onclick="cancelSale('${esc(e.receiptNumber||e.ts||realIdx)}')" title="Annuler cette vente" style="height:28px;width:28px;padding:0;border-radius:6px;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.2);color:var(--red);cursor:pointer;font-size:13px">↶</button>`}
+                   <button onclick="cancelSale(${jsArg(e.cloudKey||e.receiptNumber||e.ts||realIdx)})" title="Annuler cette vente" style="height:28px;width:28px;padding:0;border-radius:6px;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.2);color:var(--red);cursor:pointer;font-size:13px">↶</button>`}
             </td>
           </tr>`;
         }).join('')}
@@ -6016,7 +6636,8 @@ function cancelSale(id){
   const history = LS.get(key, []);
   // Cherche par receiptNumber (priorité NF525), puis ts (cross-device stable),
   // puis fallback ancien comportement (index numérique).
-  let idx = history.findIndex(s => s && s.receiptNumber && String(s.receiptNumber) === String(id));
+  let idx = history.findIndex(s => s && s.cloudKey && s.cloudKey === String(id));
+  if(idx < 0) idx = history.findIndex(s => s && s.receiptNumber && String(s.receiptNumber) === String(id));
   if(idx < 0) idx = history.findIndex(s => s && s.ts && String(s.ts) === String(id));
   if(idx < 0 && !isNaN(parseInt(id))) idx = parseInt(id); // fallback legacy
   const sale = history[idx];
@@ -6029,14 +6650,13 @@ function cancelSale(id){
   sale.cancelledTime = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
   history[idx] = sale;
   LS.set(key, history);
-  // Sync Firebase (la vente reste mais avec flag cancelled)
-  // Audit stats : structure FLAT pour être compatible avec fetchSalesFromFirebase
-  // (qui fait Object.values du doc et attend des sales au top-level, pas dans
-  // une sub-clé 'items'). Avant : { items: { [id]: sale } } était jamais relu.
-  if(window.FB && window.FB.setMerge){
-    const today = localDateKey(new Date()); // #10 timezone-safe
-    const id = sale.ts ? String(sale.ts) : ('s_'+Date.now());
-    try { window.FB.setMerge('sales', today, { [id]: sale }); } catch(e){}
+  // Cloud : la vente d'origine reste intacte (inaltérable) ; l'annulation est
+  // un document séparé sales/{jour}/cancel/{cloudKey} (avant : écrite sous une
+  // autre clé → l'original restait « non annulé » dans le cloud, bug M12).
+  if(window.FB && window.FB.set && sale.cloudKey){
+    const day = sale.date || key.slice(6);
+    window.FB.set('sales/'+day+'/cancel', sale.cloudKey, { ts: Date.now(), by: deviceId(), total: Number(sale.total)||0 })
+      .catch(e => console.warn('[cancel->FB]', e?.code || e?.message || e));
   }
   toast('✓ Vente annulée — '+fmt(sale.total)+' retiré du CA','o');
   renderHistorique();
@@ -6046,7 +6666,7 @@ window.cancelSale = cancelSale;
 // ── C1/C2 : Fond de caisse ──
 // Stocke le fond de caisse du jour. Utilisé pour calculer l'écart espèces à la clôture.
 function openCashFundModal(){
-  const todayKey = 'cashFund_'+localDateKey(new Date()); // #10 timezone-safe
+  const todayKey = 'cashFund_'+serviceDayKey(); // journée de service (avant 5 h = veille)
   const current = parseFloat(LS.get(todayKey, 0)) || 0;
   const val = prompt('💰 Fond de caisse du jour (€)\n\nMontant en espèces présent dans le tiroir à l\'ouverture :', current.toFixed(2));
   if(val === null) return;
@@ -6064,30 +6684,32 @@ function closeRegisterZ(){
   if(active.length === 0){
     if(!confirm('Aucune vente aujourd\'hui. Imprimer un Z vide pour archivage ?')) return;
   }
-  const todayISO = localDateKey(new Date()); // #10 timezone-safe
+  const todayISO = serviceDayKey(); // journée de service : Z de 00h30 = service de la veille
   const fund = parseFloat(LS.get('cashFund_'+todayISO, 0)) || 0;
-  // Calculs
-  const totalTTC = active.reduce((s,e)=>s+e.total, 0);
-  const totalHT  = active.reduce((s,e)=>s+(e.totalHT||e.total/1.1), 0);
-  const totalTVA = active.reduce((s,e)=>s+(e.totalTVA||e.total*0.1), 0);
-  const totalTips= active.reduce((s,e)=>s+(e.tip||0), 0);
+  // Calculs — CA hors pourboires (un pourboire n'est pas une vente)
+  const totalTTC = r2(active.reduce((s,e)=>s+(e.total||0)-(e.tip||0), 0));
+  const totalHT  = r2(active.reduce((s,e)=>s+(e.totalHT ?? ((e.total||0)-(e.tip||0))/1.1), 0));
+  const totalTVA = r2(active.reduce((s,e)=>s+(e.totalTVA ?? ((e.total||0)-(e.tip||0))/11), 0));
+  const totalTips= r2(active.reduce((s,e)=>s+(e.tip||0), 0));
   const byPay = {cb:0, cash:0, off:0};
   const tvaByRate = {};
   active.forEach(e => {
-    if(byPay[e.payType] !== undefined) byPay[e.payType] += e.total;
+    if(byPay[e.payType] !== undefined) byPay[e.payType] = r2(byPay[e.payType] + (e.total||0));
     if(e.tvaRates) Object.entries(e.tvaRates).forEach(([r,v])=>{
       if(!tvaByRate[r]) tvaByRate[r] = {ht:0,tva:0,ttc:0};
-      tvaByRate[r].ht += v.ht; tvaByRate[r].tva += v.tva; tvaByRate[r].ttc += v.ttc;
+      tvaByRate[r].ht = r2(tvaByRate[r].ht + v.ht); tvaByRate[r].tva = r2(tvaByRate[r].tva + v.tva); tvaByRate[r].ttc = r2(tvaByRate[r].ttc + v.ttc);
     });
   });
+  // « Offerts » = valeur des repas offerts (le montant encaissé est 0)
+  byPay.off = r2(active.reduce((s,e)=>s+(e.offeredValue||0), 0));
   const cancelledCount = history.length - active.length;
-  const cancelledAmount = history.filter(e=>e.cancelled).reduce((s,e)=>s+e.total, 0);
+  const cancelledAmount = r2(history.filter(e=>e.cancelled).reduce((s,e)=>s+(e.total||0), 0));
   const firstTime = active.length ? active[0].time : '—';
   const lastTime  = active.length ? active[active.length-1].time : '—';
   const firstNum  = active.length ? (active[0].receiptNumber||'—') : '—';
   const lastNum   = active.length ? (active[active.length-1].receiptNumber||'—') : '—';
   // Demande contrôle espèces
-  const expectedCash = fund + byPay.cash;
+  const expectedCash = r2(fund + byPay.cash);
   let countedCashStr = prompt(`💵 Comptage du tiroir-caisse en fin de service\n\n` +
     `Fond de caisse :         ${fund.toFixed(2)} €\n` +
     `+ Ventes en espèces :    ${byPay.cash.toFixed(2)} €\n` +
@@ -6096,7 +6718,7 @@ function closeRegisterZ(){
     `Compte le tiroir et saisis le montant réel (€) :`, expectedCash.toFixed(2));
   if(countedCashStr === null) return;
   const countedCash = Math.max(0, parseFloat(countedCashStr.replace(',','.')) || 0);
-  const ecart = countedCash - expectedCash;
+  const ecart = r2(countedCash - expectedCash); // arrondi : plus de « +0,00 » flottant
   // Génère le ticket Z imprimable
   const dateStr = new Date().toLocaleDateString('fr-FR');
   const timeStr = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
@@ -6175,8 +6797,12 @@ ${totalTips>0?`<div class="row" style="color:#a48"><span>+ Pourboires CB</span><
     nbSales: active.length, nbCancelled: cancelledCount
   };
   LS.set('closure_'+todayISO, closeRecord);
+  // Clôture inaltérable : un doc par Z (un 2e Z le même jour = nouveau doc,
+  // jamais une réécriture du premier). Règle /closures ajoutée en v5 (avant :
+  // refusée en silence, aucun Z n'est jamais arrivé dans le cloud).
   if(window.FB && window.FB.set){
-    try { window.FB.set('closures', todayISO, closeRecord); } catch(e){}
+    window.FB.set('closures', todayISO+'_'+Date.now()+'_'+deviceId(), {...closeRecord, device: deviceId()})
+      .catch(e => console.warn('[Z->FB]', e?.code || e?.message || e));
   }
   toast('✅ Clôture Z imprimée — ' + (ecart === 0 ? 'tiroir équilibré' : (ecart > 0 ? 'écart positif +'+ecart.toFixed(2)+'€' : 'écart NÉGATIF '+ecart.toFixed(2)+'€')), ecart === 0 ? 'g' : 'o');
 }
@@ -6671,6 +7297,8 @@ function savePlatDuJour() {
 }
 
 function checkPdjDailyPopup() {
+  // Désactivable dans Admin → Paramètres (settings.pdjPromptDaily)
+  if (settings.pdjPromptDaily === false) return;
   const today = new Date().toDateString();
   const lastShown = LS.get('pdjDailyShown', '');
   if (lastShown === today) return;

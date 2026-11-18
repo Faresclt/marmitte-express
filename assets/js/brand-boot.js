@@ -32,10 +32,30 @@
     } catch (e) { return null; }
   }
 
+  // Le cache vient de config/menu (modifiable à distance) : on n'injecte que
+  // du texte (jamais innerHTML brut), une URL https/data:image raster, et une
+  // couleur #hex. Sinon un nom piégé resterait exécuté à chaque démarrage.
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function safeUrl(u) {
+    var s = String(u == null ? '' : u).trim();
+    if (/^https:\/\//i.test(s)) return s;
+    if (/^data:image\/(png|jpe?g|webp|gif|avif);base64,/i.test(s)) return s;
+    if (/^\.{0,2}\/[^/]/.test(s)) return s;
+    return '';
+  }
+  function safeColor(c) {
+    var s = String(c == null ? '' : c).trim();
+    return /^#[0-9a-f]{3,8}$/i.test(s) ? s : '';
+  }
+
   function applyBrandToDom() {
-    var cachedLogo   = read('brand_logoUrl');
+    var cachedLogo   = safeUrl(read('brand_logoUrl'));
     var cachedName   = read('brand_name');
-    var cachedAccent = read('brand_accent');
+    var cachedAccent = safeColor(read('brand_accent'));
+    if (cachedName) cachedName = String(cachedName).slice(0, 60);
 
     // ── Couleur d'accent ──────────────────────────────────────
     if (cachedAccent) {
@@ -70,13 +90,13 @@
       if (brandText) {
         var parts = cachedName.trim().split(' ');
         brandText.innerHTML = parts.length > 1
-          ? parts.slice(0, -1).join(' ') + ' <span>' + parts[parts.length - 1] + '</span>'
-          : '<span>' + cachedName + '</span>';
+          ? esc(parts.slice(0, -1).join(' ')) + ' <span>' + esc(parts[parts.length - 1]) + '</span>'
+          : '<span>' + esc(cachedName) + '</span>';
       }
       // Nom client/serveur (dernier mot en accent)
       var restoName = document.getElementById('resto-name');
       if (restoName) {
-        restoName.innerHTML = cachedName.replace(
+        restoName.innerHTML = esc(cachedName).replace(
           /(\S+)$/,
           '<span style="color:var(--accent)">$1</span>'
         );
@@ -112,9 +132,9 @@
   window.BrandCache = {
     save: function(branding) {
       if (!branding) return;
-      write('brand_logoUrl', branding.logoUrl || '');
-      if (branding.name)   write('brand_name',   branding.name);
-      if (branding.accent) write('brand_accent', branding.accent);
+      write('brand_logoUrl', safeUrl(branding.logoUrl));
+      if (branding.name)   write('brand_name',   String(branding.name).slice(0, 60));
+      if (safeColor(branding.accent)) write('brand_accent', safeColor(branding.accent));
     },
     clear: function() {
       try {

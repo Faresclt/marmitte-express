@@ -1,27 +1,19 @@
-// firestore.rules v4 — Durcissement backward-compat root (Phase 3.5)
+// firestore.rules v5 — Appareils du resto enregistrés (staff) — 2026-11-18
 //
-// Contexte : la cible multi-tenant /restaurants/{slug}/... n'est pas encore activée
-// (RESTO_SLUG = null dans firebase-sync.js — re-activation prévue Phase 5).
-// L'app fonctionne sur les collections root depuis 2026-05-06.
+// Problème v4 : l'auth anonyme est ouverte à tous (clé API publique, repo public,
+// pas d'App Check) → `isAuth()` ne protégeait rien : n'importe quel visiteur du
+// QR pouvait modifier le menu, supprimer les tables, lire les ventes.
 //
-// La v3 laissait /orders et /tables `read: if true` (lecture totalement publique)
-// et /config/* `read: if docId != 'apikeys'` (lecture publique sauf apikeys).
-// Conséquence : un visiteur de client.html → signInAnonymously → puis console JS pouvait :
-//   - Lire toutes les commandes (notes RGPD, totaux, infos table)
-//   - Lire les backups (config/backup*) qui peuvent contenir des données privées
-//   - Voler la clé Gemini (config/apikeys lisible si isAuth)
-//   - Modifier les prix du menu (config/menu write isAuth)
+// v5 : un appareil du resto (caisse, cuisine, téléphones serveuses) s'enregistre
+// UNE FOIS avec un code secret (security/enroll, illisible) → doc staff/{uid}.
+// `isStaff()` = cet appareil est enregistré.
 //
-// v4 — Durcissement minimum viable sans casser le runtime :
-//   - /config/menu, /config/tables, /config/images_* : reads publics (clients QR)
-//   - /config/{autres} (apikeys, backup*) : reads auth uniquement
-//   - /tables/{id} root : reads auth (clients ne lisent pas /tables directement)
-//   - /orders/{id} root : reads auth (clients voient leur ticket via /tickets/{id})
-//   - /tickets/{id} : read public préservé (lien QR partagé au client)
-//   - /payments/{id} : auth uniquement (inchangé)
+// Transition sans coupure : tant que security/policy.enforce != true, tout
+// appareil authentifié garde l'accès « équipe » (comportement v4). Quand les 4
+// appareils sont enregistrés, la caisse active la protection (Admin → Sécurité).
 //
-// Restrictions write conservées en isAuth() : la plupart des pages POS sont
-// signInAnonymously. Phase 5 ajoutera RBAC (admin claims) pour serrer write/delete.
+// Public sans enregistrement : lecture du menu/plan/images, lecture d'UN ticket
+// par son id, création d'une commande client au format validé.
 
 rules_version = '2';
 service cloud.firestore {
@@ -31,107 +23,162 @@ service cloud.firestore {
     function isAuth() {
       return request.auth != null;
     }
+    function isStaff() {
+      return isAuth()
+        && exists(/databases/$(database)/documents/staff/$(request.auth.uid));
+    }
+    function policyPath() {
+      return /databases/$(database)/documents/security/policy;
+    }
+    function enforced() {
+      return exists(policyPath()) && get(policyPath()).data.get('enforce', false) == true;
+    }
+    // Équipe = appareil enregistré, ou tout appareil authentifié tant que la
+    // protection n'est pas activée (phase de transition).
+    function isTeam() {
+      return isStaff() || (isAuth() && !enforced());
+    }
+    function isStr(v, maxLen) {
+      return v is string && v.size() <= maxLen;
+    }
+
+    // ════════════ APPAREILS DU RESTO ════════════
+    match /staff/{uid} {
+      allow get: if isAuth() && (request.auth.uid == uid || isStaff());
+      allow list: if isStaff();
+      // Enregistrement : uniquement pour soi-même, avec le bon code.
+      allow create: if isAuth()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['code', 'label', 'page', 'ua', 'enrolledAt'])
+        && request.resource.data.code is string
+        && exists(/databases/$(database)/documents/security/enroll)
+        && request.resource.data.code == get(/databases/$(database)/documents/security/enroll).data.code
+        && isStr(request.resource.data.get('label', ''), 40)
+        && isStr(request.resource.data.get('page', ''), 20)
+        && isStr(request.resource.data.get('ua', ''), 300);
+      allow update: if false;
+      // Révocation d'un appareil depuis la caisse (ou par l'appareil lui-même).
+      allow delete: if isStaff();
+    }
+
+    match /security/policy {
+      allow read: if true;
+      allow create, update: if isStaff()
+        && request.resource.data.keys().hasOnly(['enforce', 'updatedAt', 'by'])
+        && request.resource.data.enforce is bool;
+      allow delete: if false;
+    }
+    match /security/enroll {
+      allow read: if false;
+      // Rotation du code depuis la caisse (sans jamais pouvoir le relire).
+      allow update: if isStaff()
+        && request.resource.data.keys().hasOnly(['code', 'updatedAt'])
+        && request.resource.data.code is string
+        && request.resource.data.code.size() >= 8;
+      allow create, delete: if false;
+    }
+    match /security/{other} {
+      allow read, write: if false;
+    }
+
+    // ════════════ CONFIG ════════════
+    match /config/{docId} {
+      // Public : menu (carte QR), plan de salle, vignettes.
+      allow read: if docId == 'menu'
+                  || docId == 'tables'
+                  || docId.matches('images_.*')
+                  || (docId != 'apikeys' && isTeam());
+      // apikeys : collection morte, totalement fermée.
+      allow write: if docId != 'apikeys' && isTeam();
+    }
+
+    // ════════════ SERVICE ════════════
+    match /tables/{id} {
+      allow read, write: if isTeam();
+    }
+
+    match /orders/{id} {
+      allow read, update, delete: if isTeam();
+      // Commande client (QR) : format strict. Les prix envoyés sont ignorés
+      // par la caisse (recalculés depuis le menu) — voir importOrder.
+      allow create: if isTeam() || (
+        isAuth()
+        && request.resource.data.keys().hasOnly(['tableId', 'tableNum', 'items', 'note', 'status', 'source', 'sentAt', 'clientUid'])
+        && request.resource.data.source == 'client'
+        && request.resource.data.status == 'pending'
+        && request.resource.data.clientUid == request.auth.uid
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.items.size() <= 40
+        && isStr(request.resource.data.get('note', ''), 500)
+        && isStr(request.resource.data.tableId, 40)
+      );
+    }
+
+    match /payments/{id} {
+      allow read, write: if isTeam();
+    }
+
+    // ════════════ ARGENT — inaltérable ════════════
+    // Une vente = un document, créé une fois, jamais modifié ni supprimé.
+    // Une annulation = un document séparé dans cancel/ (même clé que la vente).
+    match /sales/{day} {
+      allow read: if isTeam();
+      allow write: if false;
+      match /v/{saleKey} {
+        allow read: if isTeam();
+        allow create: if isTeam()
+          && request.resource.data.ts is int
+          && request.resource.data.total is number
+          && request.resource.data.payType is string
+          && request.resource.data.hash is string;
+        allow update, delete: if false;
+      }
+      match /cancel/{saleKey} {
+        allow read: if isTeam();
+        allow create: if isTeam() && request.resource.data.ts is int;
+        allow update, delete: if false;
+      }
+    }
+
+    // Clôtures Z : inaltérables.
+    match /closures/{id} {
+      allow read, create: if isTeam();
+      allow update, delete: if false;
+    }
+
+    // Compteur de notes (numérotation continue entre appareils).
+    match /counters/{id} {
+      allow read, write: if isTeam();
+    }
+
+    // Sauvegardes complètes de la caisse (1 doc par jour, sans PIN).
+    match /backups/{id} {
+      allow read, write: if isTeam();
+    }
+
+    // Tickets clients (lien QR) : lecture d'UN ticket par son id, pas de listing.
+    match /tickets/{id} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if isTeam();
+    }
+
+    // ════════════ MULTI-TENANT (inactif, inchangé) ════════════
     function isResto(slug) {
       return isAuth()
         && exists(/databases/$(database)/documents/restaurants/$(slug)/users/$(request.auth.uid));
     }
-    function role(slug) {
-      return get(/databases/$(database)/documents/restaurants/$(slug)/users/$(request.auth.uid)).data.role;
-    }
     function isAdmin(slug) {
-      return isResto(slug) && role(slug) == 'admin';
+      return isResto(slug)
+        && get(/databases/$(database)/documents/restaurants/$(slug)/users/$(request.auth.uid)).data.role == 'admin';
     }
-
-    // ════════════ MULTI-TENANT (cible — non utilisée par l'app prod aujourd'hui) ════════════
-    // Inchangé par rapport à v3. Servira quand RESTO_SLUG sera ré-activé en Phase 5.
     match /restaurants/{slug} {
       allow read: if isResto(slug);
       allow write: if isAdmin(slug);
-
-      // Menu public en lecture (clients QR sans auth)
-      match /config/menu {
-        allow read: if true;
-        allow write: if isAdmin(slug);
+      match /{document=**} {
+        allow read, write: if isAdmin(slug);
       }
-
-      // Autres configs : auth resto requise
-      match /config/{docId} {
-        allow read: if isResto(slug);
-        allow write: if isAdmin(slug);
-      }
-
-      match /tables/{tableId} {
-        allow read, write: if isResto(slug);
-      }
-
-      match /orders/{orderId} {
-        allow read: if isResto(slug);
-        allow create, update: if isResto(slug);
-        allow delete: if isAdmin(slug);
-      }
-
-      match /payments/{paymentId} {
-        allow read: if isResto(slug);
-        allow create: if isResto(slug);
-        allow update, delete: if isAdmin(slug);
-      }
-
-      match /users/{uid} {
-        allow read: if isResto(slug);
-        allow write: if isAdmin(slug);
-      }
-
-      match /images/{productId}/{document=**} {
-        allow read: if true; // images du menu publiques
-        allow write: if isAdmin(slug);
-      }
-    }
-
-    // ════════════ BACKWARD COMPAT ROOT (actif jusqu'à Phase 5) ════════════
-    //
-    // Lecture publique uniquement pour les paths utilisés par les clients QR
-    // (clients arrivent sans auth, signInAnonymously asynchrone, peut ne pas
-    // être prêt au premier read).
-    match /config/{docId} {
-      // PUBLIC : menu (clients QR le voient), tables (plan de salle UI),
-      // images_<productId> (vignettes du menu).
-      allow read: if docId == 'menu'
-                  || docId == 'tables'
-                  || docId.matches('images_.*');
-      // BLOQUÉ TOTALEMENT : apikeys est une collection morte (Gemini retiré
-      // du runtime en v68, voir commit "cleanup Gemini"). Aucune lecture ou
-      // écriture ne doit être possible. Le doc résiduel en prod doit être
-      // supprimé manuellement via Firebase Console.
-      allow read, write: if docId != 'apikeys' && isAuth();
-    }
-
-    // TABLES root : pas utilisées en lecture par les clients QR (le plan
-    // de salle vient de config/tables). Read auth uniquement.
-    match /tables/{id} {
-      allow read, write: if isAuth();
-    }
-
-    // ORDERS : durcissement majeur. Les clients ne lisent JAMAIS /orders
-    // directement — ils voient leur statut via le QR /tickets/{id} qui
-    // expose seulement ce qui doit l'être (ticket lisible publiquement).
-    match /orders/{id} {
-      allow read: if isAuth();
-      allow create, update: if isAuth();
-      allow delete: if isAuth();
-    }
-
-    // PAYMENTS : auth uniquement (inchangé). Données financières sensibles.
-    match /payments/{id} {
-      allow read, write: if isAuth();
-    }
-
-    // TICKETS publics (lien QR partagé au client) :
-    // read public (le client scanne sans auth), write auth uniquement (caisse).
-    // Ne contient PAS de données client identifiables — seulement items + total.
-    match /tickets/{id} {
-      allow read: if true;
-      allow create, update: if isAuth();
-      allow delete: if isAuth();
     }
 
     // Tout le reste bloqué

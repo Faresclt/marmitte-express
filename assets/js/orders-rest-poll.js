@@ -83,6 +83,11 @@
   }
 
   async function pollOrdersViaREST() {
+    // Filet de secours UNIQUEMENT : si le listener temps réel a livré des
+    // données il y a moins de 30 s, on ne fait rien (avant : 200 lectures
+    // toutes les 5 s sans condition → quota Firestore gratuit grillé).
+    if (document.hidden) return;
+    if (window.__lastOrdersSnap && Date.now() - window.__lastOrdersSnap < 30000) return;
     try {
       var auth = await _authHeaders();
       if (!auth) {
@@ -120,7 +125,13 @@
         if (typeof window.importOrderToTable === 'function') {
           try { window.importOrderToTable(order); } catch (e) { console.warn('[REST] import error', e); }
         }
-        markOrderReceived(order._id);
+        // Transaction « seulement si encore pending » : ne fait jamais reculer
+        // une commande déjà « en préparation » côté cuisine.
+        if (window.FB && typeof window.FB.markReceived === 'function') {
+          window.FB.markReceived(order._id).catch(function(){});
+        } else {
+          markOrderReceived(order._id);
+        }
       });
 
       // Force render salle pour activer le fallback tableStatus
@@ -142,8 +153,18 @@
       if (!res.ok) return;
       var doc = await res.json();
       var fields = doc.fields || {};
-      var branding = fields.branding ? parseFsValue(fields.branding) : null;
-      if (!branding) return;
+      var raw = fields.branding ? parseFsValue(fields.branding) : null;
+      if (!raw) return;
+      // Valeurs du cloud = non fiables : URL https/data:image, couleur #hex,
+      // texte borné (sinon XSS persistant via le cache localStorage).
+      var S = window.__safe || {};
+      var branding = {
+        name: raw.name ? String(raw.name).slice(0, 60) : '',
+        tagline: raw.tagline ? String(raw.tagline).slice(0, 120) : '',
+        emoji: raw.emoji ? String(raw.emoji).slice(0, 8) : '',
+        accent: S.safeColor ? S.safeColor(raw.accent) : '',
+        logoUrl: S.safeUrl ? S.safeUrl(raw.logoUrl) : ''
+      };
       window.__fbBranding = branding;
 
       // Met à jour localStorage brand_* SEULEMENT si Firebase a une valeur.

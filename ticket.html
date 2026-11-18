@@ -101,26 +101,56 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 16
 </div>
 
 <script type="module">
-import { db, doc, getDoc } from './assets/js/firebase-sync.js';
+import { db, doc, getDoc, escHtml, safeUrl, safeColor } from './assets/js/firebase-sync.js';
 
 const params = new URLSearchParams(location.search);
 const id = params.get('id');
-let TICKET = null; // sauvegardé en mémoire pour les actions
+let TICKET = null;      // sauvegardé en mémoire pour les actions
+let WORKER_URL = '';    // URL du relais mail (validée), '' = pas d'envoi auto
 
-if (!id) {
-  showError('Aucun identifiant de ticket fourni.');
+// Id de ticket : alphanumérique court (cf. generateShortId de la caisse).
+const TICKET_ID_RE = /^[A-Za-z0-9_-]{4,64}$/;
+
+// URL du relais mail : lue dans config/menu (settings.mailWorkerUrl, publié par
+// la caisse) — PLUS JAMAIS depuis le ticket. N'accepte que https://*.workers.dev
+// ou https://*.pages.dev (aucune URL en dur trouvée dans le dépôt).
+function validWorkerUrl(u) {
+  const s = String(u || '').trim();
+  return /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.(workers|pages)\.dev(\/[A-Za-z0-9_\-\/]*)?$/i.test(s) ? s : '';
+}
+// Liens d'avis : https uniquement (bloque javascript:, data:, etc.)
+function httpsUrl(u) {
+  const s = String(u || '').trim();
+  return /^https:\/\/[^\s"'<>]+$/i.test(s) ? s : '';
+}
+const num = (v) => Number(v) || 0;
+
+if (!id || !TICKET_ID_RE.test(id)) {
+  showError('Aucun identifiant de ticket valide fourni.');
 } else {
   loadTicket(id);
 }
 
+async function loadMailWorker() {
+  try {
+    const snap = await getDoc(doc(db, 'config', 'menu'));
+    const st = (snap.exists() && (snap.data() || {}).settings) || {};
+    return validWorkerUrl(st.mailWorkerUrl);
+  } catch (e) {
+    console.warn('[ticket] config/menu illisible:', e && (e.code || e.message));
+    return '';
+  }
+}
+
 async function loadTicket(id) {
   try {
-    const snap = await getDoc(doc(db, 'tickets', id));
+    const [snap, worker] = await Promise.all([getDoc(doc(db, 'tickets', id)), loadMailWorker()]);
     if (!snap.exists()) {
       showError('Ticket introuvable ou expiré.');
       return;
     }
-    TICKET = snap.data();
+    TICKET = snap.data() || {};
+    WORKER_URL = worker;
     render(TICKET);
   } catch (e) {
     console.error(e);
@@ -134,28 +164,23 @@ function showError(msg) {
   document.getElementById('error-msg').textContent = msg;
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+const esc = escHtml; // échappe & < > " '
 
 function render(t) {
   const resto = t.resto || {};
-  const items = t.items || [];
+  const items = Array.isArray(t.items) ? t.items : [];
   const reviews = t.reviews || {};
-  const mail = t.mail || {};
 
-  if (resto.accent) {
-    document.documentElement.style.setProperty('--accent', resto.accent);
-  }
-  if (resto.name) {
-    document.title = 'Ticket — ' + resto.name;
-  }
+  const accent = safeColor(resto.accent);
+  if (accent) document.documentElement.style.setProperty('--accent', accent);
+  if (resto.name) document.title = 'Ticket — ' + String(resto.name);
 
-  const logoHTML = resto.logoUrl
-    ? `<img src="${esc(resto.logoUrl)}" alt="logo">`
-    : (resto.emoji || '🍲');
+  const logo = safeUrl(resto.logoUrl);
+  const logoHTML = logo
+    ? `<img src="${esc(logo)}" alt="logo">`
+    : esc(String(resto.emoji || '🍲').slice(0, 8));
 
-  const tableLine = t.tableNum ? `Table ${esc(t.tableNum)}` : 'Vente directe';
+  const tableLine = t.tableNum ? `Table ${t.tableNum}` : 'Vente directe';
   const payLabel = t.payType === 'cb' ? 'Carte bancaire' : t.payType === 'cash' ? 'Espèces' : 'Offert';
 
   const itemsHTML = items.map(i => {
@@ -163,54 +188,55 @@ function render(t) {
     return `
       <div class="item">
         <div class="item-name">
-          ${esc(i.qty)}× ${esc(i.name)}
+          ${esc(num(i.qty))}× ${esc(i.name)}
           ${opts ? `<div class="item-opts">${esc(opts)}</div>` : ''}
         </div>
-        <div class="item-price">${(i.qty * i.price).toFixed(2)}€</div>
+        <div class="item-price">${(num(i.qty) * num(i.price)).toFixed(2)}€</div>
       </div>`;
   }).join('');
 
-  const reviewsHTML = (reviews.google || reviews.tripadvisor) ? `
+  const gUrl = httpsUrl(reviews.google), tUrl = httpsUrl(reviews.tripadvisor);
+  const reviewsHTML = (gUrl || tUrl) ? `
     <div class="reviews">
       <div class="reviews-title">💛 Vous avez aimé ?</div>
       <div class="reviews-sub">Aidez-nous en laissant un avis — ça nous fait toujours plaisir !</div>
       <div class="review-btns">
-        ${reviews.google ? `<a class="g" href="${esc(reviews.google)}" target="_blank" rel="noopener">⭐ Avis Google</a>` : ''}
-        ${reviews.tripadvisor ? `<a class="t" href="${esc(reviews.tripadvisor)}" target="_blank" rel="noopener">🦉 TripAdvisor</a>` : ''}
+        ${gUrl ? `<a class="g" href="${esc(gUrl)}" target="_blank" rel="noopener noreferrer">⭐ Avis Google</a>` : ''}
+        ${tUrl ? `<a class="t" href="${esc(tUrl)}" target="_blank" rel="noopener noreferrer">🦉 TripAdvisor</a>` : ''}
       </div>
     </div>
   ` : '';
 
-  const canEmail = !!(mail.workerUrl && mail.sender);
+  const canEmail = !!WORKER_URL;
   const canShare = typeof navigator.share === 'function';
-  // Boutons d'actions selon ce qui est disponible
+  // Boutons d'actions : data-action + délégation (aucune donnée dans un onclick)
   const actionsHTML = `
     <div class="actions-grid">
       ${canEmail
-        ? `<button class="act-btn primary" onclick="window.__openEmailModal()"><span class="ico">📧</span><span class="lbl">Recevoir par email</span></button>`
-        : `<button class="act-btn" onclick="window.__mailtoFallback()"><span class="ico">📧</span><span class="lbl">M'envoyer par email</span></button>`
+        ? `<button class="act-btn primary" data-action="email"><span class="ico">📧</span><span class="lbl">Recevoir par email</span></button>`
+        : `<button class="act-btn" data-action="mailto"><span class="ico">📧</span><span class="lbl">M'envoyer par email</span></button>`
       }
       ${canShare
-        ? `<button class="act-btn" onclick="window.__shareTicket()"><span class="ico">📤</span><span class="lbl">Partager (SMS, WhatsApp…)</span></button>`
-        : `<button class="act-btn" onclick="window.__copyLink(this)"><span class="ico">🔗</span><span class="lbl">Copier le lien</span></button>`
+        ? `<button class="act-btn" data-action="share"><span class="ico">📤</span><span class="lbl">Partager (SMS, WhatsApp…)</span></button>`
+        : `<button class="act-btn" data-action="copy"><span class="ico">🔗</span><span class="lbl">Copier le lien</span></button>`
       }
-      <button class="act-btn" onclick="window.print()"><span class="ico">🖨️</span><span class="lbl">Imprimer</span></button>
-      <button class="act-btn" onclick="window.__copyLink(this)"><span class="ico">🔗</span><span class="lbl">Copier le lien</span></button>
+      <button class="act-btn" data-action="print"><span class="ico">🖨️</span><span class="lbl">Imprimer</span></button>
+      <button class="act-btn" data-action="copy"><span class="ico">🔗</span><span class="lbl">Copier le lien</span></button>
     </div>
   `;
 
   // Ventilation TVA détaillée
-  const tvaRates = t.tvaRates || {};
+  const tvaRates = (t.tvaRates && typeof t.tvaRates === 'object') ? t.tvaRates : {};
   const tvaRows = Object.keys(tvaRates).sort((a,b)=>parseFloat(a)-parseFloat(b)).map(rate => {
-    const r2 = tvaRates[rate];
-    return `<div class="tva-row"><span>HT ${esc(rate)}%</span><span>${(r2.ht||0).toFixed(2)}€</span></div>
-            <div class="tva-row"><span>TVA ${esc(rate)}%</span><span>${(r2.tva||0).toFixed(2)}€</span></div>`;
+    const r2 = tvaRates[rate] || {};
+    return `<div class="tva-row"><span>HT ${esc(rate)}%</span><span>${num(r2.ht).toFixed(2)}€</span></div>
+            <div class="tva-row"><span>TVA ${esc(rate)}%</span><span>${num(r2.tva).toFixed(2)}€</span></div>`;
   }).join('');
   const tvaBlock = tvaRows ? `
     <div class="tva-block">
       ${tvaRows}
-      <div class="tva-row" style="margin-top:6px;padding-top:6px;border-top:1px dotted var(--border)"><strong>Total HT</strong><strong>${(t.totalHT || 0).toFixed(2)}€</strong></div>
-      <div class="tva-row"><strong>Total TVA</strong><strong>${(t.totalTVA || 0).toFixed(2)}€</strong></div>
+      <div class="tva-row" style="margin-top:6px;padding-top:6px;border-top:1px dotted var(--border)"><strong>Total HT</strong><strong>${num(t.totalHT).toFixed(2)}€</strong></div>
+      <div class="tva-row"><strong>Total TVA</strong><strong>${num(t.totalTVA).toFixed(2)}€</strong></div>
     </div>` : '';
 
   // Mentions légales
@@ -238,7 +264,7 @@ function render(t) {
         </div>
         <div class="items">${itemsHTML}</div>
         ${tvaBlock}
-        <div class="total"><span>TOTAL TTC</span><span class="amount">${(t.total || 0).toFixed(2)}€</span></div>
+        <div class="total"><span>TOTAL TTC</span><span class="amount">${num(t.total).toFixed(2)}€</span></div>
         <div class="info-row" style="border-top:1px solid var(--border);border-bottom:none;padding-top:14px;margin-top:14px;margin-bottom:0">
           <span>Règlement</span>
           <span><strong>${esc(payLabel)}</strong></span>
@@ -252,20 +278,33 @@ function render(t) {
   `;
 
   document.getElementById('loading').style.display = 'none';
-  document.getElementById('ticket-content').innerHTML = html;
-  document.getElementById('ticket-content').style.display = 'block';
+  const box = document.getElementById('ticket-content');
+  box.innerHTML = html;
+  box.style.display = 'block';
 }
 
-// ── Actions (exposées en global pour les onclick inline) ──
+// ── Actions (délégation sur le conteneur) ──
+document.getElementById('ticket-content').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-action]');
+  if (!b || !TICKET) return;
+  const a = b.dataset.action;
+  if (a === 'email') openEmailModal();
+  else if (a === 'mailto') mailtoFallback();
+  else if (a === 'share') shareTicket();
+  else if (a === 'copy') copyLink(b);
+  else if (a === 'print') window.print();
+});
 
-window.__openEmailModal = () => {
+// Envoi par le relais mail. Contrat v2 : POST { ticketId, to } — rien d'autre.
+// Le relais relit le ticket lui-même et construit le mail côté serveur.
+function openEmailModal() {
   const m = document.createElement('div');
   m.className = 'modal-bg';
   m.innerHTML = `
     <div class="modal">
       <h3>📧 Recevoir le ticket par email</h3>
       <p>Entrez votre adresse — vous recevrez le ticket en quelques secondes.</p>
-      <input id="em-input" type="email" placeholder="vous@exemple.fr" autocomplete="email">
+      <input id="em-input" type="email" placeholder="vous@exemple.fr" autocomplete="email" maxlength="254">
       <div class="modal-btns">
         <button class="btn-cancel" id="em-cancel">Annuler</button>
         <button class="btn-send" id="em-send">Envoyer ✓</button>
@@ -280,7 +319,7 @@ window.__openEmailModal = () => {
   m.onclick = (e) => { if (e.target === m) close(); };
   const send = async () => {
     const addr = inp.value.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) {
+    if (addr.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) {
       inp.style.borderColor = 'var(--red)';
       inp.placeholder = 'Email invalide';
       inp.value = '';
@@ -290,23 +329,14 @@ window.__openEmailModal = () => {
     btn.disabled = true;
     btn.textContent = 'Envoi…';
     try {
-      const content = buildEmailContent(TICKET);
-      const mail = TICKET.mail || {};
-      const res = await fetch(mail.workerUrl, {
+      const res = await fetch(WORKER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: addr,
-          subject: content.subject,
-          html: content.html,
-          text: content.text,
-          fromName: (TICKET.resto || {}).name || 'Restaurant',
-          fromEmail: mail.sender
-        })
+        body: JSON.stringify({ ticketId: id, to: addr })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) {
-        const errMsg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || res.statusText;
+        const errMsg = (data && typeof data.error === 'string' && data.error) || res.statusText || ('HTTP ' + res.status);
         alert('❌ Erreur : ' + errMsg);
         btn.disabled = false;
         btn.textContent = 'Envoyer ✓';
@@ -323,67 +353,69 @@ window.__openEmailModal = () => {
   };
   document.getElementById('em-send').onclick = send;
   inp.onkeydown = (e) => { if (e.key === 'Enter') send(); };
-};
+}
 
-window.__mailtoFallback = () => {
-  const content = buildEmailContent(TICKET);
+function mailtoFallback() {
+  const content = buildEmailText(TICKET);
   window.location.href = 'mailto:?subject=' + encodeURIComponent(content.subject) +
     '&body=' + encodeURIComponent(content.text);
-};
+}
 
-window.__shareTicket = async () => {
+async function shareTicket() {
   const resto = (TICKET.resto || {}).name || 'Restaurant';
   try {
     await navigator.share({
       title: 'Ticket — ' + resto,
-      text: resto + ' — Total ' + (TICKET.total || 0).toFixed(2) + '€',
+      text: resto + ' — Total ' + num(TICKET.total).toFixed(2) + '€',
       url: window.location.href
     });
   } catch (e) {
     if (e.name !== 'AbortError') console.warn('share:', e);
   }
-};
+}
 
-window.__copyLink = async (btn) => {
+async function copyLink(btn) {
   try {
     await navigator.clipboard.writeText(window.location.href);
-    const orig = btn.querySelector('.lbl').textContent;
-    btn.querySelector('.lbl').textContent = '✓ Lien copié';
-    setTimeout(() => { btn.querySelector('.lbl').textContent = orig; }, 1500);
+    const lbl = btn.querySelector('.lbl');
+    const orig = lbl.textContent;
+    lbl.textContent = '✓ Lien copié';
+    setTimeout(() => { lbl.textContent = orig; }, 1500);
   } catch (e) {
     alert('Lien : ' + window.location.href);
   }
-};
+}
 
-function buildEmailContent(t) {
+// Texte brut pour le repli mailto: (le mail HTML est construit par le relais).
+function buildEmailText(t) {
   const resto = (t.resto || {}).name || 'Restaurant';
-  const items = t.items || [];
+  const items = Array.isArray(t.items) ? t.items : [];
   const reviews = t.reviews || {};
-  const tvaRates = t.tvaRates || {};
+  const tvaRates = (t.tvaRates && typeof t.tvaRates === 'object') ? t.tvaRates : {};
   const lg = t.legal || {};
   const tableLine = t.tableNum ? 'Table ' + t.tableNum : 'Vente directe';
   const payLabel = t.payType === 'cb' ? 'Carte bancaire' : t.payType === 'cash' ? 'Espèces' : 'Offert';
 
-  // Texte simple
   let text = resto + '\n';
   if (t.number) text += 'Ticket N° ' + t.number + '\n';
   text += (t.date || '') + ' à ' + (t.time || '') + '\n';
   text += tableLine + ' — ' + payLabel + '\n\n';
   items.forEach(i => {
     const opts = [i.cuisson, i.garniture].filter(Boolean).join(', ');
-    text += i.qty + 'x ' + i.name + (opts ? ' (' + opts + ')' : '') + ' — ' + (i.qty * i.price).toFixed(2) + '€\n';
+    text += num(i.qty) + 'x ' + i.name + (opts ? ' (' + opts + ')' : '') + ' — ' + (num(i.qty) * num(i.price)).toFixed(2) + '€\n';
   });
   if (Object.keys(tvaRates).length) {
     text += '\n— TVA —\n';
     Object.keys(tvaRates).sort().forEach(rate => {
-      text += 'HT ' + rate + '% : ' + (tvaRates[rate].ht||0).toFixed(2) + '€  |  TVA : ' + (tvaRates[rate].tva||0).toFixed(2) + '€\n';
+      text += 'HT ' + rate + '% : ' + num((tvaRates[rate] || {}).ht).toFixed(2) + '€  |  TVA : ' + num((tvaRates[rate] || {}).tva).toFixed(2) + '€\n';
     });
-    text += 'Total HT  : ' + (t.totalHT||0).toFixed(2) + '€\n';
-    text += 'Total TVA : ' + (t.totalTVA||0).toFixed(2) + '€\n';
+    text += 'Total HT  : ' + num(t.totalHT).toFixed(2) + '€\n';
+    text += 'Total TVA : ' + num(t.totalTVA).toFixed(2) + '€\n';
   }
-  text += 'TOTAL TTC : ' + (t.total || 0).toFixed(2) + '€\n\nMerci de votre visite !';
-  if (reviews.google) text += '\n\nAvis Google : ' + reviews.google;
-  if (reviews.tripadvisor) text += '\nTripAdvisor : ' + reviews.tripadvisor;
+  text += 'TOTAL TTC : ' + num(t.total).toFixed(2) + '€\n\nMerci de votre visite !';
+  const g = httpsUrl(reviews.google), ta = httpsUrl(reviews.tripadvisor);
+  if (g) text += '\n\nAvis Google : ' + g;
+  if (ta) text += '\nTripAdvisor : ' + ta;
   if (lg.raison || lg.siret) {
     text += '\n\n— Mentions légales —';
     if (lg.raison) text += '\n' + lg.raison;
@@ -392,55 +424,7 @@ function buildEmailContent(t) {
     if (lg.tvaIntra) text += '\nN° TVA : ' + lg.tvaIntra;
     if (lg.ape) text += '\nAPE : ' + lg.ape;
   }
-
-  // HTML formaté
-  const accent = (t.resto || {}).accent || '#f5a623';
-  const itemRows = items.map(i => {
-    const opts = [i.cuisson, i.garniture].filter(Boolean).join(', ');
-    return '<tr><td style="padding:6px 8px;border-bottom:1px solid #eee">' + i.qty + 'x ' + esc(i.name) +
-      (opts ? ' <span style="color:#888;font-size:11px">(' + esc(opts) + ')</span>' : '') +
-      '</td><td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">' + (i.qty * i.price).toFixed(2) + '€</td></tr>';
-  }).join('');
-  let reviewLinks = '';
-  if (reviews.google)      reviewLinks += '<a href="' + esc(reviews.google) + '" style="display:inline-block;margin:4px;padding:10px 18px;background:#4285F4;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">⭐ Avis Google</a>';
-  if (reviews.tripadvisor) reviewLinks += '<a href="' + esc(reviews.tripadvisor) + '" style="display:inline-block;margin:4px;padding:10px 18px;background:#00aa6c;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">🦉 TripAdvisor</a>';
-
-  // Ventilation TVA
-  const tvaHTMLRows = Object.keys(tvaRates).sort().map(rate =>
-    '<tr><td style="padding:3px 8px;color:#666;font-size:11px">HT ' + esc(rate) + '%</td><td style="padding:3px 8px;text-align:right;color:#666;font-size:11px">' + (tvaRates[rate].ht||0).toFixed(2) + '€</td><td style="padding:3px 8px;color:#666;font-size:11px">TVA ' + esc(rate) + '%</td><td style="padding:3px 8px;text-align:right;color:#666;font-size:11px">' + (tvaRates[rate].tva||0).toFixed(2) + '€</td></tr>'
-  ).join('');
-  const tvaHTML = tvaHTMLRows ? '<table style="width:100%;border-collapse:collapse;margin-top:12px;border-top:1px dashed #ccc;padding-top:8px">' + tvaHTMLRows + '</table>' +
-    '<div style="margin-top:8px;display:flex;justify-content:space-between;font-size:12px;color:#666"><span>Total HT</span><span>' + (t.totalHT||0).toFixed(2) + '€</span></div>' +
-    '<div style="display:flex;justify-content:space-between;font-size:12px;color:#666"><span>Total TVA</span><span>' + (t.totalTVA||0).toFixed(2) + '€</span></div>' : '';
-
-  // Mentions légales
-  const legalParts = [];
-  if (lg.raison)   legalParts.push('<strong>' + esc(lg.raison) + '</strong>');
-  if (lg.adresse)  legalParts.push(esc(lg.adresse));
-  if (lg.siret)    legalParts.push('SIRET : ' + esc(lg.siret));
-  if (lg.tvaIntra) legalParts.push('N° TVA : ' + esc(lg.tvaIntra));
-  if (lg.ape)      legalParts.push('APE : ' + esc(lg.ape));
-  const legalHTML = legalParts.length
-    ? '<div style="margin-top:18px;padding-top:14px;border-top:1px dashed #ccc;font-size:10px;color:#666;text-align:center;line-height:1.6">' + legalParts.join('<br>') + '</div>'
-    : '';
-
-  const html = '<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">' +
-    '<div style="background:' + accent + ';padding:20px;text-align:center;border-radius:10px 10px 0 0">' +
-      '<h1 style="margin:0;color:#1a1100;font-size:22px;letter-spacing:1px">' + esc(resto) + '</h1>' +
-      (t.number ? '<div style="font-size:12px;color:#1a1100;margin-top:4px;font-weight:600">Ticket N° ' + esc(t.number) + '</div>' : '') +
-    '</div>' +
-    '<div style="padding:20px;border:1px solid #eee;border-top:none">' +
-      '<div style="color:#666;font-size:13px;margin-bottom:14px"><strong>' + esc(tableLine) + '</strong> · ' + esc(t.date || '') + ' à ' + esc(t.time || '') + '<br>Règlement : <strong>' + esc(payLabel) + '</strong></div>' +
-      '<table style="width:100%;border-collapse:collapse;font-size:13px">' + itemRows + '</table>' +
-      tvaHTML +
-      '<div style="margin-top:8px;padding-top:8px;border-top:2px solid #1a1a1a;display:flex;justify-content:space-between;font-size:18px;font-weight:700"><span>TOTAL TTC</span><span>' + (t.total || 0).toFixed(2) + '€</span></div>' +
-      (reviewLinks ? '<div style="margin-top:24px;padding-top:20px;border-top:1px solid #eee;text-align:center"><div style="font-size:13px;color:#666;margin-bottom:10px">Vous avez aimé ? Laissez-nous un avis 💛</div>' + reviewLinks + '</div>' : '') +
-      legalHTML +
-    '</div>' +
-    '<div style="text-align:center;font-size:11px;color:#999;margin-top:12px">Ticket envoyé automatiquement — ne pas répondre</div>' +
-  '</div>';
-
-  return { subject: 'Ticket N° ' + (t.number||'') + ' — ' + resto + ' — ' + (t.date || ''), text, html };
+  return { subject: 'Ticket N° ' + (t.number||'') + ' — ' + resto + ' — ' + (t.date || ''), text };
 }
 </script>
 </body>

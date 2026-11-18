@@ -8,6 +8,8 @@
     "test:headed": "playwright test --headed"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0"
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "@playwright/test": "^1.60.0",
+    "firebase": "^10.12.0"
   }
 }

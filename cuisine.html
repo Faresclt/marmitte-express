@@ -38,6 +38,9 @@
     var lu = read('brand_logoUrl');
     var ln = read('brand_name');
     var la = read('brand_accent');
+    // Cache local = donnée Firestore : couleur #hex et URL https/data:image/relative seulement
+    if (la && !/^#[0-9a-f]{3,8}$/i.test(la)) la = null;
+    if (lu && !/^(https:\/\/|data:image\/(png|jpe?g|webp|gif|avif);base64,|(\.{0,2}\/)?[a-z0-9_-][^:]*$)/i.test(lu)) lu = null;
     if (la) document.documentElement.style.setProperty('--accent', la);
     if (lu || ln) {
       window.__brandPreBoot = { logoUrl: lu, name: ln, accent: la };
@@ -172,10 +175,19 @@ body{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidd
 </div>
 
 <script type="module">
-function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-import { db, collection, onSnapshot, updateDoc, deleteDoc, doc, serverTimestamp } from './assets/js/firebase-sync.js';
+import { db, collection, onSnapshot, updateDoc, deleteDoc, doc, serverTimestamp, escHtml, safeUrl, safeColor, requireStaff } from './assets/js/firebase-sync.js';
+// esc = escHtml (échappe & < > " ') — tout texte venant de Firestore passe par là.
+const esc = escHtml;
+
+// Appareil du personnel : bandeau / écran d'enregistrement si non enregistré.
+requireStaff({ label: 'Cuisine', page: 'cuisine' });
+// Contrat service worker : la cuisine n'a jamais de saisie en cours → rechargeable.
+window.__isBusy = () => false;
 
 let orders = {};
+// Produits du menu indexés par id : le nom affiché/lu vient du MENU (pas de la
+// commande, qui peut venir d'un client QR non authentifié).
+let productsById = new Map();
 let prevCount = 0;
 let noCuisineCategories = [];
 let noCuisineProductNames = new Set(); // Fallback: product names from noCuisine categories
@@ -224,14 +236,16 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
   // Branding cross-device
   if(data && data.branding){
     const b = data.branding;
-    if(b.accent){
-      document.documentElement.style.setProperty('--accent', b.accent);
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', b.accent);
+    const accent = safeColor(b.accent);
+    if(accent){
+      document.documentElement.style.setProperty('--accent', accent);
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', accent);
     }
     const img = document.getElementById('resto-logo-img');
     if(img){
-      if(b.logoUrl){
-        if(img.src !== b.logoUrl) img.src = b.logoUrl;
+      const logo = safeUrl(b.logoUrl);
+      if(logo){
+        if(img.getAttribute('src') !== logo) img.src = logo;
         img.style.display = 'inline-block';
       } else { img.style.display = 'none'; }
     }
@@ -250,6 +264,11 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
   noCuisineCategories = allCats
     .filter(c => c.noCuisine === true)
     .map(c => c.id || c.name);
+  productsById = new Map(
+    ((data && Array.isArray(data.products)) ? data.products : [])
+      .filter(p => p && p.id != null)
+      .map(p => [String(p.id), p])
+  );
   // Build product name set for fallback matching (old orders without cat field)
   noCuisineProductNames.clear();
   if (data && data.products && noCuisineCategories.length) {
@@ -266,9 +285,34 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
   } else if (data && data.settings && typeof data.settings.lateThresholdMin === 'number'){
     lateThresholdMin = data.settings.lateThresholdMin;
   }
-  // Re-render with updated filter
-  if (Object.keys(orders).length > 0) renderAll();
+  // Re-render with updated filter (noms du menu potentiellement changés →
+  // invalide le cache de signature)
+  if (Object.keys(orders).length > 0) { _lastRenderSig = ''; renderAll(); }
 });
+
+// Nom d'un article tel qu'affiché/lu en cuisine : nom du MENU (par pid) quand
+// le produit existe, + variante seulement si elle fait partie des variantes du
+// produit. Sinon (ancien article, supplément, produit retiré) : nom de la
+// commande — toujours échappé à l'affichage.
+function itemLabel(i, o) {
+  const p = i && i.pid != null ? productsById.get(String(i.pid)) : null;
+  if (!p || !p.name) return String((i && i.name) || '');
+  const base = String(p.name);
+  const vs = Array.isArray(p.variants) ? p.variants : [];
+  if (i.variant != null) {
+    const v = vs.find(x => x && x.label === i.variant);
+    return v ? base + ' — ' + String(v.label) : base;
+  }
+  // Ancienne commande du personnel (variante incluse dans le nom, sans champ variant)
+  if (o && o.source !== 'client' && typeof i.name === 'string' && i.name.startsWith(base + ' — ')) return i.name;
+  return base;
+}
+// Options affichées en tags (cuisson, garniture, supplément sirop)
+function itemOpts(i) {
+  const opts = [i.cuisson, i.garniture].filter(x => typeof x === 'string' && x);
+  if (i.sirop === true) opts.push('+ sirop');
+  return opts;
+}
 
 // ── Écoute commandes ──
 onSnapshot(collection(db, 'orders'), snap => {
@@ -436,12 +480,16 @@ function _renderAllImpl() {
     return d && d.toDateString() === today;
   }).length;
 
-  const activeItems = [...receivedF, ...preparingF].flatMap(o => filterCuisineItems(o.items||[]));
-  const sum = {};
-  activeItems.forEach(i => { if (!sum[i.name]) sum[i.name] = 0; sum[i.name] += i.qty; });
-  const arr = Object.entries(sum).sort((a,b) => b[1] - a[1]);
+  const sum = new Map();
+  [...receivedF, ...preparingF].forEach(o => {
+    filterCuisineItems(o.items||[]).forEach(i => {
+      const n = itemLabel(i, o);
+      sum.set(n, (sum.get(n) || 0) + (Number(i.qty) || 0));
+    });
+  });
+  const arr = [...sum.entries()].sort((a,b) => b[1] - a[1]);
   document.getElementById('sum-body').innerHTML = arr.length
-    ? arr.map(([n,q]) => `<div class="stag"><span class="stag-q">${q}×</span>${n}</div>`).join('')
+    ? arr.map(([n,q]) => `<div class="stag"><span class="stag-q">${Number(q) || 0}×</span>${esc(n)}</div>`).join('')
     : '<span style="color:#5a5e72">Aucune commande active</span>';
 }
 
@@ -452,23 +500,22 @@ function makeTicket(o, type) {
   const mins = minsAgo(o);
   // Audit cuisine #9 : seuil "late" via lateThresholdMin (config-driven)
   const late = type === 'new' && mins >= lateThresholdMin;
-  // _id Firestore ne contient théoriquement que [a-zA-Z0-9_-] mais on échappe
-  // par défense en profondeur (quote-safe inside onclick=").
-  const idEsc = esc(o._id);
+  // Plus d'onclick construit avec l'id : data-act / data-id + délégation
+  // (listener unique sur .board, plus bas). L'id est échappé pour l'attribut.
+  const idAttr = esc(o._id);
 
   let btns = '';
-  if (type === 'new') btns = `<button class="tbtn tbtn-prep" onclick="doStatus('${idEsc}','preparing')">🔥 EN PRÉPARATION</button>`;
-  else if (type === 'prep') btns = `<button class="tbtn tbtn-ready" onclick="doStatus('${idEsc}','ready')">✅ PRÊT À SERVIR</button>`;
-  else btns = `<button class="tbtn tbtn-done" onclick="doStatus('${idEsc}','served')">🍽️ SERVI</button><button class="tbtn tbtn-clr" onclick="doClear('${idEsc}')">✕</button>`;
+  if (type === 'new') btns = `<button class="tbtn tbtn-prep" data-act="preparing" data-id="${idAttr}">🔥 EN PRÉPARATION</button>`;
+  else if (type === 'prep') btns = `<button class="tbtn tbtn-ready" data-act="ready" data-id="${idAttr}">✅ PRÊT À SERVIR</button>`;
+  else btns = `<button class="tbtn tbtn-done" data-act="served" data-id="${idAttr}">🍽️ SERVI</button><button class="tbtn tbtn-clr" data-act="clear" data-id="${idAttr}">✕</button>`;
 
-  // Audit cuisine #5 : XSS — esc() partout. Avant : i.name / i.cuisson /
-  // i.garniture injectés sans échappement. Un nom de produit '<script>' (admin
-  // malicieux ou bug input) exécutait du JS arbitraire dans cuisine.html.
+  // Audit cuisine #5 : XSS — esc() partout. Le nom affiché vient du menu (pid)
+  // quand il existe ; sinon nom de la commande, échappé.
   let itemsHTML = '';
   for (const i of items) {
-    const opts = [i.cuisson, i.garniture].filter(Boolean);
+    const opts = itemOpts(i);
     const qty = Number(i.qty) || 0;
-    itemsHTML += `<div class="tkt-row"><span class="tkt-qty">${qty}×</span><span class="tkt-nm">${esc(i.name).toUpperCase()}</span></div>`;
+    itemsHTML += `<div class="tkt-row"><span class="tkt-qty">${qty}×</span><span class="tkt-nm">${esc(itemLabel(i, o).toUpperCase())}</span></div>`;
     if (opts.length) itemsHTML += `<div class="tkt-tags">${opts.map(x=>`<span class="tkt-tag">${esc(x)}</span>`).join('')}</div>`;
   }
 
@@ -482,6 +529,17 @@ function makeTicket(o, type) {
     <div class="tkt-act">${btns}</div>
   </div>`;
 }
+
+// Délégation : un seul listener pour tous les boutons de tickets.
+const _ACTS = new Set(['preparing', 'ready', 'served', 'clear']);
+document.querySelector('.board').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  const act = b.dataset.act, id = b.dataset.id;
+  if (!id || !_ACTS.has(act) || !orders[id]) return;
+  if (act === 'clear') window.doClear(id);
+  else window.doStatus(id, act);
+});
 
 // Audit cuisine #3 : SINGLETON AudioContext (réutilise audioCtx créé par
 // unlockAudio L383). Avant : new AudioContext() à chaque playSound → Chrome
@@ -606,11 +664,15 @@ function speakOrder(order) {
   if (!audioUnlocked) { speechQueue.push(order); return; }
   const items = filterCuisineItems(order.items || []);
   if (!items.length) return;
-  const tbl = order.tableNum || order.tableId || '?';
-  const liste = items.map(i => {
-    let desc = `${Number(i.qty) || 1} ${i.name || ''}`;
-    if (i.cuisson) desc += `, cuisson ${i.cuisson}`;
-    if (i.garniture) desc += `, avec ${i.garniture}`;
+  // Tout ce qui est lu vient du menu quand c'est possible, et est tronqué
+  // (une commande client ne doit pas pouvoir faire « parler » la cuisine).
+  const cut = (s, n) => String(s == null ? '' : s).slice(0, n);
+  const tbl = cut(order.tableNum || order.tableId || '?', 10);
+  const liste = items.slice(0, 20).map(i => {
+    let desc = `${Math.min(Number(i.qty) || 1, 99)} ${cut(itemLabel(i, order), 60)}`;
+    if (typeof i.cuisson === 'string' && i.cuisson) desc += `, cuisson ${cut(i.cuisson, 30)}`;
+    if (typeof i.garniture === 'string' && i.garniture) desc += `, avec ${cut(i.garniture, 30)}`;
+    if (i.sirop === true) desc += ', avec sirop';
     return desc;
   }).join('. ');
   const texte = `Nouvelle commande, table ${tbl}. ${liste}.`;

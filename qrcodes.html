@@ -17,7 +17,10 @@
 <link rel="stylesheet" href="assets/css/components.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script type="module">
-import { db, doc, onSnapshot } from './assets/js/firebase-sync.js';
+import { db, doc, onSnapshot, requireStaff } from './assets/js/firebase-sync.js';
+
+// Page du personnel : bandeau / écran d'enregistrement si appareil non enregistré.
+requireStaff({ label: 'QR codes', page: 'qrcodes' });
 
 onSnapshot(doc(db,'config','menu'), snap => {
   if(!snap.exists()){

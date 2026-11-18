@@ -40,6 +40,9 @@
     var lu = read('brand_logoUrl');
     var ln = read('brand_name');
     var la = read('brand_accent');
+    // Cache local = donnée Firestore : couleur #hex et URL https/data:image/relative seulement
+    if (la && !/^#[0-9a-f]{3,8}$/i.test(la)) la = null;
+    if (lu && !/^(https:\/\/|data:image\/(png|jpe?g|webp|gif|avif);base64,|(\.{0,2}\/)?[a-z0-9_-][^:]*$)/i.test(lu)) lu = null;
     if (la) document.documentElement.style.setProperty('--accent', la);
     if (lu) {
       // Précharge l'image pour gagner sur le RTT réseau
@@ -58,28 +61,56 @@
 </script>
 
 <script type="module">
-import { db, doc, onSnapshot, addDoc, collection, getDoc, serverTimestamp, escHtml, query, where } from './assets/js/firebase-sync.js';
+import { db, doc, onSnapshot, setDoc, collection, getDoc, getDocFromServer, serverTimestamp, escHtml, safeUrl, safeColor, requireStaff, query, where } from './assets/js/firebase-sync.js';
 
-// Audit serveur #9 : renommé l'ancien `esc` ambigu en `escJs` pour clarifier
-// son rôle. Il N'ÉCHAPPE QUE les single quotes pour insertion dans onclick="...'X'..."
-// — c'est INSUFFISANT pour du HTML. Pour le contenu HTML, utiliser escHtml() importé.
-// Avant : esc() utilisé partout sans réaliser qu'il n'échappe pas <, >, & → XSS sur p.name.
-function escJs(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+// Appareil du personnel : bandeau / écran d'enregistrement si non enregistré.
+requireStaff({ label: 'Serveur', page: 'serveur' });
+
+// Plus aucun onclick construit avec une donnée : data-* + délégation partout
+// (l'ancien escJs n'échappait pas les guillemets doubles → sortie d'attribut).
 
 // Audit serveur #6 : lock anti-double-envoi sendOrder.
-// Si le timeout 10s remettait le bouton enabled pendant que Firebase finissait
-// par accepter le premier addDoc en arrière-plan, un re-clic créait UN SECOND order
-// pour la même table.
 let _orderInFlight = false;
+// Idempotence : id de commande généré côté client, gardé tant que l'envoi n'a
+// pas réussi → un nouvel essai réécrit le MÊME document (pas de doublon).
+let _pendingOrderRef = null;
+function cartChanged(){ _pendingOrderRef = null; }
 
 // Get table number from URL: client.html?table=3
 const params = new URLSearchParams(window.location.search);
-let tableNum = params.get('table') || null;
-let tableId = params.get('id') || (tableNum ? 't'+tableNum : null);
+let tableNum = params.get('table') ? String(params.get('table')).slice(0, 20) : null;
+let tableId = params.get('id') ? String(params.get('id')).slice(0, 40) : (tableNum ? 't'+tableNum : null);
 
 let menu = null;
 let cart = [];
 let productImages = {};
+// Contrat service worker : ne pas recharger la page pendant une saisie.
+window.__isBusy = () => cart.length > 0 || _orderInFlight;
+
+// ── Prix / options (même logique que la caisse) ──
+const SIROP_PRICE = 0.5;
+function variantsOf(p){
+  return (p && p.hasVariant && Array.isArray(p.variants))
+    ? p.variants.filter(v => v && typeof v.label === 'string' && Number.isFinite(Number(v.price)))
+    : [];
+}
+function unitPrice(p, variant, sirop){
+  let price = Number(p && p.price) || 0;
+  const v = variantsOf(p).find(x => x.label === variant);
+  if(v) price = Number(v.price) || 0;
+  if(sirop && p && p.hasSirop) price += SIROP_PRICE;
+  return Math.round(price * 100) / 100;
+}
+function needsOptions(p){ return !!(p && (p.hasCuisson || p.hasGarniture || variantsOf(p).length || p.hasSirop)); }
+function lineKey(r){ return [r.pid, r.variant || '', r.cuisson || '', r.garniture || '', r.sirop ? 'sirop' : ''].join('|'); }
+function fmtEur(n){ return (Number(n) || 0).toFixed(2).replace('.',','); }
+function priceLabel(p){
+  const vs = variantsOf(p);
+  if(vs.length) return 'dès ' + fmtEur(Math.min(...vs.map(v => Number(v.price) || 0))) + ' €';
+  return fmtEur(p.price) + ' €';
+}
+// Nombre CSS sûr pour les styles inline du plan de salle
+function px(v, d){ const n = Number(v); return Number.isFinite(n) ? n : d; }
 
 // Update page title and table display
 function updateTableDisplay(){
@@ -101,36 +132,36 @@ function showTablePicker(){
   // Calculate bounds for scaling
   let maxX=0, maxY=0;
   elements.forEach(e=>{
-    const w = e.type==='table-rect'?(e.size||110)*1.4:(e.type==='bar'||e.type==='wall'?e.w||160:e.size||90);
-    const h = e.type==='bar'||e.type==='wall'?e.h||100:e.size||90;
-    maxX=Math.max(maxX, (e.x||0)+w);
-    maxY=Math.max(maxY, (e.y||0)+h);
+    const w = e.type==='table-rect'?px(e.size,110)*1.4:(e.type==='bar'||e.type==='wall'?px(e.w,160):px(e.size,90));
+    const h = e.type==='bar'||e.type==='wall'?px(e.h,100):px(e.size,90);
+    maxX=Math.max(maxX, px(e.x,0)+w);
+    maxY=Math.max(maxY, px(e.y,0)+h);
   });
-  
-  // Audit serveur #1 : escape numbers/ids du plan salle. Avant : ${el.id} et
-  // ${el.number} injectés bruts dans onclick=" et innerHTML — XSS si un admin
-  // utilise un nom de table avec un guillemet (rare mais possible).
+
+  // Audit serveur #1 : plan de salle venant de Firestore. Plus d'onclick
+  // construit avec id/numéro : data-tidx (index dans `elements`) + délégation ;
+  // coordonnées forcées en nombres ; numéro échappé.
   let elHtml = '';
-  elements.forEach(el=>{
-    const isTable = el.type==='table-round'||el.type==='table-rect';
-    const idJs = escJs(el.id || '');
-    const numJs = escJs(el.number || '');
+  const hoverOn = "this.style.borderColor='var(--accent)';this.style.background='rgba(245,166,35,.15)'";
+  const hoverOff = "this.style.borderColor='#22c97a';this.style.background='rgba(34,201,122,.1)'";
+  elements.forEach((el, idx)=>{
     const numHtml = escHtml(el.number || '');
     const seats = Number(el.seats) || 0;
+    const x = px(el.x,0), y = px(el.y,0);
     if(el.type==='table-round'){
-      const sz=el.size||90;
-      elHtml+=`<div onclick="${isTable?`pickTable('${idJs}','${numJs}')`:''}" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz}px;height:${sz}px;border-radius:50%;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(245,166,35,.15)'" onmouseout="this.style.borderColor='#22c97a';this.style.background='rgba(34,201,122,.1)'">
+      const sz=px(el.size,90);
+      elHtml+=`<div data-tidx="${idx}" style="position:absolute;left:${x}px;top:${y}px;width:${sz}px;height:${sz}px;border-radius:50%;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="${hoverOn}" onmouseout="${hoverOff}">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;color:#22c97a;line-height:1">${numHtml}</div>
         <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
       </div>`;
     } else if(el.type==='table-rect'){
-      const sz=el.size||110;
-      elHtml+=`<div onclick="pickTable('${idJs}','${numJs}')" style="position:absolute;left:${el.x}px;top:${el.y}px;width:${sz*1.4}px;height:${sz}px;border-radius:12px;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(245,166,35,.15)'" onmouseout="this.style.borderColor='#22c97a';this.style.background='rgba(34,201,122,.1)'">
+      const sz=px(el.size,110);
+      elHtml+=`<div data-tidx="${idx}" style="position:absolute;left:${x}px;top:${y}px;width:${sz*1.4}px;height:${sz}px;border-radius:12px;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="${hoverOn}" onmouseout="${hoverOff}">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:#22c97a;line-height:1">${numHtml}</div>
         <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
       </div>`;
     } else if(el.type==='bar'){
-      elHtml+=`<div style="position:absolute;left:${el.x}px;top:${el.y}px;width:${el.w||160}px;height:${el.h||55}px;border-radius:10px;background:rgba(74,158,255,.1);border:2px solid rgba(74,158,255,.4);display:flex;align-items:center;justify-content:center;gap:6px">
+      elHtml+=`<div style="position:absolute;left:${x}px;top:${y}px;width:${px(el.w,160)}px;height:${px(el.h,55)}px;border-radius:10px;background:rgba(74,158,255,.1);border:2px solid rgba(74,158,255,.4);display:flex;align-items:center;justify-content:center;gap:6px">
         <span style="font-size:18px">🍺</span><span style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:#4a9eff">${numHtml || 'BAR'}</span>
       </div>`;
     }
@@ -152,6 +183,14 @@ function showTablePicker(){
       </div>
     </div>`;
   picker.style.display='flex';
+  // Délégation : choix de table par index (jamais de donnée dans un onclick)
+  document.getElementById('plan-inner').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-tidx]');
+    if(!t) return;
+    const el = elements[parseInt(t.dataset.tidx, 10)];
+    if(!el || (el.type !== 'table-round' && el.type !== 'table-rect')) return;
+    pickTable(String(el.id ?? ''), String(el.number ?? ''));
+  });
   // Pinch-zoom + pan + double-tap reset
   const planW = maxX + 60, planH = maxY + 60;
   const view = { scale:1, tx:0, ty:0 };
@@ -220,8 +259,8 @@ function showTablePicker(){
 }
 
 function pickTable(id, num){
-  tableId = id;
-  tableNum = num;
+  tableId = String(id || '').slice(0, 40);
+  tableNum = String(num || '').slice(0, 20);
   updateTableDisplay();
   document.getElementById('table-picker').style.display='none';
   document.getElementById('app').style.display='flex';
@@ -248,6 +287,7 @@ function changeTable(){
     }
   }
   cart = [];
+  cartChanged();
   updateCartBar();
   document.getElementById('app').style.display='none';
   showTablePicker();
@@ -270,33 +310,61 @@ async function loadImages(batchCount){
   renderMenu();
 }
 
+// ── PIN serveur ──
+// Source : config/staffcfg.serveurPin (doc lisible par le personnel seulement,
+// publié par la caisse). Transition : si staffcfg n'existe pas encore, on
+// retombe sur l'ancien config/menu.serveurPin. Le PIN reste un garde-fou
+// anti-erreur (la vraie protection = appareil enregistré, cf. requireStaff).
+// Tant que la source n'est pas connue, aucun PIN saisi ne déverrouille.
+const _pinSrc = { staff: undefined, staffExists: false };
+window._pinResolved = false;
+function resolveServeurPin(){
+  if(!menu || _pinSrc.staff === undefined) return; // attendre menu + staffcfg
+  const pin = _pinSrc.staffExists ? _pinSrc.staff : (menu.serveurPin ?? null);
+  window._serveurPin = (pin === null || pin === undefined || pin === '') ? null : String(pin);
+  window._pinResolved = true;
+  // Pas de PIN, PIN par défaut, ou déjà déverrouillé pour la session → app directe
+  if(!window._serveurPin || window._serveurPin === '0000' || sessionStorage.getItem('serveur_unlocked')==='1'){
+    unlockApp();
+  }
+}
+onSnapshot(doc(db, 'config', 'staffcfg'), snap => {
+  _pinSrc.staffExists = snap.exists() && (snap.data() || {}).serveurPin !== undefined;
+  _pinSrc.staff = _pinSrc.staffExists ? (snap.data() || {}).serveurPin : null;
+  resolveServeurPin();
+}, err => {
+  // Illisible (appareil non enregistré + protection active → écran requireStaff) :
+  // on retombe sur l'ancien emplacement pour ne pas bloquer la transition.
+  console.warn('[serveur] config/staffcfg illisible:', err && (err.code || err.message));
+  _pinSrc.staffExists = false;
+  _pinSrc.staff = null;
+  resolveServeurPin();
+});
+
 // Load menu
 onSnapshot(doc(db, 'config', 'menu'), snap => {
   if(snap.exists()){
     menu = snap.data();
-    // Store serveur PIN for lock screen
-    window._serveurPin = menu.serveurPin || null;
-    // If already unlocked or no PIN set, show app directly
-    if(!window._serveurPin || window._serveurPin === '0000' || sessionStorage.getItem('serveur_unlocked')==='1'){
-      unlockApp();
-    }
+    resolveServeurPin();
     const b = menu.branding||{};
     if(b.name) { const safe = escHtml(b.name); document.getElementById('resto-name').innerHTML = safe.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>'); document.title = b.name + ' — Serveur'; }
-    if(b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+    const accent = safeColor(b.accent);
+    if(accent) document.documentElement.style.setProperty('--accent', accent);
+    const logo = safeUrl(b.logoUrl);
     const logoEl = document.getElementById('resto-logo');
     if(logoEl){
-      if(b.logoUrl){
-        if(logoEl.src !== b.logoUrl) logoEl.src = b.logoUrl;
+      if(logo){
+        if(logoEl.getAttribute('src') !== logo) logoEl.src = logo;
         logoEl.style.display = 'block';
       } else { logoEl.style.display = 'none'; }
     }
     // Met aussi à jour le PIN screen logo (live sync)
     const pinLogoEl = document.getElementById('pin-logo');
     if(pinLogoEl){
-      if(b.logoUrl){
+      if(logo){
         pinLogoEl.innerHTML = '';
         const pimg = document.createElement('img');
-        pimg.src = b.logoUrl;
+        pimg.src = logo;
         pimg.alt = b.name || '';
         pimg.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:14px;display:block;margin:0 auto';
         pinLogoEl.appendChild(pimg);
@@ -437,14 +505,18 @@ function renderMenu(){
   const cats = menu.cats||[];
   if(!cats.length) return;
 
-  let activeCat = tabs.dataset.active || cats[0]?.id;
-  tabs.innerHTML = cats.map(c=>`
-    <button class="mtab${activeCat===c.id?' active':''}" onclick="switchTab('${c.id}')">
-      ${c.icon||''} ${c.name}
-    </button>`).join('');
+  let activeCat = tabs.dataset.active || String(cats[0]?.id ?? '');
+  // Catégories Firestore : échappées, data-cat + délégation (plus d'onclick construit)
+  tabs.innerHTML = cats.map(c=>{
+    const cid = String(c.id ?? '');
+    return `
+    <button class="mtab${activeCat===cid?' active':''}" data-cat="${escHtml(cid)}">
+      ${escHtml(c.icon||'')} ${escHtml(c.name||'')}
+    </button>`;
+  }).join('');
   tabs.dataset.active = activeCat;
 
-  const prods = (menu.products||[]).filter(p=>p.cat===activeCat);
+  const prods = (menu.products||[]).filter(p=>String(p.cat ?? '')===activeCat);
   const sections = [];
   prods.forEach(p=>{
     const sec = p.section||'';
@@ -455,10 +527,10 @@ function renderMenu(){
 
   let html='';
   sections.forEach(sec=>{
-    if(sec.name) html+=`<div class="sec-sep">${sec.name.toUpperCase()}</div>`;
+    if(sec.name) html+=`<div class="sec-sep">${escHtml(String(sec.name).toUpperCase())}</div>`;
     sec.items.forEach(p=>{
       const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
-      const img = (p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null);
+      const img = safeUrl((p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null));
       // Audit serveur #1 : XSS — escHtml partout sur les contenus produits dérivés de Firebase.
       // Avant : ${p.name} brut → admin malicieux qui tape "<scr"+"ipt>alert(1)" en nom
       // de produit exécutait du JS sur la tablette serveur. Idem alt="${p.name}" (XSS via
@@ -469,24 +541,24 @@ function renderMenu(){
         ? `<div class="prod-img"><img src="${escHtml(img)}" alt="${safeName}" loading="lazy"></div>`
         : '';
       const outOfStock = p.stock!==undefined && p.stock>=0 && p.stock===0;
-      const price = Number(p.price) || 0;
-      const pidJs = escJs(p.id), nameJs = escJs(p.name);
+      const pidAttr = escHtml(p.id);
+      const optHint = [variantsOf(p).length?'📏 Taille':'', p.hasCuisson?'🔥 Cuisson':'', p.hasGarniture?'🍟 Garniture':''].filter(Boolean).join(' · ');
       html+=`<div class="prod-card${img?' has-img':''}${outOfStock?' sold-out':''}">
         ${imgHtml}
         <div class="prod-info">
           <div class="prod-name">${p.pdj?'⭐ ':''}${safeName}</div>
           ${safeSub?`<div class="prod-sub">${safeSub}</div>`:''}
-          ${(p.hasCuisson||p.hasGarniture)?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${p.hasCuisson?'🔥 Cuisson':''}${p.hasCuisson&&p.hasGarniture?' · ':''}${p.hasGarniture?'🍟 Garniture':''}</div>`:''}
-          <div class="prod-price">${price.toFixed(2).replace('.',',')} €</div>
+          ${optHint?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${optHint}</div>`:''}
+          <div class="prod-price">${priceLabel(p)}</div>
         </div>
         <div class="prod-actions">
           ${outOfStock ? `<span style="font-size:12px;font-weight:700;color:var(--red);background:rgba(232,64,64,.1);padding:6px 14px;border-radius:20px">Épuisé</span>` :
             inCart ? `
             <div style="display:flex;align-items:center;gap:6px">
               <span style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--accent)">${inCart} dans le panier</span>
-              <button class="add-btn" onclick="addProduct('${pidJs}',${price},'${nameJs}')">+</button>
+              <button class="add-btn" data-add-pid="${pidAttr}">+</button>
             </div>` :
-            `<button class="add-btn" onclick="addProduct('${pidJs}',${price},'${nameJs}')">+ Ajouter</button>`
+            `<button class="add-btn" data-add-pid="${pidAttr}">+ Ajouter</button>`
           }
         </div>
       </div>`;
@@ -495,60 +567,103 @@ function renderMenu(){
   content.innerHTML = html||'<div style="padding:30px;text-align:center;color:#888">Aucun article</div>';
 }
 
-function changeQty(pid, price, delta, name, cuisson, garniture, tva, cat){
-  const ex = cart.find(r=>r.pid===pid && (r.cuisson||'')===(cuisson||'') && (r.garniture||'')===(garniture||''));
+// Ligne de panier = {pid, name, price, qty, tva, cuisson, garniture, cat, variant, sirop}
+// (même identité de ligne que la caisse : pid + variante + cuisson + garniture + sirop).
+// Prix recalculé depuis le menu (variante / sirop) — la caisse le recalcule aussi.
+function makeLine(p, opts){
+  const o = opts || {};
+  const variant = variantsOf(p).some(v => v.label === o.variant) ? o.variant : null;
+  const sirop = !!(o.sirop && p.hasSirop);
+  return {
+    pid: p.id,
+    name: String(p.name || '') + (variant ? ' — ' + variant : ''),
+    price: unitPrice(p, variant, sirop),
+    tva: Number(p.tva) || 10,
+    cuisson: o.cuisson || null,
+    garniture: o.garniture || null,
+    cat: p.cat || null,
+    variant,
+    sirop
+  };
+}
+function changeQty(line, delta){
+  const key = lineKey(line);
+  const ex = cart.find(r => lineKey(r) === key);
   if(ex){ ex.qty+=delta; if(ex.qty<=0) cart=cart.filter(r=>r!==ex); }
-  else if(delta>0) cart.push({pid,name,price:parseFloat(price),qty:1,tva:parseFloat(tva)||10,cuisson:cuisson||null,garniture:garniture||null,cat:cat||null});
+  else if(delta>0) cart.push({...line, qty:1});
+  cartChanged();
   updateCartBar();
   renderMenu();
 }
 
 let pendingOptProduct = null;
 
-function addProduct(pid, price, name){
-  const p = (menu.products||[]).find(x=>x.id===pid);
+function addProduct(pid){
+  const p = (menu?.products||[]).find(x=>x.id===pid);
+  if(!p) return;
   // Bloque l'ajout UNIQUEMENT si le produit est explicitement épuisé (stock === 0).
   // ⚠ La caisse sérialise stock:-1 pour les produits SANS gestion de stock
   // (marmite-express-caisse.html : p.stock===undefined?-1:p.stock). Tester
   // `<= 0` attrapait ce -1 sentinelle et bloquait l'ajout de TOUS les produits
   // non gérés en stock. `=== 0` strict = cohérent avec l'affichage outOfStock
   // et avec client.html.
-  if(p && p.stock === 0){
-    if(window.showServeurNotif) {
-      showServeurNotif('🚫 ' + name + ' est épuisé — informe le client');
-    } else {
-      alert('🚫 Produit épuisé : ' + name);
-    }
+  if(p.stock === 0){
+    showServeurNotif('🚫 ' + String(p.name || '') + ' est épuisé — informe le client');
     return;
   }
-  if(p && (p.hasCuisson || p.hasGarniture)){
+  // Variante (obligatoire si hasVariant), cuisson, garniture ou sirop → modale
+  if(needsOptions(p)){
     openOptionsModal(p);
     return;
   }
-  const tva = p ? (p.tva||10) : 10;
-  const cat = p ? (p.cat||null) : null;
-  changeQty(pid, price, 1, name, null, null, tva, cat);
+  changeQty(makeLine(p), 1);
 }
 
+// Délégation : boutons « + Ajouter » (data-add-pid) et onglets (data-cat)
+document.getElementById('menu-content').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-add-pid]');
+  if(b) addProduct(b.dataset.addPid);
+});
+document.getElementById('menu-tabs').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-cat]');
+  if(b) switchTab(b.dataset.cat);
+});
+
+// Modale d'options : variante (obligatoire si hasVariant), cuisson, garniture,
+// supplément sirop. Texte du menu échappé ; les chips portent un index
+// (data-idx) vers les listes ci-dessous, jamais la valeur dans un onclick.
+let _optLists = { variant: [], cuisson: [], garniture: [] };
+const _optLabel = 'font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px';
+function optGroup(id, title, labels){
+  return `<div style="margin-bottom:16px">
+      <div style="${_optLabel}">${title}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px" id="${id}">
+        ${labels.map((l,i)=>`<button type="button" class="opt-chip${i===0?' sel':''}" data-idx="${i}" onclick="selChip(this)">${escHtml(l)}</button>`).join('')}
+      </div>
+    </div>`;
+}
 function openOptionsModal(p){
   pendingOptProduct = p;
   const opts = menu.options||{};
-  const cuissons = opts.cuissons||[];
-  const garnitures = opts.garnitures||[];
-  let html = `<div style="font-size:16px;font-weight:700;margin-bottom:16px">${p.name}</div>`;
-  if(p.hasCuisson && cuissons.length){
-    html+=`<div style="margin-bottom:16px">
-      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🔥 Cuisson</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-cuisson-btns">
-        ${cuissons.map((c,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${c}" onclick="selChip(this,'cuisson')">${c}</button>`).join('')}
-      </div>
-    </div>`;
+  const strs = (a) => (Array.isArray(a) ? a : []).filter(x => typeof x === 'string' && x);
+  const variants = variantsOf(p);
+  _optLists = {
+    variant: variants.map(v => v.label),
+    cuisson: p.hasCuisson ? strs(opts.cuissons) : [],
+    garniture: p.hasGarniture ? strs(opts.garnitures) : []
+  };
+  let html = `<div style="font-size:16px;font-weight:700;margin-bottom:16px">${escHtml(p.name)}</div>`;
+  if(variants.length){
+    html += optGroup('opt-variant-btns', '📏 Taille', variants.map(v => v.label + ' — ' + fmtEur(v.price) + '€'));
   }
-  if(p.hasGarniture && garnitures.length){
+  if(_optLists.cuisson.length) html += optGroup('opt-cuisson-btns', '🔥 Cuisson', _optLists.cuisson);
+  if(_optLists.garniture.length) html += optGroup('opt-garniture-btns', '🍟 Garniture', _optLists.garniture);
+  if(p.hasSirop){
     html+=`<div style="margin-bottom:16px">
-      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🍟 Garniture</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-garniture-btns">
-        ${garnitures.map((g,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${g}" onclick="selChip(this,'garniture')">${g}</button>`).join('')}
+      <div style="${_optLabel}">🍯 Supplément</div>
+      <div style="display:flex;gap:6px" id="opt-sirop-btns">
+        <button type="button" class="opt-chip sel" data-sirop="0" onclick="selChip(this)">Sans sirop</button>
+        <button type="button" class="opt-chip" data-sirop="1" onclick="selChip(this)">+ Sirop (+0,50€)</button>
       </div>
     </div>`;
   }
@@ -568,9 +683,20 @@ function selChip(el){
 function confirmOpt(){
   if(!pendingOptProduct) return;
   const p = pendingOptProduct;
-  const cuissonEl = document.querySelector('#opt-cuisson-btns .opt-chip.sel');
-  const garnitureEl = document.querySelector('#opt-garniture-btns .opt-chip.sel');
-  changeQty(p.id, p.price, 1, p.name, cuissonEl?cuissonEl.dataset.val:null, garnitureEl?garnitureEl.dataset.val:null, p.tva||10, p.cat||null);
+  const pick = (group) => {
+    const el = document.querySelector('#opt-'+group+'-btns .opt-chip.sel');
+    const i = el ? parseInt(el.dataset.idx, 10) : -1;
+    return (i >= 0 && i < _optLists[group].length) ? _optLists[group][i] : null;
+  };
+  const variant = pick('variant');
+  if(_optLists.variant.length && !variant){ showServeurNotif('Choisis une taille'); return; }
+  const siropEl = document.querySelector('#opt-sirop-btns .opt-chip.sel');
+  changeQty(makeLine(p, {
+    variant,
+    cuisson: pick('cuisson'),
+    garniture: pick('garniture'),
+    sirop: !!(siropEl && siropEl.dataset.sirop === '1')
+  }), 1);
   closeOptModal();
 }
 
@@ -604,25 +730,23 @@ function closeCartPanel(){ document.getElementById('cart-panel').style.display='
 
 function renderCartPanel(){
   const total = cart.reduce((s,r)=>s+(Number(r.qty)||0)*(Number(r.price)||0),0);
-  document.getElementById('cp-items').innerHTML = cart.map(r=>{
-    // Audit serveur #1 : escHtml sur le contenu, escJs pour les insertions onclick.
+  document.getElementById('cp-items').innerHTML = cart.map((r, idx)=>{
+    // Audit serveur #1 : escHtml sur le contenu ; boutons +/- par index (data-cart-idx)
+    // + délégation, plus aucune donnée dans un onclick.
     const safeName = escHtml(r.name);
-    const optTxt = [r.cuisson, r.garniture].filter(Boolean).map(escHtml).join(' · ');
+    const optTxt = [r.cuisson, r.garniture, r.sirop ? '+ sirop' : ''].filter(Boolean).map(escHtml).join(' · ');
     const price = Number(r.price) || 0;
     const qty = Number(r.qty) || 0;
-    const tva = Number(r.tva) || 10;
-    const pidJs = escJs(r.pid), nameJs = escJs(r.name);
-    const cuissonJs = escJs(r.cuisson || ''), garnitureJs = escJs(r.garniture || '');
     return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)">
       <div style="flex:1">
         <div style="font-size:15px;font-weight:600">${safeName}</div>
         ${optTxt?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${optTxt}</div>`:''}
-        <div style="font-size:12px;color:#888">${price.toFixed(2).replace('.',',')}€/u</div>
+        <div style="font-size:12px;color:#888">${fmtEur(price)}€/u</div>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
-        <button onclick="changeQty('${pidJs}',${price},-1,'${nameJs}','${cuissonJs}','${garnitureJs}',${tva});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
+        <button data-cart-idx="${idx}" data-cart-delta="-1" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
         <span style="font-family:'Bebas Neue',sans-serif;font-size:22px">${qty}</span>
-        <button onclick="changeQty('${pidJs}',${price},1,'${nameJs}','${cuissonJs}','${garnitureJs}',${tva});renderCartPanel()" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
+        <button data-cart-idx="${idx}" data-cart-delta="1" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
       </div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:65px;text-align:right">${(qty*price).toFixed(2).replace('.',',')}€</div>
     </div>`;
@@ -630,6 +754,17 @@ function renderCartPanel(){
   document.getElementById('cp-total').textContent = total.toFixed(2).replace('.',',')+'€';
   document.getElementById('cp-send').disabled = !cart.length;
 }
+
+// Délégation pour les boutons +/- du panier
+document.getElementById('cp-items').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-cart-idx]');
+  if(!btn) return;
+  const r = cart[parseInt(btn.dataset.cartIdx, 10)];
+  const delta = parseInt(btn.dataset.cartDelta, 10);
+  if(!r || (delta !== 1 && delta !== -1)) return;
+  changeQty(r, delta);
+  renderCartPanel();
+});
 
 async function sendOrder(){
   if(!cart.length) return;
@@ -652,8 +787,8 @@ async function sendOrder(){
   }
 
   // Audit serveur #10 : validation cart vs menu actuel. Le menu peut avoir
-  // changé pendant la prise de commande (admin baisse un prix, retire un
-  // produit). On re-check avant addDoc et alerte le serveur si divergence.
+  // changé pendant la prise de commande (prix, variante, produit retiré).
+  // Prix attendu = même calcul que la caisse (variante + sirop).
   if(menu && Array.isArray(menu.products)){
     const productsMap = new Map(menu.products.map(p => [p.id, p]));
     const warnings = [];
@@ -668,7 +803,12 @@ async function sendOrder(){
         warnings.push(`• "${r.name}" — produit désactivé (item retiré)`);
         return;
       }
-      const newPrice = Number(p.price) || 0;
+      const vs = variantsOf(p);
+      if(vs.length && !vs.some(v => v.label === r.variant)){
+        warnings.push(`• "${r.name}" — taille plus proposée (item retiré)`);
+        return;
+      }
+      const newPrice = unitPrice(p, r.variant, r.sirop);
       const oldPrice = Number(r.price) || 0;
       if(Math.abs(newPrice - oldPrice) > 0.001){
         warnings.push(`• "${r.name}" — prix changé : ${oldPrice.toFixed(2)}€ → ${newPrice.toFixed(2)}€`);
@@ -679,14 +819,14 @@ async function sendOrder(){
     });
     if(warnings.length){
       const msg = 'Modifications détectées sur la carte :\n\n' + warnings.join('\n') + '\n\nEnvoyer la commande avec les corrections ?';
+      cart = validCart;
+      cartChanged();
       if(!confirm(msg)){
         // L'utilisateur refuse → on rafraîchit le cart pour qu'il revoie
-        cart = validCart;
         updateCartBar();
         renderCartPanel();
         return;
       }
-      cart = validCart;
       if(!cart.length){
         const errEl = document.getElementById('cp-error');
         errEl.textContent = 'Tous les items ont été retirés (carte modifiée). Recommandez.';
@@ -701,31 +841,60 @@ async function sendOrder(){
   const btn = document.getElementById('cp-send');
   btn.disabled=true; btn.textContent='⏳ Envoi en cours...';
 
-  // Timeout safety — si Firebase ne répond pas en 10s, on AFFICHE l'erreur
-  // mais on NE remet PAS le bouton enabled tant que la Promise n'est pas
-  // résolue (évite double-envoi, cf. #6).
-  let timedOut = false;
+  // Idempotence : id généré côté client et conservé jusqu'au succès. Un nouvel
+  // essai (réseau perdu, timeout) réutilise le MÊME id → jamais de doublon.
+  const isRetry = !!_pendingOrderRef;
+  if(!_pendingOrderRef) _pendingOrderRef = doc(collection(db,'orders'));
+  const ref = _pendingOrderRef;
+
+  // Réseau lent / hors ligne : le SDK garde l'écriture en file et la rejouera.
+  // Après 10 s on rend la main : réessayer réécrit le même document.
   const timeoutId = setTimeout(()=>{
-    timedOut = true;
-    btn.textContent='⏳ Envoi long... patience';
-    document.getElementById('cp-error').textContent='⚠️ Délai dépassé — la commande peut encore aboutir. Attendez avant de réessayer.';
+    if(_pendingOrderRef !== ref) return;
+    _orderInFlight = false;
+    btn.disabled = !cart.length;
+    btn.textContent = '✅ Réessayer (sans doublon)';
+    document.getElementById('cp-error').textContent='⚠️ Réseau lent — la commande partira dès le retour du réseau. Réessayer ne crée pas de doublon.';
     document.getElementById('cp-error').style.display='block';
   }, 10000);
 
   try{
-    const note = document.getElementById('cp-note')?.value||'';
-    await addDoc(collection(db,'orders'),{
-      tableId,
-      tableNum: tableNum,
-      items: cart.map(r=>({pid:r.pid,name:r.name,price:Number(r.price)||0,qty:Number(r.qty)||0,tva:Number(r.tva)||10,cuisson:r.cuisson||null,garniture:r.garniture||null,cat:r.cat||null})),
-      note,
-      status: 'pending',
-      // Audit serveur #7 : source='serveur' (avant: 'client' — incohérent,
-      // la cuisine ne pouvait pas distinguer ordre serveur vs ordre client direct)
-      source: 'serveur',
-      sentAt: serverTimestamp()
-    });
+    const note = String(document.getElementById('cp-note')?.value||'').slice(0, 500);
+    // Nouvel essai : si le 1er envoi est en fait arrivé, on ne le réécrit pas
+    // (la cuisine a pu le faire avancer entre-temps).
+    let already = false;
+    if(isRetry){
+      try { already = (await getDocFromServer(ref)).exists(); } catch(_) { /* hors ligne → setDoc mis en file */ }
+    }
+    if(!already){
+      await setDoc(ref, {
+        tableId: String(tableId),
+        tableNum: String(tableNum),
+        items: cart.map(r=>({
+          pid: r.pid,
+          name: r.name,
+          price: Number(r.price) || 0,
+          qty: Number(r.qty) || 0,
+          tva: Number(r.tva) || 10,
+          cuisson: r.cuisson || null,
+          garniture: r.garniture || null,
+          cat: r.cat || null,
+          variant: r.variant || null,
+          sirop: !!r.sirop
+        })),
+        note,
+        status: 'pending',
+        // Audit serveur #7 : source='serveur' (la cuisine distingue serveur / client QR)
+        source: 'serveur',
+        sentAt: serverTimestamp()
+      });
+    }
     clearTimeout(timeoutId);
+    if(_pendingOrderRef !== ref){ // panier modifié entre-temps : le 1er envoi est quand même arrivé
+      showServeurNotif('✓ Commande précédente bien reçue — vérifie le panier avant de renvoyer');
+      return;
+    }
+    _pendingOrderRef = null;
     cart=[];
     // Vide la note pour éviter qu'elle ne "fuite" sur la commande suivante
     // (ex: "sans oignon" écrit pour la table 5 ne doit pas rester pour la 12)
@@ -739,13 +908,15 @@ async function sendOrder(){
   }catch(e){
     clearTimeout(timeoutId);
     const errEl = document.getElementById('cp-error');
-    errEl.textContent = '❌ Erreur : '+e.message+'. Appelez un serveur.';
+    errEl.textContent = '❌ Erreur : '+(e && (e.code || e.message))+'. Réessayer ne crée pas de doublon.';
     errEl.style.display='block';
     console.error('Firebase error:',e);
   } finally {
-    _orderInFlight = false;
-    btn.disabled = !cart.length;
-    btn.textContent = '✅ Confirmer la commande';
+    if(_pendingOrderRef === ref || _pendingOrderRef === null){
+      _orderInFlight = false;
+      btn.disabled = !cart.length;
+      btn.textContent = '✅ Confirmer la commande';
+    }
   }
 }
 
@@ -757,7 +928,6 @@ function showConfirmation(){
   }, 3000);
 }
 
-function esc(s){ return escJs(s); } // alias backcompat — utilisé dans onclick="...'esc(name)'..."
 window.switchTab=switchTab; window.changeQty=changeQty; window.addProduct=addProduct;
 window.openCartPanel=openCartPanel; window.closeCartPanel=closeCartPanel;
 window.renderCartPanel=renderCartPanel; window.sendOrder=sendOrder;
@@ -1011,6 +1181,15 @@ function updatePinDots(){
 }
 
 function checkPin(){
+  // PIN pas encore chargé (config/staffcfg / config/menu) : aucun code ne
+  // déverrouille — avant, n'importe quel code passait pendant le chargement.
+  if(!window._pinResolved){
+    const errEl = document.getElementById('pin-error');
+    errEl.textContent = 'Chargement… réessaie dans un instant';
+    errEl.style.opacity = '1';
+    setTimeout(()=>{ errEl.style.opacity='0'; errEl.textContent='Code incorrect'; pinEntry=''; updatePinDots(); }, 1200);
+    return;
+  }
   const correctPin = window._serveurPin;
   if(!correctPin || correctPin==='0000' || pinEntry===correctPin){
     // Success
