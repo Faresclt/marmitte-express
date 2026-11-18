@@ -431,6 +431,8 @@ document.addEventListener('DOMContentLoaded', () => {
 <link rel="stylesheet" href="./assets/css/caisse.css">
 <!-- REST poll des orders - marche MÊME SI Firebase SDK foire (script classic, pas module) -->
 <script src="assets/js/orders-rest-poll.js" defer></script>
+<!-- Cartes 2026 (boissons + plats) : appliquées une fois au menu de la caisse -->
+<script src="assets/js/carte-2026.js"></script>
 <!-- QR code generator pour partage du ticket via QR (zero coût, marche sans SIM) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
 <script>
@@ -1739,6 +1741,59 @@ function saveAll(){
   // Firebase sans avoir à cliquer Publier manuellement.
   scheduleAutoPublish();
 }
+
+// ── Cartes 2026 (assets/js/carte-2026.js) ──
+// Applique UNE fois les nouvelles cartes boissons + plats au menu local :
+// prix, noms, descriptions, rubriques, nouveaux produits, désactivation des
+// produits retirés. Photos, fiches détaillées et stock des produits existants
+// sont conservés ; la TVA n'est pas touchée. Puis publication dès que le menu
+// cloud a été vu (garde anti-écrasement v79 respectée).
+function applyCarte2026(){
+  const C = window.CARTE_2026;
+  if(!C || LS.get('carte_applied', null) === C.version) return false;
+  const now = Date.now();
+  (C.newCats||[]).forEach(nc => {
+    if(cats.some(c => c.id === nc.id)) return;
+    const c = { id: nc.id, name: nc.name, icon: nc.icon, noCuisine: !!nc.noCuisine };
+    const i = cats.findIndex(x => x.id === nc.after);
+    if(i >= 0) cats.splice(i + 1, 0, c); else cats.push(c);
+  });
+  const byId = new Map(products.map(p => [p.id, p]));
+  const ordered = [];
+  let created = 0, updated = 0, retired = 0;
+  C.items.forEach(it => {
+    let p = byId.get(it.id);
+    if(it.keep){ if(p){ if(it.cat) p.cat = it.cat; if(it.section) p.section = it.section; ordered.push(p); } return; }
+    if(!p){
+      const src = it.img && byId.get(it.img);
+      p = { id: it.id, tva: it.cat === 'alcools' ? 20 : 10 };
+      if(src && src.imgUrl) p.imgUrl = src.imgUrl;
+      byId.set(it.id, p); created++;
+    } else updated++;
+    p.cat = it.cat; p.section = it.section; p.name = it.name; p.sub = it.sub || ''; p.price = it.price;
+    if('hasVariant' in it){ p.hasVariant = !!it.hasVariant; p.variants = it.variants || null; }
+    if('hasSirop' in it) p.hasSirop = !!it.hasSirop;
+    p.active = true; p.updatedAt = now;
+    ordered.push(p);
+  });
+  (C.retire||[]).forEach(id => { const p = byId.get(id); if(p && p.active !== false){ p.active = false; p.updatedAt = now; retired++; } });
+  const inCarte = new Set(ordered.map(p => p.id));
+  products = ordered.concat([...byId.values()].filter(p => !inCarte.has(p.id)));
+  LS.set('cats', cats); LS.set('products', products);
+  LS.set('carte_applied', C.version);
+  console.log('[carte 2026] '+updated+' produit(s) mis à jour, '+created+' créé(s), '+retired+' désactivé(s)');
+  try { renderTabs(); renderMenu(); } catch(e){}
+  try { toast('📋 Nouvelles cartes 2026 appliquées ('+(updated+created)+' produits)', 'g'); } catch(e){}
+  // Publication dès que le menu cloud a été reçu (sinon publishMenu refuse)
+  let tries = 0;
+  const t = setInterval(() => {
+    if(window._cloudMenuSeen){ clearInterval(t); try { publishMenu(true); } catch(e){} }
+    else if(++tries > 90){ clearInterval(t); }
+  }, 2000);
+  return true;
+}
+window.applyCarte2026 = applyCarte2026;
+document.addEventListener('DOMContentLoaded', () => { try { applyCarte2026(); } catch(e){ console.error('[carte 2026]', e); } });
 
 var _autoPublishTimer = null;
 function scheduleAutoPublish(){
@@ -7156,6 +7211,8 @@ function openPdjModal() {
   sel.innerHTML = pdjProds.length
     ? pdjProds.map(p => '<option value="' + p.id + '">' + p.name + '</option>').join('')
     : '<option value="">Aucun produit marqué "Plat du jour"</option>';
+  // (valeurs échappées : id/nom viennent du menu synchronisé)
+  if (pdjProds.length) sel.innerHTML = pdjProds.map(p => '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join('');
   const saved = LS.get('platDuJour', null);
   if (saved) {
     document.getElementById('pdj-nom').value = saved.nom || '';

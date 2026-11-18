@@ -12,7 +12,7 @@
 //  contournant le cache HTTP ({cache:'reload'}). Plus de mélange
 //  « HTML neuf + JS ancien » par revalidation en arrière-plan : une nouvelle
 //  version arrive en bloc via le bandeau de mise à jour.
-const CACHE_NAME = 'marmite-v80-securite-ventes';
+const CACHE_NAME = 'marmite-v81-cartes-2026';
 
 // HTML pages CRITIQUES — cachées au install pour cold-boot offline.
 // Sans ça : tablette qui ouvre la caisse en wifi down matin = écran blanc.
@@ -39,6 +39,7 @@ const STATIC_ASSETS = [
   './assets/js/pwa-standalone-detect.js',
   './assets/js/firebase-sync.js',
   './assets/js/sw-register.js',
+  './assets/js/carte-2026.js',
   'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap'
 ];
 

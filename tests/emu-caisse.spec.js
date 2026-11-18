@@ -103,8 +103,8 @@ test('commande client au prix truqué + nom piégé → prix et nom du MENU ; an
   }, { tid, orderId });
   const rows = await page.evaluate((tid) => tableData[tid].ticket.filter(r => r._orderId), tid);
   const main = rows.find(r => r.pid === 'p7');
-  expect(main.price).toBe(3.5);                    // prix du menu, pas 0,01
-  expect(main.name).toBe('St Pellegrino 50cl');    // nom du menu, pas le HTML piégé
+  expect(main.price).toBe(4);                      // prix du menu (carte 2026), pas 0,01
+  expect(main.name).toBe('San Pellegrino 50cl');   // nom du menu, pas le HTML piégé
   expect(main.qty).toBe(2);
   expect(rows.find(r => r.pid === 'p7_sirop').qty).toBe(2);   // supplément sirop facturé ×2
   expect(rows.find(r => r.pid === 'zzz-inconnu').price).toBe(0); // inconnu + client → 0 € + alerte
@@ -196,3 +196,41 @@ for (const p of ['serveur.html', 'cuisine.html', 'client.html?table=1', 'ticket.
     expect(errors.filter(e => !/\[SW\]|REST poll|permission|403/i.test(e))).toEqual([]);
   });
 }
+
+test('cartes 2026 appliquées une fois : prix, nouveautés, retraits, cafés, ordre', async ({ page }) => {
+  await openCaisse(page);
+  const r = await page.evaluate(() => {
+    const by = (id) => products.find(p => p.id === id);
+    return {
+      applied: JSON.parse(localStorage.getItem('carte_applied')),
+      burger: by('p47') && [by('p47').name, by('p47').price],
+      cote: by('p51').price,
+      blonde33: by('p150') && [by('p150').price, by('p150').active, by('p150').section],
+      escargots: by('p131') && by('p131').variants.map(v => v.label + ':' + v.price).join('|'),
+      carpaccio: by('p40') ? by('p40').active : 'absent',
+      cafe: by('p140') && [by('p140').cat, by('p140').price, by('p140').tva],
+      cafes: cats.find(c => c.id === 'cafes'),
+      firstDrinks: products.filter(p => p.cat === 'softs' && p.active).slice(0, 3).map(p => p.name),
+      count: products.filter(p => p.active).length
+    };
+  });
+  expect(r.applied).toBe('2026-11');
+  expect(r.burger).toEqual(['Le burger maison', 17.5]);
+  expect(r.cote).toBe(70);
+  expect(r.blonde33).toEqual([5.5, true, 'Bières pression']);
+  expect(r.escargots).toBe('6 pièces:12|12 pièces:18');
+  expect(r.carpaccio === false || r.carpaccio === 'absent').toBe(true);
+  expect(r.cafe).toEqual(['cafes', 1.9, 10]);
+  expect(r.cafes.noCuisine).toBe(true);
+  expect(r.firstDrinks).toEqual(['Sodas', 'Sirops', 'Jus']);
+  // Rejouée au rechargement ? Non (une seule fois) : un prix modifié à la main reste
+  await page.evaluate(() => { products.find(p => p.id === 'p47').price = 18; saveAll(); });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => !!(window.FB && window.FB.getCol), null, { timeout: 45_000 });
+  expect(await page.evaluate(() => products.find(p => p.id === 'p47').price)).toBe(18);
+  // Encaissement d'un café : bon prix, catégorie hors cuisine
+  await page.evaluate(() => { addToTicketDirect('p140'); openPay(); selectPayType('cash'); validatePay(); });
+  const day = await page.evaluate(() => serviceDayKey());
+  const last = await page.evaluate((d) => JSON.parse(localStorage.getItem('sales_' + d)).filter(s => !s._fromCloud).pop(), day);
+  expect([last.total, last.payType, last.items[0].name]).toEqual([1.9, 'cash', 'Café']);
+});
