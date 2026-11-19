@@ -2111,7 +2111,7 @@ function cardHTML(p){
     ${p.pdj?'<span class="pdj-tag">Aujourd\'hui</span>':''}
     ${stockBadge}
     ${imgZone}
-    <button class="mcard-86" onclick="event.stopPropagation();toggle86(${jsArg(p.id)})" title="${isOutOfStock?'Remettre disponible':'Marquer épuisé (86)'}" style="position:absolute;top:6px;left:6px;width:28px;height:28px;border-radius:50%;background:${isOutOfStock?'rgba(34,201,122,.95)':'rgba(0,0,0,.6)'};border:1px solid ${isOutOfStock?'var(--green)':'rgba(255,255,255,.2)'};color:#fff;font-size:13px;font-weight:800;cursor:pointer;z-index:3;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(6px)">${isOutOfStock?'✓':'86'}</button>
+    ${isOutOfStock?`<button class="mcard-86" onclick="event.stopPropagation();toggle86(${jsArg(p.id)})" title="Remettre disponible" style="position:absolute;top:6px;left:6px;width:28px;height:28px;border-radius:50%;background:rgba(34,201,122,.95);border:1px solid var(--green);color:#fff;font-size:13px;font-weight:800;cursor:pointer;z-index:3;display:flex;align-items:center;justify-content:center">✓</button>`:''}
     <div class="mcard-body">
       <div class="mcard-name">${esc(p.name)}</div>${sub}
       <div class="mcard-foot"><div class="mcard-price">${fmt(p.price)}</div>${isOutOfStock?'':'<div class="mcard-add">+</div>'}</div>
@@ -2143,8 +2143,18 @@ function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 // Pour une valeur placée dans un onclick="f('…')" : JSON (guillemets doubles
 // échappés) puis échappement HTML de l'attribut. Ex: onclick="f(${jsArg(id)})"
 function jsArg(v){ return esc(JSON.stringify(String(v??''))); }
-// URL d'image sûre (https, data:image raster, chemin relatif) sinon ''
-function safeImg(u){ return (window.__safe && window.__safe.safeUrl) ? window.__safe.safeUrl(u) : ''; }
+// URL d'image sûre (https, data:image raster, chemin relatif) sinon ''.
+// Copie locale de safeUrl (firebase-sync.js) : le menu est rendu pendant le
+// parsing, AVANT que le module ait posé window.__safe — dépendre de lui
+// affichait l'assiette 🍽️ à la place de toutes les photos au démarrage (v83).
+function safeImg(u){
+  const s = String(u ?? '').trim();
+  if (!s) return '';
+  if (/^https:\/\//i.test(s)) return s;
+  if (/^data:image\/(png|jpe?g|webp|gif|avif);base64,[a-z0-9+/=\s]+$/i.test(s)) return s;
+  if (!/^\/\//.test(s) && /^[a-z0-9_\-./%]+\.(png|jpe?g|webp|gif|avif)(\?[a-z0-9=&_.-]*)?$/i.test(s)) return s;
+  return '';
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  TICKET

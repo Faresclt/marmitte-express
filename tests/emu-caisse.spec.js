@@ -227,8 +227,18 @@ test('cartes 2026 appliquées une fois : prix, nouveautés, retraits, cafés, or
   const urls = await page.evaluate(() => [safeImg('images/soda.png'), safeImg('./assets/x.webp'), safeImg('javascript:alert(1)'),
     safeImg('//evil.example/x.png'), safeImg('data:image/svg+xml;base64,AAAA'), safeImg('https://firebasestorage.googleapis.com/x.jpg')]);
   expect(urls).toEqual(['images/soda.png', './assets/x.webp', '', '', '', 'https://firebasestorage.googleapis.com/x.jpg']);
+  // v83 : le menu est rendu pendant le parsing, avant le module firebase-sync.
+  // safeImg ne doit donc PAS dépendre de window.__safe (sinon 🍽️ partout au démarrage).
+  const bootImg = await page.evaluate(() => { const s = window.__safe; window.__safe = undefined;
+    try { return safeImg('images/soda.png'); } finally { window.__safe = s; } });
+  expect(bootImg).toBe('images/soda.png');
   await page.evaluate(() => { currentCat = 'softs'; settings.showImg = true; renderMenu(); });
   expect(await page.locator('.mcard-img img').count()).toBeGreaterThan(3);
+  // Pas de bouton « 86 » sur les produits disponibles (pris pour un compteur de stock)
+  expect(await page.locator('.mcard-86').count()).toBe(0);
+  await page.evaluate(() => { products.find(p => p.id === 'p7').stock = 0; renderMenu(); });
+  expect(await page.locator('.mcard-86').count()).toBe(1);   // ✓ « remettre dispo » seulement si épuisé
+  await page.evaluate(() => { products.find(p => p.id === 'p7').stock = undefined; renderMenu(); });
   // Rejouée au rechargement ? Non (une seule fois) : un prix modifié à la main reste
   await page.evaluate(() => { products.find(p => p.id === 'p47').price = 18; saveAll(); });
   await page.reload({ waitUntil: 'domcontentloaded' });
