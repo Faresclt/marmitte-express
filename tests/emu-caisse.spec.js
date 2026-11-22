@@ -311,14 +311,16 @@ const decode = (v) => {
   return v;
 };
 
-async function openEnrolled(browser, url) {
+async function openEnrolled(browser, url, debugTag) {
   const ctx = await browser.newContext({ bypassCSP: true, serviceWorkers: 'block' });
   const pg = await ctx.newPage();
+  if (debugTag) pg.on('console', (msg) => { const t = msg.text(); if (/order|listener|Bootstrap|import|poll|FIRESTORE|snapshot|Salle|staff|permission/i.test(t)) console.log(`[${debugTag}]`, msg.type(), t.slice(0, 240)); });
   const errors = collectConsoleErrors(pg);
   pg.on('dialog', (d) => d.accept());
   await pg.goto(url, { waitUntil: 'domcontentloaded' });
   await pg.waitForFunction(() => !!window.__staff, null, { timeout: 45_000 });
   await pg.evaluate(async (code) => { await window.__staff.ready(); await window.__staff.enroll(code, 'Test', 'test'); }, CODE);
+  errors.length = 0;   // refus d'accès normaux AVANT l'enregistrement (protection active) : seuls ceux d'après comptent
   await pg.reload({ waitUntil: 'domcontentloaded' });
   await pg.waitForFunction(() => !!(window.__staff && window.__staff.status().isStaff), null, { timeout: 45_000 });
   return { ctx, pg, errors };
@@ -380,9 +382,8 @@ test('v86 : plan de salle réel — dimensions libres, ovales, tables inclinées
   const plan = JSON.parse(fs.readFileSync(new URL('../scripts/plan-salle-2026.json', import.meta.url), 'utf8'));
   await page.setViewportSize({ width: 1280, height: 720 });
   await openCaisse(page);
-  // Le plan arrive par le cloud (comme avec scripts/apply-plan-salle.mjs) et la caisse le reprend
-  await page.evaluate((p) => window.FB.setMerge('config', 'menu', { salleLayout: p }), plan);
-  await page.waitForFunction((n) => (window.salleElements || []).length === n, plan.length, { timeout: 20_000 });
+  // Test d'affichage : le plan est donné à la caisse et publié pour la serveuse
+  await page.evaluate((p) => { window.salleElements = p; LS.set('salleLayout', p); return window.FB.setMerge('config', 'menu', { salleLayout: p }); }, plan);
   await page.evaluate(() => openSalle());
   const r = await page.evaluate(() => {
     const q = (id) => document.querySelector(`#salle-elements [data-id="${id}"]`);
@@ -409,4 +410,101 @@ test('v86 : plan de salle réel — dimensions libres, ovales, tables inclinées
   await s.locator('#plan-inner [data-tidx]').filter({ hasText: /^\s*69\b/ }).click();
   await expect(s.locator('#app')).toBeVisible();
   await ctx.close();
+});
+
+test('service réel : la serveuse commande → la cuisine voit les plats → la caisse affiche l\'addition juste', async ({ browser }) => {
+  await adminSet('security/policy', { enforce: true });   // appareils enregistrés, comme au resto
+  const fs = await import('node:fs');
+  const plan = JSON.parse(fs.readFileSync(new URL('../scripts/plan-salle-2026.json', import.meta.url), 'utf8'));
+  const m = decode({ mapValue: { fields: (await adminGet('config/menu')).fields } });
+  const find = (re) => { const p = (m.products || []).find((x) => x.active !== false && re.test(x.name)); expect(p, String(re)).toBeTruthy(); return p; };
+  const blonde = find(/^Blonde 50cl$/), escargots = find(/^Escargots/), burger = find(/^Le burger maison$/), entrecote = find(/entrecôte/i);
+
+  // Tablette caisse (enregistrée), ouverte comme pendant le service
+  const C = await openEnrolled(browser, 'marmite-express-caisse.html?emu', process.env.DEBUG_CAISSE ? 'caisse' : '');
+  await C.pg.waitForFunction(() => !!(window.FB && window.FB.setMerge), null, { timeout: 45_000 });
+  await C.pg.evaluate((p) => window.FB.setMerge('config', 'menu', { salleLayout: p }), plan);
+  await C.pg.waitForFunction(() => (window.salleElements || []).some((e) => e.id === 't5'), null, { timeout: 20_000 });
+
+  // Téléphone de la serveuse, table 5 : tout passe par l'écran (fenêtre d'options comprise)
+  const S = await openEnrolled(browser, 'serveur.html?table=5&id=t5&emu');
+  await S.pg.waitForFunction(() => getComputedStyle(document.getElementById('app')).display !== 'none', null, { timeout: 30_000 });
+  const add = async (pid, pickOptions) => {
+    await S.pg.evaluate((id) => window.addProduct(id), pid);
+    if (pickOptions) { await pickOptions(); await S.pg.locator('#opt-modal button', { hasText: 'Ajouter' }).click(); }
+  };
+  await add(blonde.id, () => S.pg.locator('#opt-sirop-btns [data-sirop="1"]').click());
+  await add(escargots.id, () => S.pg.locator('#opt-variant-btns .opt-chip', { hasText: '12 pièces' }).click());
+  await add(burger.id, burger.hasCuisson || burger.hasGarniture || burger.hasSirop ? async () => {} : null);
+  await add(entrecote.id, () => S.pg.locator('#opt-cuisson-btns .opt-chip', { hasText: 'Saignant' }).click());
+  await expect(S.pg.locator('#cart-count')).toContainText('4');
+  await S.pg.locator('#cart-bar').click();
+  await S.pg.getByRole('button', { name: /Confirmer la commande/ }).click();
+
+  // 1) La commande est partie
+  let order;
+  await expect.poll(async () => {
+    const docs = (await adminList('orders')).map((d) => ({ id: d.name.split('/').pop(), ...decode({ mapValue: { fields: d.fields } }) }));
+    order = docs.find((o) => o.tableId === 't5' && o.source === 'serveur' && (o.items || []).length === 4);
+    return !!order;
+  }, { timeout: 20_000 }).toBe(true);
+
+  // 2) La caisse la reçoit et monte l'addition de la table 5 avec les prix de la carte
+  try {
+    await C.pg.waitForFunction(() => ((window.tableData || {}).t5?.ticket || []).length === 5, null, { timeout: 30_000 });   // 4 articles + ligne « + Supp. Sirop »
+  } catch (e) {
+    console.log('DEBUG caisse', JSON.stringify(await C.pg.evaluate(() => ({
+      t5: (window.tableData || {}).t5, tables: Object.keys(window.tableData || {}),
+      fbOrders: Object.values(window.fbOrders || {}).map((o) => ({ id: o._id, t: o.tableId, s: o.status, n: (o.items || []).length })),
+      lastSnap: window.__lastOrdersSnap ? Date.now() - window.__lastOrdersSnap : null, pollErr: window.__lastOrdersPollError || null,
+      staff: window.__staff && window.__staff.status(), hasT5: (window.salleElements || []).some((x) => x.id === 't5'),
+      vis: document.visibilityState, focus: document.hasFocus(), lastPoll: window.__lastOrdersPoll || null, menu: !!window.publishedMenu, fbTables: Object.keys(window.fbTables || {}).length, initFn: typeof window.initFirebaseListeners,
+    }))), 'LECTURE', JSON.stringify(await C.pg.evaluate(async () => { try { const d = await window.FB.getCol('orders'); return Object.keys(d || {}).length + ' commandes lues'; } catch (e) { return 'refus ' + (e.code || e.message); } })), ' ERRORS', JSON.stringify(C.errors.slice(0, 8)));
+    throw e;
+  }
+  const lines = await C.pg.evaluate(() => window.tableData.t5.ticket.map((r) => ({ name: r.name, price: r.price, qty: r.qty })));
+  const total = lines.reduce((s, r) => s + r.price * r.qty, 0);
+  expect(lines.map((r) => r.price).sort((a, b) => a - b)).toEqual([0.5, 8, 17.5, 18, 28]);   // sirop, blonde 50cl, burger, escargots 12 pièces, entrecôte
+  expect(lines.some((r) => /Escargots.*12 pièces/.test(r.name))).toBe(true);
+  expect(total).toBe(72);
+  await C.pg.evaluate(() => { const p = document.getElementById('pin-screen'); if (p) p.style.display = 'none'; openSalle(); });
+  expect(await C.pg.evaluate(() => tableStatus('t5'))).toBe('occupied');
+  await C.pg.evaluate(() => openTableService('t5'));
+  await expect(C.pg.locator('#tm-total')).toContainText('72,00');
+  // v87 : addition détaillée, ligne par ligne, pour la retaper sur la caisse du resto
+  const detail = C.pg.locator('#tm-detail');
+  await expect(detail).toContainText('Escargots de Bourgogne — 12 pièces');
+  await expect(detail).toContainText('Blonde 50cl');
+  await expect(detail).toContainText('Supp. Sirop');
+  await expect(detail).toContainText('Saignant');
+  await expect(detail).toContainText('TOTAL');
+  await expect(detail).toContainText('72,00');
+  expect(await detail.locator('.tm-line').count()).toBe(5);
+  if (process.env.SHOT_DIR) await C.pg.screenshot({ path: process.env.SHOT_DIR + '/addition-caisse.png' });
+  await expect.poll(async () => decode((await adminGet('orders/' + order.id)).fields.status), { timeout: 15_000 }).toBe('received');
+
+  // 3) La cuisine voit les plats (pas la bière : catégorie bar), avec la cuisson
+  const K = await openEnrolled(browser, 'cuisine.html?emu');
+  const card = K.pg.locator(`button[data-id="${order.id}"]`).first().locator('xpath=ancestor::*[contains(@class,"ticket") or contains(@class,"card")][1]');
+  await expect(K.pg.getByText(/Escargots/).first()).toBeVisible({ timeout: 30_000 });
+  await expect(K.pg.getByText(/burger/i).first()).toBeVisible();
+  await expect(K.pg.getByText(/entrecôte/i).first()).toBeVisible();
+  await expect(K.pg.getByText(/Saignant/).first()).toBeVisible();
+  await expect(K.pg.getByText(/Blonde 50cl/)).toHaveCount(0);
+  if (process.env.SHOT_DIR) await K.pg.screenshot({ path: process.env.SHOT_DIR + '/commande-cuisine.png' });
+
+  // 4) Addition encaissée sur la caisse du resto → « Table réglée » libère la table, sans vente dans l'app
+  const salesBefore = await C.pg.evaluate(() => (JSON.parse(localStorage.getItem('sales_' + serviceDayKey()) || '[]')).length);
+  const regle = C.pg.locator('#table-modal button', { hasText: 'Table réglée' });
+  await expect(regle).toBeVisible();
+  await regle.click();   // la confirmation est acceptée (comme ta mère qui valide)
+  await C.pg.waitForFunction(() => !((window.tableData || {}).t5?.ticket || []).length, null, { timeout: 10_000 });
+  expect(await C.pg.evaluate(() => (JSON.parse(localStorage.getItem('sales_' + serviceDayKey()) || '[]')).length)).toBe(salesBefore);
+  expect(await C.pg.evaluate(() => tableStatus('t5'))).not.toBe('occupied');
+
+  const noise = (e) => /\[SW\]|REST poll|permission|403|Notification/i.test(e);
+  expect(S.errors.filter((e) => !noise(e))).toEqual([]);
+  expect(K.errors.filter((e) => !noise(e))).toEqual([]);
+  expect(C.errors.filter((e) => !noise(e))).toEqual([]);
+  await S.ctx.close(); await K.ctx.close(); await C.ctx.close();
 });

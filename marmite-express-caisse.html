@@ -409,12 +409,22 @@ window.showFirebaseStatus = function(s){
   else if(s==='error'){ el.style.background='rgba(232,64,64,.1)'; el.style.borderColor='rgba(232,64,64,.2)'; el.querySelector('.fs-dot').style.background='#e84040'; el.querySelector('.fs-txt').textContent='Hors ligne'; }
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+// v87 — BUG CORRIGÉ : firebase-sync.js fait un `await` de premier niveau
+// (enableIndexedDbPersistence). Ce module ne s'exécute donc qu'APRÈS cette
+// attente, et l'événement DOMContentLoaded était parfois déjà passé : les
+// écoutes (commandes, tables, carte) et la relève de secours ne démarraient
+// jamais → aucune commande n'arrivait dans l'addition. On démarre maintenant
+// tout de suite si la page est déjà chargée.
+function bootFirebaseListeners(){
+  if(window.__fbListenersStarted) return;
+  window.__fbListenersStarted = true;
   try { window.initFirebaseListeners(); } catch(e){ window.showFirebaseStatus('error'); console.error(e); }
   // Audit stats #2 : sync compteur receipt depuis Firebase au boot
   // pour éviter doublons de numéros entre devices.
   try { if(typeof window.syncReceiptCounterAtBoot === 'function') window.syncReceiptCounterAtBoot(); } catch(e){ console.warn('[Receipt] sync boot fail:', e); }
-});
+}
+if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootFirebaseListeners);
+else bootFirebaseListeners();
 </script>
 <link rel="stylesheet" href="./assets/css/design-system.css">
 <link rel="stylesheet" href="./assets/css/components.css">
@@ -1016,6 +1026,11 @@ document.addEventListener('DOMContentLoaded', () => {
         <h4>📝 Note (allergie, anniversaire, infos…)</h4>
         <textarea id="tm-note" placeholder="Ex: allergie noix, anniversaire client, sans gluten…" maxlength="500" aria-label="Note pour cette table" oninput="saveTableNote(this.value)" style="width:100%;min-height:50px;padding:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit;resize:vertical"></textarea>
       </div>
+      <!-- v87 : addition ligne par ligne (à retaper sur la caisse du resto) -->
+      <div class="tm-section" id="tm-detail-section">
+        <h4>🧾 Détail de l'addition</h4>
+        <div id="tm-detail"></div>
+      </div>
       <div class="tm-section">
         <h4>Convives à la table</h4>
         <div class="person-grid" id="person-grid"></div>
@@ -1028,7 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
     <div class="tm-footer">
       <div class="tm-total-info">Total table : <span id="tm-total">0,00 €</span></div>
       <button class="btn-add-articles" onclick="goToPOSForTable()">📋 Ajouter des articles</button>
-      <button class="btn-reset-table" onclick="resetTable()" title="Vide complètement cette table (articles + convives)">🗑️ Vider la table</button>
+      <button class="btn-reset-table" onclick="resetTable()" title="L'addition est réglée sur la caisse du resto : libère la table (rien n'est enregistré comme vente)">✅ Table réglée — libérer</button>
       <button class="btn-pay-all" id="btn-pay-all" onclick="payAllAndClose()">💳 Tout encaisser</button>
       <button class="btn-close-table" onclick="closeTableModal()">Fermer</button>
     </div>
@@ -2377,7 +2392,7 @@ function resetTable(){
   const hasData = ticket.length > 0 || persons.length > 0;
   if(hasData){
     const tot = ticket.reduce((s,r)=>s+r.qty*r.price,0);
-    if(!confirm(`⚠ Vider complètement cette table ?\n\n${ticket.length} article(s) — ${fmt(tot)}\n${persons.length} convive(s)\n\nCette action est irréversible.`)) return;
+    if(!confirm(`✅ Table réglée ?\n\nAddition : ${fmt(tot)} (${ticket.length} ligne(s))\n\nÀ faire une fois l'addition encaissée sur la caisse du resto : la table est libérée.\nRien n'est enregistré comme vente dans l'app.`)) return;
   }
   persons=[]; activePerson=null; ticket=[];
   if(currentTableId){
@@ -2387,7 +2402,7 @@ function resetTable(){
   }
   renderPersonBar(); renderTableModal(); renderTicket();
   if(typeof renderSalle === 'function') renderSalle();
-  toast(hasData ? 'Table vidée' : 'Table déjà vide');
+  toast(hasData ? '✅ Table libérée' : 'Table déjà libre');
 }
 
 function renderPersonBar(){
@@ -2400,6 +2415,25 @@ function renderPersonBar(){
 }
 
 function renderTableModal(){
+  // v87 — Addition détaillée : ce que la serveuse a commandé, ligne par ligne,
+  // avec options et prix, pour la retaper sur la caisse du resto.
+  const det = document.getElementById('tm-detail');
+  if(det){
+    if(!ticket.length){
+      det.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:6px 0">Aucun article pour l\'instant.</div>';
+    } else {
+      const total = ticket.reduce((s,r)=>s+r.qty*r.price,0);
+      det.innerHTML = ticket.map(r=>{
+        const sup = !!r._isSupplement;
+        const opts = [r.cuisson, r.garniture].filter(Boolean).map(o=>`<span style="font-size:10px;font-weight:700;color:#000;background:var(--accent);border-radius:8px;padding:1px 6px;margin-left:6px">${esc(o)}</span>`).join('');
+        return `<div class="tm-line" style="display:flex;align-items:baseline;gap:8px;padding:${sup?'1px 0 4px 22px':'6px 0 2px'};${sup?'':'border-top:1px solid rgba(255,255,255,.05)'};font-size:${sup?12:14}px">
+          <span style="min-width:26px;color:var(--muted);font-weight:700">${sup?'':esc(r.qty)+'×'}</span>
+          <span style="flex:1;font-weight:${sup?500:700};color:${sup?'var(--muted)':'var(--text)'}">${esc(String(r.name||'').trim())}${opts}</span>
+          <span style="font-weight:700;white-space:nowrap">${fmt(r.qty*r.price)}</span>
+        </div>`;
+      }).join('') + `<div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:2px solid var(--border);font-weight:800;font-size:15px"><span>TOTAL</span><span style="color:var(--green)">${fmt(total)}</span></div>`;
+    }
+  }
   // Person grid
   const grid=document.getElementById('person-grid');
   grid.innerHTML=persons.map(p=>{
