@@ -208,11 +208,24 @@ function showTablePicker(){
   const elements = menu.salleLayout;
   // Calculate bounds for scaling
   let maxX=0, maxY=0;
+  // Même géométrie que la caisse (v86) : w/h libres pour les tables (carré,
+  // ovale), rot = rotation en degrés, porte, murs et plantes pour se repérer.
+  const isTable = (e) => e.type==='table-round' || e.type==='table-rect';
+  const posNum = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
+  const box = (e) => {
+    if(isTable(e) && Number(e.w) > 0 && Number(e.h) > 0) return { w:posNum(e.w,90), h:posNum(e.h,90) };
+    if(e.type==='table-rect'){ const s = posNum(e.size,110); return { w:s*1.4, h:s }; }
+    if(e.type==='bar')  return { w:posNum(e.w,160), h:posNum(e.h,55) };
+    if(e.type==='wall') return { w:posNum(e.w,12),  h:posNum(e.h,100) };
+    if(e.type==='door') return { w:posNum(e.w,90),  h:posNum(e.h,80) };
+    if(e.type==='plant'){ const s = posNum(e.size,44); return { w:s, h:s }; }
+    const s = posNum(e.size,90); return { w:s, h:s };
+  };
+  const rotOf = (e) => Math.max(-180, Math.min(180, Number(e.rot) || 0));
   elements.forEach(e=>{
-    const w = e.type==='table-rect'?px(e.size,110)*1.4:(e.type==='bar'||e.type==='wall'?px(e.w,160):px(e.size,90));
-    const h = e.type==='bar'||e.type==='wall'?px(e.h,100):px(e.size,90);
-    maxX=Math.max(maxX, px(e.x,0)+w);
-    maxY=Math.max(maxY, px(e.y,0)+h);
+    const b = box(e);
+    maxX=Math.max(maxX, px(e.x,0)+b.w);
+    maxY=Math.max(maxY, px(e.y,0)+b.h);
   });
 
   // Audit serveur #1 : plan de salle venant de Firestore. Plus d'onclick
@@ -228,24 +241,28 @@ function showTablePicker(){
     // Pastille « panier en cours » (nombre seulement, jamais de donnée texte)
     const pending = (el.type==='table-round' || el.type==='table-rect') ? cartCountFor(String(el.id ?? '')) : 0;
     const badge = pending ? `<div style="position:absolute;top:-8px;right:-8px;min-width:24px;height:24px;padding:0 6px;border-radius:12px;background:var(--accent);color:#000;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">🛒${pending}</div>` : '';
-    if(el.type==='table-round'){
-      const sz=px(el.size,90);
-      elHtml+=`<div data-tidx="${idx}" style="position:absolute;left:${x}px;top:${y}px;width:${sz}px;height:${sz}px;border-radius:50%;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="${hoverOn}" onmouseout="${hoverOff}">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;color:#22c97a;line-height:1">${numHtml}</div>
-        <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
-        ${badge}
-      </div>`;
-    } else if(el.type==='table-rect'){
-      const sz=px(el.size,110);
-      elHtml+=`<div data-tidx="${idx}" style="position:absolute;left:${x}px;top:${y}px;width:${sz*1.4}px;height:${sz}px;border-radius:12px;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="${hoverOn}" onmouseout="${hoverOff}">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:#22c97a;line-height:1">${numHtml}</div>
-        <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
+    const b = box(el);
+    const rot = rotOf(el);
+    const tf = rot ? `transform:rotate(${rot}deg);` : '';
+    const untf = rot ? `transform:rotate(${-rot}deg);` : '';
+    if(isTable(el)){
+      const round = el.type==='table-round';
+      const small = Math.min(b.w, b.h) <= 80;
+      elHtml+=`<div data-tidx="${idx}" style="position:absolute;left:${x}px;top:${y}px;width:${b.w}px;height:${b.h}px;border-radius:${round?'50%':'12px'};background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:border-color .15s,background .15s;user-select:none;${tf}" onmouseover="${hoverOn}" onmouseout="${hoverOff}">
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:${small?15:22}px;color:#22c97a;line-height:1;${untf}">${numHtml}</div>
+        <div style="font-size:10px;color:var(--muted);font-weight:600;${untf}">${seats} cvts</div>
         ${badge}
       </div>`;
     } else if(el.type==='bar'){
-      elHtml+=`<div style="position:absolute;left:${x}px;top:${y}px;width:${px(el.w,160)}px;height:${px(el.h,55)}px;border-radius:10px;background:rgba(74,158,255,.1);border:2px solid rgba(74,158,255,.4);display:flex;align-items:center;justify-content:center;gap:6px">
+      elHtml+=`<div style="position:absolute;left:${x}px;top:${y}px;width:${b.w}px;height:${b.h}px;border-radius:10px;background:rgba(74,158,255,.1);border:2px solid rgba(74,158,255,.4);display:flex;align-items:center;justify-content:center;gap:6px;pointer-events:none">
         <span style="font-size:18px">🍺</span><span style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:#4a9eff">${numHtml || 'BAR'}</span>
       </div>`;
+    } else if(el.type==='wall'){
+      elHtml+=`<div style="position:absolute;left:${x}px;top:${y}px;width:${b.w}px;height:${b.h}px;border-radius:4px;background:rgba(255,255,255,.18);pointer-events:none"></div>`;
+    } else if(el.type==='door'){
+      elHtml+=`<div style="position:absolute;left:${x}px;top:${y}px;width:${b.w}px;height:${b.h}px;border-left:2px dashed rgba(255,255,255,.35);border-bottom:2px dashed rgba(255,255,255,.35);border-bottom-left-radius:100%;display:flex;justify-content:center;pointer-events:none"><span style="font-size:12px;font-weight:700;color:var(--muted);margin-top:4px">🚪 ${numHtml || 'Entrée'}</span></div>`;
+    } else if(el.type==='plant'){
+      elHtml+=`<div style="position:absolute;left:${x}px;top:${y}px;width:${b.w}px;height:${b.h}px;border-radius:50%;background:rgba(34,201,122,.08);display:flex;align-items:center;justify-content:center;font-size:${Math.round(b.w*0.5)}px;pointer-events:none">🌿</div>`;
     }
   });
   

@@ -373,3 +373,40 @@ test('test à blanc : serveuse → cuisine → « prête » ; panier gardé par 
   expect(K.errors.filter((e) => !noise(e))).toEqual([]);
   await S.ctx.close(); await K.ctx.close();
 });
+
+test('v86 : plan de salle réel — dimensions libres, ovales, tables inclinées (caisse + serveuse)', async ({ page, browser }) => {
+  await adminSet('security/policy', { enforce: false });
+  const fs = await import('node:fs');
+  const plan = JSON.parse(fs.readFileSync(new URL('../scripts/plan-salle-2026.json', import.meta.url), 'utf8'));
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openCaisse(page);
+  // Le plan arrive par le cloud (comme avec scripts/apply-plan-salle.mjs) et la caisse le reprend
+  await page.evaluate((p) => window.FB.setMerge('config', 'menu', { salleLayout: p }), plan);
+  await page.waitForFunction((n) => (window.salleElements || []).length === n, plan.length, { timeout: 20_000 });
+  await page.evaluate(() => openSalle());
+  const r = await page.evaluate(() => {
+    const q = (id) => document.querySelector(`#salle-elements [data-id="${id}"]`);
+    const t69 = q('t69'), t7 = q('t7'), t18 = q('t18');
+    return {
+      n: document.querySelectorAll('#salle-elements [data-id]').length,
+      t69: [t69.style.width, t69.style.height, t69.style.borderRadius],
+      t18: [t18.style.width, t18.style.height],
+      t7: [t7.style.transform, [...t7.children].find((c) => c.textContent.trim() === '7').style.transform],
+      door: !!q('door1') && q('door1').textContent.includes('Entrée'),
+    };
+  });
+  expect(r).toEqual({ n: plan.length, t69: ['327px', '143px', '50%'], t18: ['108px', '207px'],
+    t7: ['rotate(-20deg)', 'rotate(20deg)'], door: true });
+  if (process.env.SHOT_DIR) { await page.evaluate(() => { const p = document.getElementById('pin-screen'); if (p) p.style.display = 'none'; });
+    await page.screenshot({ path: process.env.SHOT_DIR + '/plan-caisse.png' }); }
+
+  // Téléphone serveuse : même plan, 19 tables touchables
+  const ctx = await browser.newContext({ bypassCSP: true, serviceWorkers: 'block', viewport: { width: 900, height: 560 } });
+  const s = await ctx.newPage();
+  await s.goto('serveur.html?emu', { waitUntil: 'domcontentloaded' });
+  await expect(s.locator('#plan-inner [data-tidx]')).toHaveCount(19, { timeout: 30_000 });
+  if (process.env.SHOT_DIR) await s.screenshot({ path: process.env.SHOT_DIR + '/plan-serveur.png' });
+  await s.locator('#plan-inner [data-tidx]').filter({ hasText: /^\s*69\b/ }).click();
+  await expect(s.locator('#app')).toBeVisible();
+  await ctx.close();
+});

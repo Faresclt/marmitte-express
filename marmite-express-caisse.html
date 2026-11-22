@@ -4009,6 +4009,7 @@ const ELEMENT_TYPES = {
   'bar':         {label:'Bar', emoji:'🍺'},
   'wall':        {label:'Mur', emoji:'🧱'},
   'plant':       {label:'Déco/plante', emoji:'🌿'},
+  'door':        {label:'Entrée', emoji:'🚪'},
 };
 
 function initSalle(){
@@ -4313,10 +4314,9 @@ function applySalleScale(reset){
   // Calcul bounds plan
   let maxX=0, maxY=0;
   salleElements.forEach(el=>{
-    const w = el.type==='table-rect' ? (el.size||110)*1.4 : (el.size||90);
-    const h = el.type==='table-rect' ? (el.size||110) : (el.size||90);
-    maxX = Math.max(maxX, (el.x||0) + w);
-    maxY = Math.max(maxY, (el.y||0) + h);
+    const b = salleBox(el);
+    maxX = Math.max(maxX, (el.x||0) + b.w);
+    maxY = Math.max(maxY, (el.y||0) + b.h);
   });
   const padding = 60;
   const planW = maxX + padding;
@@ -4617,6 +4617,23 @@ function ordersForTable(tid){
 }
 window.ordersForTable = ordersForTable;
 
+// ── Géométrie du plan (v86) ──
+// Rétro-compatible : sans w/h, une table garde sa taille par défaut (ronde =
+// size, rect = size×1.4 par size). Avec w/h : dimensions libres (carré, ovale
+// si ronde avec w≠h). rot = rotation en degrés (tables inclinées).
+function salleIsTable(el){ return el.type==='table-round' || el.type==='table-rect'; }
+function salleBox(el){
+  const n = (v, d) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? x : d; };
+  if(salleIsTable(el) && Number(el.w) > 0 && Number(el.h) > 0) return { w:n(el.w,90), h:n(el.h,90) };
+  if(el.type==='table-rect'){ const s = n(el.size,110); return { w:s*1.4, h:s }; }
+  if(el.type==='bar')  return { w:n(el.w,160), h:n(el.h,55) };
+  if(el.type==='wall') return { w:n(el.w,12),  h:n(el.h,100) };
+  if(el.type==='door') return { w:n(el.w,90),  h:n(el.h,80) };
+  if(el.type==='plant'){ const s = n(el.size,44); return { w:s, h:s }; }
+  const s = n(el.size,90); return { w:s, h:s };
+}
+function salleRot(el){ const r = Number(el.rot) || 0; return Math.max(-180, Math.min(180, r)); }
+
 function makeElDOM(el){
   const div = document.createElement('div');
   div.dataset.id = el.id;
@@ -4637,14 +4654,15 @@ function makeElDOM(el){
   }
 
   if(el.type==='table-round'){
-    const sz = el.size||90;
+    const box = salleBox(el);
+    const sz = Math.min(box.w, box.h);
     const status = tableStatus(el.id);
     const tc = tableColors(status);
     const color = tc.color;
     const bg = tc.bg;
     const border = isSelected ? '2.5px solid #fff' : `2.5px solid ${color}`;
-    div.style.width = sz+'px';
-    div.style.height = sz+'px';
+    div.style.width = box.w+'px';
+    div.style.height = box.h+'px';
     div.style.borderRadius = '50%';
     div.style.background = bg;
     div.style.border = border;
@@ -4658,23 +4676,23 @@ function makeElDOM(el){
     const noteRound = (tableData[el.id] && tableData[el.id].note) || '';
     div.innerHTML = `
       ${noteRound ? `<div style="position:absolute;top:6px;right:6px;font-size:14px;cursor:help;z-index:2" title="${esc(noteRound)}">📝</div>` : ''}
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;letter-spacing:1px;color:${color};line-height:1">${el.number||''}</div>
-      <div style="font-size:10px;color:var(--muted);font-weight:600">${el.seats||0} cvts</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;letter-spacing:1px;color:${color};line-height:1">${esc(el.number||'')}</div>
+      <div style="font-size:10px;color:var(--muted);font-weight:600">${Number(el.seats)||0} cvts</div>
       ${tc.label?`<div style="font-size:9px;font-weight:800;color:${color};margin-top:2px">${tc.label}</div>`:''}
     `;
-    // Chairs around table
-    drawChairs(div, el.seats||4, sz);
+    // Chaises autour (cercle seulement ; un ovale garde son contour net)
+    if(box.w === box.h) drawChairs(div, el.seats||4, sz);
   }
 
   else if(el.type==='table-rect'){
-    const sz = el.size||110;
+    const box = salleBox(el);
     const status = tableStatus(el.id);
     const tc = tableColors(status);
     const color = tc.color;
     const bg = tc.bg;
     const border = isSelected ? '2.5px solid #fff' : `2.5px solid ${color}`;
-    div.style.width = (sz*1.4)+'px';
-    div.style.height = sz+'px';
+    div.style.width = box.w+'px';
+    div.style.height = box.h+'px';
     div.style.borderRadius = '12px';
     div.style.background = bg;
     div.style.border = border;
@@ -4688,8 +4706,8 @@ function makeElDOM(el){
     const noteRect = (tableData[el.id] && tableData[el.id].note) || '';
     div.innerHTML = `
       ${noteRect ? `<div style="position:absolute;top:6px;right:6px;font-size:14px;cursor:help;z-index:2" title="${esc(noteRect)}">📝</div>` : ''}
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:${color};line-height:1">${el.number||''}</div>
-      <div style="font-size:10px;color:var(--muted);font-weight:600">${el.seats||0} couverts</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:${color};line-height:1">${esc(el.number||'')}</div>
+      <div style="font-size:10px;color:var(--muted);font-weight:600">${Number(el.seats)||0} couverts</div>
       ${tc.label?`<div style="font-size:9px;font-weight:800;color:${color};margin-top:2px">${tc.label}</div>`:''}
     `;
   }
@@ -4707,7 +4725,22 @@ function makeElDOM(el){
     div.style.gap = '8px';
     div.style.cursor = salleMode==='edit'?'grab':'default';
     div.style.boxShadow = '0 4px 24px rgba(74,158,255,.12)';
-    div.innerHTML = `<span style="font-size:20px">🍺</span><span style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;color:#4a9eff">${el.number||'BAR'}</span>`;
+    div.innerHTML = `<span style="font-size:20px">🍺</span><span style="font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;color:#4a9eff">${esc(el.number||'BAR')}</span>`;
+  }
+
+  else if(el.type==='door'){
+    const box = salleBox(el);
+    div.style.width = box.w+'px';
+    div.style.height = box.h+'px';
+    div.style.borderLeft = '2px dashed rgba(255,255,255,.35)';
+    div.style.borderBottom = '2px dashed rgba(255,255,255,.35)';
+    div.style.borderBottomLeftRadius = '100%';
+    div.style.display = 'flex';
+    div.style.alignItems = 'flex-start';
+    div.style.justifyContent = 'center';
+    div.style.cursor = salleMode==='edit'?'grab':'default';
+    if(isSelected) div.style.outline = '2px solid #fff';
+    div.innerHTML = `<span style="font-size:12px;font-weight:700;color:var(--muted);margin-top:4px">🚪 ${esc(el.number||'Entrée')}</span>`;
   }
 
   else if(el.type==='wall'){
@@ -4721,7 +4754,7 @@ function makeElDOM(el){
   }
 
   else if(el.type==='plant'){
-    const sz = el.size||44;
+    const sz = salleBox(el).w;
     div.style.width = sz+'px';
     div.style.height = sz+'px';
     div.style.borderRadius = '50%';
@@ -4735,11 +4768,19 @@ function makeElDOM(el){
     div.textContent = '🌿';
   }
 
+  // Table inclinée : la forme tourne, les textes restent droits
+  const rot = salleRot(el);
+  const baseTf = rot ? `rotate(${rot}deg)` : '';
+  if(rot){
+    div.style.transform = baseTf;
+    [...div.children].forEach(c => { if(c.style.position !== 'absolute') c.style.transform = `rotate(${-rot}deg)`; });
+  }
+
   // Events
   if(salleMode==='service' && (el.type==='table-round'||el.type==='table-rect')){
     div.addEventListener('click', ()=>openTableService(el.id));
-    div.addEventListener('mouseenter',()=>{ div.style.transform='scale(1.04)'; });
-    div.addEventListener('mouseleave',()=>{ div.style.transform=''; });
+    div.addEventListener('mouseenter',()=>{ div.style.transform=(baseTf+' scale(1.04)').trim(); });
+    div.addEventListener('mouseleave',()=>{ div.style.transform=baseTf; });
   } else if(salleMode==='edit'){
     div.addEventListener('mousedown', e=>startDrag(e, el.id));
     div.addEventListener('click', e=>{ e.stopPropagation(); selectEl(el.id); });
@@ -4834,9 +4875,7 @@ function onDrag(e){
   const canvas = document.getElementById('salle-elements');
   const cW = canvas.clientWidth  || 1200;
   const cH = canvas.clientHeight || 700;
-  const hasWH = el.type === 'bar' || el.type === 'wall';
-  const elW = hasWH ? (parseFloat(el.w) || 120) : (parseFloat(el.size) || 80);
-  const elH = hasWH ? (parseFloat(el.h) ||  60) : (parseFloat(el.size) || 80);
+  const { w: elW, h: elH } = salleBox(el);
   el.x = Math.max(0, Math.min(nx, cW - elW));
   el.y = Math.max(0, Math.min(ny, cH - elH));
   const dom=document.querySelector(`[data-id="${dragState.id}"]`);
@@ -4879,7 +4918,8 @@ function selectEl(id){
   props.style.display='flex';
 
   const isTable=el.type==='table-round'||el.type==='table-rect';
-  const hasWH=el.type==='bar'||el.type==='wall';
+  // Largeur/hauteur libres : bar, mur, porte, et tables à dimensions libres (carré, ovale)
+  const hasWH=el.type==='bar'||el.type==='wall'||el.type==='door'||(isTable&&Number(el.w)>0&&Number(el.h)>0);
   const hasSize=!hasWH;
 
   // Label
@@ -4959,10 +4999,8 @@ function copySelected(){
 // 2 éléments au même endroit (Math.random() pouvait piler des tables).
 // Retourne true si rect1 chevauche rect2.
 function _salleCollide(a, b){
-  const aW = (a.type==='bar'||a.type==='wall') ? (a.w||120) : (a.size||80);
-  const aH = (a.type==='bar'||a.type==='wall') ? (a.h|| 60) : (a.size||80);
-  const bW = (b.type==='bar'||b.type==='wall') ? (b.w||120) : (b.size||80);
-  const bH = (b.type==='bar'||b.type==='wall') ? (b.h|| 60) : (b.size||80);
+  const { w: aW, h: aH } = salleBox(a);
+  const { w: bW, h: bH } = salleBox(b);
   return !(a.x + aW <= b.x || b.x + bW <= a.x || a.y + aH <= b.y || b.y + bH <= a.y);
 }
 
