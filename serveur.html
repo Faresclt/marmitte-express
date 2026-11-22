@@ -61,7 +61,7 @@
 </script>
 
 <script type="module">
-import { db, doc, onSnapshot, setDoc, collection, getDoc, getDocFromServer, serverTimestamp, escHtml, safeUrl, safeColor, requireStaff, query, where } from './assets/js/firebase-sync.js';
+import { db, doc, onSnapshot, setDoc, collection, getDoc, getDocFromServer, serverTimestamp, escHtml, safeUrl, safeColor, optImg, requireStaff, query, where } from './assets/js/firebase-sync.js';
 
 // Appareil du personnel : bandeau / écran d'enregistrement si non enregistré.
 requireStaff({ label: 'Serveur', page: 'serveur' });
@@ -571,7 +571,7 @@ function renderMenu(){
     if(sec.name) html+=`<div class="sec-sep">${escHtml(String(sec.name).toUpperCase())}</div>`;
     sec.items.forEach(p=>{
       const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
-      const img = safeUrl(p.imgUrl || productImages[p.id] || null);
+      const img = safeUrl(optImg(p.imgUrl || productImages[p.id] || null, 'thumb'));
       // Audit serveur #1 : XSS — escHtml partout sur les contenus produits dérivés de Firebase.
       // Avant : ${p.name} brut → admin malicieux qui tape "<scr"+"ipt>alert(1)" en nom
       // de produit exécutait du JS sur la tablette serveur. Idem alt="${p.name}" (XSS via

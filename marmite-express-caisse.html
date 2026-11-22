@@ -1967,7 +1967,7 @@ function renderMenu(){
 }
 
 function cardHTML(p){
-  const img=safeImg(p.imgUrl||getImg(p.id)||getImg(p.name));
+  const img=safeImg(optImg(p.imgUrl||getImg(p.id)||getImg(p.name),'medium'));
   const imgZone=settings.showImg
     ?(img?`<div class="mcard-img"><img src="${img}" alt="${esc(p.name)}" loading="lazy"><div class="img-grad"></div></div>`
         :`<div class="mcard-img"><div class="mcard-ph">🍽️</div></div>`)
@@ -2016,6 +2016,16 @@ function jsArg(v){ return esc(JSON.stringify(String(v??''))); }
 // Copie locale de safeUrl (firebase-sync.js) : le menu est rendu pendant le
 // parsing, AVANT que le module ait posé window.__safe — dépendre de lui
 // affichait l'assiette 🍽️ à la place de toutes les photos au démarrage (v83).
+// Photos du site : images/x.png (2 à 7 Mo, 2816 px) → version WebP déjà générée
+// dans images/optimized/x-<taille>.webp (thumb 200 px ≈ 4 Ko, medium 600 px ≈ 27 Ko,
+// full 1200 px ≈ 90 Ko). Conversion à l'affichage : marche quelle que soit la
+// source (cloud, caisse, carte-2026) sans réécrire les données (v85).
+// Copie locale (le menu est rendu avant le chargement du module firebase-sync).
+function optImg(u, size){
+  const s = String(u ?? '').trim();
+  const m = /^(?:\.\/)?images\/([a-z0-9_\-.%]+)\.(png|jpe?g)$/i.exec(s);
+  return m ? 'images/optimized/'+m[1]+'-'+(size||'medium')+'.webp' : s;
+}
 function safeImg(u){
   const s = String(u ?? '').trim();
   if (!s) return '';
@@ -2266,7 +2276,7 @@ function renderTicket(){
   // Filter by person if active
   c.innerHTML=rows.map(r=>{
     const prod=products.find(x=>x.id===r.pid);
-    const img=safeImg((prod&&prod.imgUrl)||getImg(r.pid)||getImg(r.name));
+    const img=safeImg(optImg((prod&&prod.imgUrl)||getImg(r.pid)||getImg(r.name),'thumb'));
     const th=img?`<div class="trow-thumb"><img src="${esc(img)}" alt="${esc(r.name)}"></div>`:`<div class="trow-thumb">🍽️</div>`;
     const person=persons.find(p=>p.id===r.personId);
     const dot=person?`<span class="trow-who" style="background:${esc(person.color)}"></span>`:'<span class="trow-who" style="background:transparent"></span>';
@@ -3465,7 +3475,7 @@ function renderProdList(){
   const ps=products.filter(p=>p.cat===adminProdCat);
   if(!ps.length){ el.innerHTML='<div style="color:var(--muted);font-size:13px;padding:12px 0">Aucun produit. Cliquez "+ Nouveau produit" pour commencer.</div>'; return; }
   ps.forEach(p=>{
-    const img=p.imgUrl||getImg(p.id)||getImg(p.name);
+    const img=optImg(p.imgUrl||getImg(p.id)||getImg(p.name),'thumb');
     const div=document.createElement('div'); div.className='acard';
     div.innerHTML=`<div class="acard-img" onclick="openEditProduct(${jsArg(p.id)})">
         ${img?`<img src="${img}" alt="">`:'<span style="font-size:22px">🍽️</span>'}
@@ -3553,7 +3563,7 @@ function openAddProduct(){
 function openEditProduct(id){
   editingProdId=id;
   const p=products.find(x=>x.id===id); if(!p) return;
-  const img=p.imgUrl||getImg(p.id)||getImg(p.name);
+  const img=optImg(p.imgUrl||getImg(p.id)||getImg(p.name),'medium');
   editingProdImg=img||null;
   document.getElementById('pm-title').textContent='Modifier — '+p.name;
   document.getElementById('pm-name').value=p.name;
@@ -6561,7 +6571,7 @@ function pdjLoadProductImg() {
   const ph = document.getElementById('pdj-img-ph');
   pdjImgData = null;
   if (selId) {
-    const imgSrc = getImg(selId) || (products.find(p=>p.id===selId)||{}).imgUrl || null;
+    const imgSrc = optImg(getImg(selId) || (products.find(p=>p.id===selId)||{}).imgUrl || null, 'medium') || null;
     if (imgSrc) {
       prev.src = imgSrc;
       prev.style.display = 'block';

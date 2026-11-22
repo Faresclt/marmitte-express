@@ -53,7 +53,7 @@
 </script>
 
 <script type="module">
-import { db, doc, onSnapshot, getDoc, escHtml, safeUrl, safeColor } from './assets/js/firebase-sync.js';
+import { db, doc, onSnapshot, getDoc, escHtml, safeUrl, safeColor, optImg } from './assets/js/firebase-sync.js';
 
 // Carte seule (décision du 19/11) : le client consulte la carte via le QR de
 // table, il ne commande plus — les serveuses prennent la commande (serveur.html).
@@ -228,7 +228,7 @@ function renderMenu(){
   sections.forEach(sec=>{
     if(sec.name) html+=`<div class="sec-sep">${escHtml(sec.name.toUpperCase())}</div>`;
     sec.items.forEach(p=>{
-      const img = safeUrl(p.imgUrl || productImages[p.id] || null);
+      const img = safeUrl(optImg(p.imgUrl || productImages[p.id] || null, 'thumb'));
       // src filtré par safeUrl (https, data:image raster, relatif) puis échappé ;
       // alt échappé pour bloquer toute injection via le nom de produit.
       const imgHtml = img
@@ -400,7 +400,7 @@ window.openProductDetail = function(pid){
   const p = (menu.products||[]).find(x=>x.id===pid);
   if(!p) return;
   // Image
-  const img = safeUrl(p.imgUrl || productImages[p.id] || null);
+  const img = safeUrl(optImg(p.imgUrl || productImages[p.id] || null, 'full'));
   const imgEl = document.getElementById('detail-img');
   const phEl = document.getElementById('detail-img-ph');
   if(img){ imgEl.src = img; imgEl.style.display='block'; phEl.style.display='none'; }

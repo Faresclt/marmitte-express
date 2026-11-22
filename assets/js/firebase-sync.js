@@ -289,6 +289,16 @@ export function escHtml(s) {
 
 // URL sûre pour src/href : uniquement https:, data:image/(raster) ou relative.
 // Bloque javascript:, data:text/html, data:image/svg+xml, etc.
+// Photos du site : images/x.png (2 à 7 Mo, 2816 px) → version WebP déjà générée
+// dans images/optimized/x-<taille>.webp (thumb 200 px ≈ 4 Ko, medium 600 px ≈ 27 Ko,
+// full 1200 px ≈ 90 Ko). Conversion à l'affichage : marche quelle que soit la
+// source (cloud, caisse, carte-2026) sans réécrire les données (v85).
+export function optImg(u, size = "medium") {
+  const s = String(u ?? "").trim();
+  const m = /^(?:\.\/)?images\/([a-z0-9_\-.%]+)\.(png|jpe?g)$/i.exec(s);
+  return m ? `images/optimized/${m[1]}-${size}.webp` : s;
+}
+
 export function safeUrl(u) {
   const s = String(u ?? "").trim();
   if (!s) return "";

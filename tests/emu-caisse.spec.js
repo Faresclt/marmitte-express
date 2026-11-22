@@ -267,6 +267,19 @@ test('cartes 2026 appliquées une fois : prix, nouveautés, retraits, cafés, or
   expect(bootImg).toBe('images/soda.png');
   await page.evaluate(() => { currentCat = 'softs'; settings.showImg = true; renderMenu(); });
   expect(await page.locator('.mcard-img img').count()).toBeGreaterThan(3);
+  // v85 : photos servies en WebP optimisé (≈27 Ko) au lieu des PNG de 2 à 7 Mo, et réellement chargées
+  expect(await page.evaluate(() => [optImg('images/soda.png', 'thumb'), optImg('./images/a b.png'), optImg('https://x.example/y.png'), optImg('data:image/png;base64,AA')]))
+    .toEqual(['images/optimized/soda-thumb.webp', './images/a b.png', 'https://x.example/y.png', 'data:image/png;base64,AA']);
+  const srcs = await page.locator('.mcard-img img').evaluateAll((els) => els.map((i) => i.getAttribute('src')));
+  expect(srcs.filter((s) => /^images\/[^/]+\.(png|jpe?g)$/i.test(s))).toEqual([]);
+  await page.waitForFunction(() => [...document.querySelectorAll('.mcard-img img')].every((i) => i.complete), null, { timeout: 15_000 });
+  expect(await page.locator('.mcard-img img').evaluateAll((els) => els.filter((i) => !i.naturalWidth).map((i) => i.src))).toEqual([]);
+  // Chaque photo du site a ses trois versions optimisées (sinon optImg pointerait dans le vide)
+  const fs = await import('node:fs');
+  const dir = new URL('../images/', import.meta.url);
+  const missing = fs.readdirSync(dir).filter((f) => /\.(png|jpe?g)$/i.test(f)).flatMap((f) => ['thumb', 'medium', 'full']
+    .map((sz) => `optimized/${f.replace(/\.[^.]+$/, '')}-${sz}.webp`)).filter((p) => !fs.existsSync(new URL(p, dir)));
+  expect(missing).toEqual([]);
   // Pas de bouton « 86 » sur les produits disponibles (pris pour un compteur de stock)
   expect(await page.locator('.mcard-86').count()).toBe(0);
   await page.evaluate(() => { products.find(p => p.id === 'p7').stock = 0; renderMenu(); });
