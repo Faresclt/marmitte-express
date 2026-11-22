@@ -121,7 +121,7 @@ body{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidd
 .tbtn-prep{background:rgba(245,166,35,.15);color:#f5a623;border:2px solid rgba(245,166,35,.3)}
 .tbtn-ready{background:#22c97a;color:#000;font-weight:800}
 .tbtn-done{background:rgba(74,158,255,.12);color:#4a9eff;border:2px solid rgba(74,158,255,.2);flex:3}
-.tbtn-clr{background:rgba(232,64,64,.1);color:#e84040;border:2px solid rgba(232,64,64,.15);flex:1;font-size:22px}
+.tbtn-clr{background:rgba(232,64,64,.1);color:#e84040;border:2px solid rgba(232,64,64,.15);flex:1.4;font-size:16px}
 
 @keyframes unlockPulse{0%,100%{box-shadow:0 0 0 rgba(232,64,64,0)}50%{box-shadow:0 0 12px rgba(232,64,64,.4)}}
 #audio-unlock.unlocked{background:rgba(34,201,122,.15) !important;border-color:rgba(34,201,122,.4) !important;color:#22c97a !important;animation:none !important;pointer-events:none}
@@ -192,10 +192,9 @@ let prevCount = 0;
 let noCuisineCategories = [];
 let noCuisineProductNames = new Set(); // Fallback: product names from noCuisine categories
 
-// Audit cuisine #9 : seuil "late" configurable (avant hardcodé à 10 min L342).
-// Lu depuis config/menu.lateThresholdMin pour permettre adaptation
-// fast-food (5 min) vs gastro (30 min). Default 10 min si non défini.
-let lateThresholdMin = 10;
+// Seuil "en retard" : 10 min fixes (le réglage config/menu.lateThresholdMin
+// n'a jamais été publié par la caisse → lecture retirée le 19/11).
+const LATE_THRESHOLD_MIN = 10;
 
 // Audit cuisine #3 : AudioContext SINGLETON (avant : new AudioContext() à chaque
 // playSound → fuite mémoire, Chrome bloque > 6 contexts → audio mort mi-service).
@@ -279,12 +278,6 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
     });
   }
   console.log('[Cuisine] noCuisine cats:', noCuisineCategories, 'products:', [...noCuisineProductNames]);
-  // Audit cuisine #9 : lire seuil "late" configurable. Default 10 min.
-  if (data && typeof data.lateThresholdMin === 'number' && data.lateThresholdMin > 0){
-    lateThresholdMin = data.lateThresholdMin;
-  } else if (data && data.settings && typeof data.settings.lateThresholdMin === 'number'){
-    lateThresholdMin = data.settings.lateThresholdMin;
-  }
   // Re-render with updated filter (noms du menu potentiellement changés →
   // invalide le cache de signature)
   if (Object.keys(orders).length > 0) { _lastRenderSig = ''; renderAll(); }
@@ -381,7 +374,8 @@ window.doStatus = async function(id, s) {
 window.doClear = async function(id) {
   const o = orders[id];
   const tbl = o ? (o.tableNum || o.tableId || '?') : '?';
-  if (!confirm(`Annuler la commande de la table ${tbl} ?\n\nElle restera consultable dans l'historique (status: cancelled) mais disparaîtra de l'écran cuisine.`)) return;
+  // status 'cancelled' → la caisse retire les lignes de cette commande de l'addition
+  if (!confirm("Annuler cette commande ? Elle sera retirée de l'addition de la table.")) return;
   try {
     await updateDoc(doc(db, 'orders', id), {
       status: 'cancelled',
@@ -498,8 +492,7 @@ function makeTicket(o, type) {
   const tbl = o.tableNum || o.tableId || '?';
   const time = o.sentAt?.toDate ? o.sentAt.toDate().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
   const mins = minsAgo(o);
-  // Audit cuisine #9 : seuil "late" via lateThresholdMin (config-driven)
-  const late = type === 'new' && mins >= lateThresholdMin;
+  const late = type === 'new' && mins >= LATE_THRESHOLD_MIN;
   // Plus d'onclick construit avec l'id : data-act / data-id + délégation
   // (listener unique sur .board, plus bas). L'id est échappé pour l'attribut.
   const idAttr = esc(o._id);
@@ -507,7 +500,7 @@ function makeTicket(o, type) {
   let btns = '';
   if (type === 'new') btns = `<button class="tbtn tbtn-prep" data-act="preparing" data-id="${idAttr}">🔥 EN PRÉPARATION</button>`;
   else if (type === 'prep') btns = `<button class="tbtn tbtn-ready" data-act="ready" data-id="${idAttr}">✅ PRÊT À SERVIR</button>`;
-  else btns = `<button class="tbtn tbtn-done" data-act="served" data-id="${idAttr}">🍽️ SERVI</button><button class="tbtn tbtn-clr" data-act="clear" data-id="${idAttr}">✕</button>`;
+  else btns = `<button class="tbtn tbtn-done" data-act="served" data-id="${idAttr}">🍽️ SERVI</button><button class="tbtn tbtn-clr" data-act="clear" data-id="${idAttr}" title="Annule la commande : retirée de l'addition de la table">Annuler</button>`;
 
   // Audit cuisine #5 : XSS — esc() partout. Le nom affiché vient du menu (pid)
   // quand il existe ; sinon nom de la commande, échappé.
@@ -578,7 +571,7 @@ function tickRefresh(){
   _renderAllImpl();
   // Détecte les nouveaux late
   Object.values(orders).forEach(o => {
-    if ((o.status === 'received' || o.status === 'pending') && minsAgo(o) >= lateThresholdMin){
+    if ((o.status === 'received' || o.status === 'pending') && minsAgo(o) >= LATE_THRESHOLD_MIN){
       if (!window._lateNotified.has(o._id)){
         window._lateNotified.add(o._id);
         if (soundOn) playSound([1500, 1500, 1500]); // 3 bips aigus pour late

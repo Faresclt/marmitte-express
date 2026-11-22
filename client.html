@@ -4,10 +4,10 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com https://*.firebasestorage.app https://firestore.googleapis.com https://cdnjs.cloudflare.com data: blob:; img-src 'self' data: blob: https:; font-src 'self' https://fonts.gstatic.com">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Commander — La Marmite Express</title>
-<meta name="description" content="Commandez directement depuis votre table — La Marmite Express">
-<meta property="og:title" content="Commander — La Marmite Express">
-<meta property="og:description" content="Passez votre commande directement depuis votre table">
+<title>La carte — La Marmite Express</title>
+<meta name="description" content="Consultez la carte de La Marmite Express">
+<meta property="og:title" content="La carte — La Marmite Express">
+<meta property="og:description" content="Consultez la carte depuis votre table">
 <meta property="og:image" content="icon-512.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
@@ -53,41 +53,40 @@
 </script>
 
 <script type="module">
-import { db, auth, authReady, doc, onSnapshot, setDoc, collection, getDoc, serverTimestamp, escHtml, safeUrl, safeColor } from './assets/js/firebase-sync.js';
+import { db, doc, onSnapshot, getDoc, escHtml, safeUrl, safeColor } from './assets/js/firebase-sync.js';
 
-// Get table number from URL: client.html?table=3
-// Valeurs d'URL = données non fiables : toujours des strings bornées (règles
-// Firestore : tableId string ≤ 40), et échappées à l'affichage.
+// Carte seule (décision du 19/11) : le client consulte la carte via le QR de
+// table, il ne commande plus — les serveuses prennent la commande (serveur.html).
+// Aucune écriture Firestore depuis cette page.
+
+// Numéro de table (optionnel) : client.html?table=3
+// Valeur d'URL = donnée non fiable : string bornée, affichée via textContent.
 const params = new URLSearchParams(window.location.search);
-const tableNum = String(params.get('table') || '?').slice(0, 20);
-const tableId = String(params.get('id') || ('t'+tableNum)).slice(0, 40);
+const tableNum = String(params.get('table') || '').trim().slice(0, 20);
 
 let menu = null;
-let cart = [];
-// Idempotence de l'envoi : l'id de la commande est généré côté client et gardé
-// tant que l'envoi n'a pas réussi → un nouvel essai réécrit le MÊME document.
-let _pendingOrderRef = null;
-let _sending = false;
-function cartChanged(){ _pendingOrderRef = null; }
-// Contrat service worker : ne pas recharger la page pendant une saisie.
-window.__isBusy = () => cart.length > 0 || _sending;
 
-// ── Prix / options (même logique que la caisse) ──
+// ── Prix (lecture seule) ──
 const SIROP_PRICE = 0.5;
+// Variantes de taille : tableau [{label, price}] (format caisse) ; tolère aussi
+// l'ancienne forme texte « 6 pièces:12|12 pièces:18 ».
 function variantsOf(p){
-  return (p && p.hasVariant && Array.isArray(p.variants))
-    ? p.variants.filter(v => v && typeof v.label === 'string' && Number.isFinite(Number(v.price)))
+  if(!p || !p.hasVariant) return [];
+  let raw = p.variants;
+  if(typeof raw === 'string'){
+    raw = raw.split('|').map(s => {
+      const i = s.lastIndexOf(':');
+      return i > 0 ? { label: s.slice(0, i).trim(), price: s.slice(i + 1).trim().replace(',', '.') } : null;
+    });
+  }
+  return Array.isArray(raw)
+    ? raw.filter(v => v && typeof v.label === 'string' && v.label && Number.isFinite(Number(v.price)))
     : [];
 }
-function unitPrice(p, variant, sirop){
-  let price = Number(p && p.price) || 0;
-  const v = variantsOf(p).find(x => x.label === variant);
-  if(v) price = Number(v.price) || 0;
-  if(sirop && p && p.hasSirop) price += SIROP_PRICE;
-  return Math.round(price * 100) / 100;
+// « 6 pièces 12,00 € · 12 pièces 18,00 € » (texte brut, à échapper à l'affichage)
+function variantsText(p){
+  return variantsOf(p).map(v => v.label + ' ' + fmtEur(v.price) + ' €').join(' · ');
 }
-function needsOptions(p){ return !!(p && (p.hasCuisson || p.hasGarniture || variantsOf(p).length || p.hasSirop)); }
-function lineKey(r){ return [r.pid, r.variant || '', r.cuisson || '', r.garniture || '', r.sirop ? 'sirop' : ''].join('|'); }
 // Prix affiché sur la carte : prix de base, ou « dès » la plus petite variante
 function priceLabel(p){
   const vs = variantsOf(p);
@@ -111,9 +110,12 @@ try {
   if(stored) myAllergies = new Set(JSON.parse(stored));
 } catch(e){ /* ignore corrupt storage */ }
 
-// Update page title and table display
-document.getElementById('table-display').textContent = tableNum;
-document.title = `Table ${tableNum} — Commander`;
+// Numéro de table affiché seulement s'il est présent dans l'URL
+if(tableNum){
+  document.getElementById('table-display').textContent = tableNum;
+  document.getElementById('table-pill').style.display = '';
+  document.title = `Table ${tableNum} — La carte`;
+}
 
 // Fix #10 : batches d'images chargés en parallèle (Promise.all) au lieu d'await
 // séquentiel. Sur 5 batches × 800ms en 4G restaurant ça passe de 4s à ~1s.
@@ -226,45 +228,31 @@ function renderMenu(){
   sections.forEach(sec=>{
     if(sec.name) html+=`<div class="sec-sep">${escHtml(sec.name.toUpperCase())}</div>`;
     sec.items.forEach(p=>{
-      const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
-      const img = safeUrl((p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null));
+      const img = safeUrl(p.imgUrl || productImages[p.id] || null);
       // src filtré par safeUrl (https, data:image raster, relatif) puis échappé ;
       // alt échappé pour bloquer toute injection via le nom de produit.
       const imgHtml = img
         ? `<div class="prod-img"><img src="${escHtml(img)}" alt="${escHtml(p.name)}" loading="lazy" decoding="async" width="64" height="64"></div>`
         : '';
-      // Stock : 0 = épuisé, N positif = limité (N-inCart restants), -1/undefined = illimité
+      // Stock : 0 = épuisé ; tout le reste (-1 / undefined / N) = disponible
       const outOfStock = p.stock === 0;
-      const stockLimited = typeof p.stock === 'number' && p.stock > 0;
-      const stockLeft = stockLimited ? Math.max(0, p.stock - inCart) : Infinity;
-      const stockReached = stockLimited && inCart >= p.stock;
-      const stockWarn = stockLimited && stockLeft > 0 && stockLeft <= 3 ? `<div class="stock-warn">⏱️ Plus que ${stockLeft} en stock</div>` : '';
       // Pastille allergènes (visible AVANT clic = conformité INCO 2014 art. 9)
       const allergens = Array.isArray(p.allergens) ? p.allergens : [];
       const allergenHint = allergens.length ? `<div class="prod-allergens-hint">⚠️ Allergènes (${allergens.length})</div>` : '';
-      const displayName = (p.pdj && menu.platDuJour && menu.platDuJour.nom) ? menu.platDuJour.nom : p.name;
       const displaySub = p.sub;
-      html+=`<div class="prod-card${img?' has-img':''}${outOfStock||stockReached?' sold-out':''}" data-pid="${escHtml(p.id)}" data-action="detail">
+      const vText = variantsText(p);
+      const optHint = [p.hasCuisson?'🔥 Cuisson au choix':'', p.hasGarniture?'🍟 Garniture au choix':''].filter(Boolean).join(' · ');
+      html+=`<div class="prod-card${img?' has-img':''}${outOfStock?' sold-out':''}" data-pid="${escHtml(p.id)}" data-action="detail">
         ${imgHtml}
         <div class="prod-info">
-          <div class="prod-name">${p.pdj?'⭐ ':''}${escHtml(displayName)}</div>
+          <div class="prod-name">${p.pdj?'⭐ ':''}${escHtml(p.name)}</div>
           ${displaySub?`<div class="prod-sub">${escHtml(displaySub)}</div>`:''}
-          ${(p.hasCuisson||p.hasGarniture||variantsOf(p).length)?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${[variantsOf(p).length?'📏 Taille':'', p.hasCuisson?'🔥 Cuisson':'', p.hasGarniture?'🍟 Garniture':''].filter(Boolean).join(' · ')}</div>`:''}
+          ${vText?`<div class="prod-variants">📏 ${escHtml(vText)}</div>`:''}
+          ${optHint?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${optHint}</div>`:''}
           ${allergenHint}
-          ${stockWarn}
           <div class="prod-price">${priceLabel(p)}</div>
         </div>
-        <div class="prod-actions">
-          ${outOfStock ? `<span class="badge-soldout">Épuisé</span>` :
-            stockReached ? `<span class="badge-soldout">Stock atteint</span>` :
-            inCart ? `
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--accent)">${inCart} dans le panier</span>
-              <button class="add-btn" data-pid="${escHtml(p.id)}" data-action="add" aria-label="Ajouter ${escHtml(displayName)}">+</button>
-            </div>` :
-            `<button class="add-btn" data-pid="${escHtml(p.id)}" data-action="add" aria-label="Ajouter ${escHtml(displayName)} au panier">+ Ajouter</button>`
-          }
-        </div>
+        ${outOfStock ? `<div class="prod-actions"><span class="badge-soldout">Épuisé</span></div>` : ''}
       </div>`;
     });
   });
@@ -274,25 +262,17 @@ function renderMenu(){
       : 'Aucun article dans cette catégorie';
     content.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">🍽️</div>${reason}</div>`;
   } else {
-    content.innerHTML = html;
+    content.innerHTML = html + '<div class="menu-footnote">Prix TTC, TVA incluse — service compris</div>';
   }
 }
 
-// Event delegation : remplace les onclick inline (sécurité XSS + maintenabilité)
-// closest() prend le bouton "+" si on clique dessus, sinon la card si on clique ailleurs.
+// Event delegation : clic sur une carte produit → fiche détaillée
 document.getElementById('menu-content').addEventListener('click', (e) => {
-  const target = e.target.closest('[data-action]');
+  const target = e.target.closest('[data-action="detail"]');
   if(!target) return;
   const pid = target.dataset.pid;
-  const action = target.dataset.action;
-  const p = (menu?.products||[]).find(x => x.id === pid);
-  if(!p) return;
-  if(action === 'add'){
-    e.stopPropagation();
-    addProduct(p.id);
-  } else if(action === 'detail'){
-    openProductDetail(pid);
-  }
+  if(!(menu?.products||[]).some(x => x.id === pid)) return;
+  openProductDetail(pid);
 });
 document.getElementById('menu-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-cat]');
@@ -329,20 +309,13 @@ window.toggleFilter = toggleFilter;
 window.onSearch = onSearch;
 
 // ── Fix #6 : Escape ferme le modal du dessus (a11y / mobile-friendly) ──
-// L'ordre suit le z-index : confirm-order > allergies > opt > detail > cart-panel.
-// Permet aussi de bouclier le scroll de l'<html> quand un modal est ouvert.
+// L'ordre suit le z-index : allergies > detail.
 document.addEventListener('keydown', (e) => {
   if(e.key !== 'Escape') return;
-  const confirmModal = document.getElementById('confirm-order-modal');
   const allergiesModal = document.getElementById('allergies-modal');
-  const optModal = document.getElementById('opt-modal');
   const detailModal = document.getElementById('detail-modal');
-  const cartPanel = document.getElementById('cart-panel');
-  if(confirmModal && confirmModal.style.display === 'flex'){ closeConfirmOrderModal(); return; }
   if(allergiesModal && allergiesModal.style.display === 'flex'){ closeAllergiesModal(); return; }
-  if(optModal && optModal.style.display === 'flex'){ closeOptModal(); return; }
   if(detailModal && detailModal.classList.contains('show')){ closeDetail(); return; }
-  if(cartPanel && cartPanel.style.display === 'flex'){ closeCartPanel(); return; }
 });
 
 // ── Modal "Mes allergies" ──
@@ -378,7 +351,7 @@ function saveAllergies(){
   updateAllergiesChip();
   closeAllergiesModal();
   renderMenu();
-  if(checked.length > 0) showCartToast('🛡️ '+checked.length+' allergie(s) actives');
+  if(checked.length > 0) showToast('🛡️ '+checked.length+' allergie(s) actives');
 }
 
 function clearAllergies(){
@@ -405,97 +378,47 @@ window.closeAllergiesModal = closeAllergiesModal;
 window.saveAllergies = saveAllergies;
 window.clearAllergies = clearAllergies;
 
-// Ligne de panier = {pid, name, price, qty, tva, cuisson, garniture, cat, variant, sirop}
-// (même identité de ligne que la caisse : pid + variante + cuisson + garniture + sirop).
-// Le prix est recalculé depuis le menu (variante / sirop) — la caisse le recalcule aussi.
-function makeLine(p, opts){
-  const o = opts || {};
-  const variant = variantsOf(p).some(v => v.label === o.variant) ? o.variant : null;
-  const sirop = !!(o.sirop && p.hasSirop);
-  return {
-    pid: p.id,
-    name: String(p.name || '') + (variant ? ' — ' + variant : ''),
-    price: unitPrice(p, variant, sirop),
-    tva: Number(p.tva) || 10,
-    cuisson: o.cuisson || null,
-    garniture: o.garniture || null,
-    cat: p.cat || null,
-    variant,
-    sirop
-  };
-}
-function changeQty(line, delta){
-  const key = lineKey(line);
-  const ex = cart.find(r => lineKey(r) === key);
-  if(ex){ ex.qty+=delta; if(ex.qty<=0) cart=cart.filter(r=>r!==ex); }
-  else if(delta>0) cart.push({...line, qty:1});
-  cartChanged();
-  updateCartBar();
-  renderMenu();
-  if(delta > 0) showCartToast('+ ' + line.name);
-  else if(delta < 0 && !ex) showCartToast('Retiré : ' + line.name);
-}
-
-let _cartToastTimer = null;
-function showCartToast(msg){
-  let t = document.getElementById('cart-toast');
+// Petit toast de feedback (ex. allergies appliquées)
+let _toastTimer = null;
+function showToast(msg){
+  let t = document.getElementById('client-toast');
   if(!t){
     t = document.createElement('div');
-    t.id = 'cart-toast';
+    t.id = 'client-toast';
     t.setAttribute('role', 'status');
     t.setAttribute('aria-live', 'polite');
     document.body.appendChild(t);
   }
   t.textContent = msg;
   t.classList.add('show');
-  clearTimeout(_cartToastTimer);
-  _cartToastTimer = setTimeout(() => t.classList.remove('show'), 1600);
-}
-window.showCartToast = showCartToast;
-
-// Options picker for products with cuisson/garniture
-let pendingOptProduct = null;
-
-function addProduct(pid){
-  const p = (menu?.products||[]).find(x=>x.id===pid);
-  if(!p) return;
-  // Garde stock : empêche dépassement quand p.stock est un quota fini
-  if(typeof p.stock === 'number' && p.stock >= 0){
-    const inCart = cart.filter(r => r.pid === pid).reduce((s,r) => s + r.qty, 0);
-    if(p.stock === 0 || inCart >= p.stock){
-      showCartToast(p.stock === 0 ? '✕ Produit épuisé' : '✕ Stock atteint ('+p.stock+' max)');
-      return;
-    }
-  }
-  // Variante (obligatoire si hasVariant), cuisson, garniture ou sirop → modale
-  if(needsOptions(p)){
-    openOptionsModal(p);
-    return;
-  }
-  changeQty(makeLine(p), 1);
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 1600);
 }
 
 // ── Product detail modal (clic plat depuis menu client) ──
-let _detailProduct = null;
 window.openProductDetail = function(pid){
   const p = (menu.products||[]).find(x=>x.id===pid);
   if(!p) return;
-  _detailProduct = p;
   // Image
-  const img = safeUrl((p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null));
+  const img = safeUrl(p.imgUrl || productImages[p.id] || null);
   const imgEl = document.getElementById('detail-img');
   const phEl = document.getElementById('detail-img-ph');
   if(img){ imgEl.src = img; imgEl.style.display='block'; phEl.style.display='none'; }
   else { imgEl.style.display='none'; phEl.style.display='flex'; }
   // Nom + prix
-  const displayName = (p.pdj && menu.platDuJour && menu.platDuJour.nom) ? menu.platDuJour.nom : p.name;
-  document.getElementById('detail-name').innerHTML = (p.pdj?'⭐ ':'') + escHtml(displayName);
+  document.getElementById('detail-name').innerHTML = (p.pdj?'⭐ ':'') + escHtml(p.name);
   document.getElementById('detail-price').textContent = priceLabel(p);
   // Description
-  const desc = (p.pdj && menu.platDuJour && menu.platDuJour.desc) ? menu.platDuJour.desc : (p.description || p.sub || '');
+  const desc = p.description || p.sub || '';
   document.getElementById('detail-desc').textContent = desc || 'Aucune description disponible.';
+  // Tailles (prix par variante) + supplément sirop : lecture seule
+  const vText = variantsText(p);
+  const sizeLines = [vText, p.hasSirop ? 'Supplément sirop +' + fmtEur(SIROP_PRICE) + ' €' : ''].filter(Boolean);
+  document.getElementById('detail-variants-sec').style.display = sizeLines.length ? 'block' : 'none';
+  document.getElementById('detail-variants').textContent = sizeLines.join('\n');
   // Tags
   const tags = [];
+  if(p.stock === 0) tags.push('<span class="detail-tag spicy">Épuisé</span>');
   if(p.vegan) tags.push('<span class="detail-tag vegan">🌱 Vegan</span>');
   else if(p.vegetarian) tags.push('<span class="detail-tag veg">🥬 Végétarien</span>');
   if(p.glutenFree) tags.push('<span class="detail-tag veg" style="background:rgba(74,158,255,.15);color:#4a9eff;border-color:rgba(74,158,255,.3)">🌾 Sans gluten</span>');
@@ -521,336 +444,14 @@ window.openProductDetail = function(pid){
 
 window.closeDetail = function(){
   document.getElementById('detail-modal').classList.remove('show');
-  _detailProduct = null;
 };
-
-window.addProductFromDetail = function(){
-  if(!_detailProduct) return;
-  const p = _detailProduct;
-  closeDetail();
-  addProduct(p.id);
-};
-
-// Modale d'options : variante (obligatoire si hasVariant), cuisson, garniture,
-// supplément sirop. Tout texte venant du menu est échappé ; les chips portent
-// un index (data-idx) vers les listes ci-dessous, jamais la valeur dans un onclick.
-let _optLists = { variant: [], cuisson: [], garniture: [] };
-const _optLabel = 'font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px';
-function optGroup(id, title, labels){
-  return `<div style="margin-bottom:16px">
-      <div style="${_optLabel}">${title}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px" id="${id}">
-        ${labels.map((l,i)=>`<button type="button" class="opt-chip${i===0?' sel':''}" data-idx="${i}" onclick="selChip(this)">${escHtml(l)}</button>`).join('')}
-      </div>
-    </div>`;
-}
-function openOptionsModal(p){
-  pendingOptProduct = p;
-  const opts = menu.options||{};
-  const strs = (a) => (Array.isArray(a) ? a : []).filter(x => typeof x === 'string' && x);
-  const cuissons = strs(opts.cuissons);
-  const garnitures = strs(opts.garnitures);
-  const variants = variantsOf(p);
-  _optLists = {
-    variant: variants.map(v => v.label),
-    cuisson: p.hasCuisson ? cuissons : [],
-    garniture: p.hasGarniture ? garnitures : []
-  };
-  let html = `<div style="font-size:16px;font-weight:700;margin-bottom:16px">${escHtml(p.name)}</div>`;
-  if(variants.length){
-    html += optGroup('opt-variant-btns', '📏 Taille', variants.map(v => v.label + ' — ' + fmtEur(v.price) + '€'));
-  }
-  if(_optLists.cuisson.length) html += optGroup('opt-cuisson-btns', '🔥 Cuisson', _optLists.cuisson);
-  if(_optLists.garniture.length) html += optGroup('opt-garniture-btns', '🍟 Garniture', _optLists.garniture);
-  if(p.hasSirop){
-    html+=`<div style="margin-bottom:16px">
-      <div style="${_optLabel}">🍯 Supplément</div>
-      <div style="display:flex;gap:6px" id="opt-sirop-btns">
-        <button type="button" class="opt-chip sel" data-sirop="0" onclick="selChip(this)">Sans sirop</button>
-        <button type="button" class="opt-chip" data-sirop="1" onclick="selChip(this)">+ Sirop (+0,50€)</button>
-      </div>
-    </div>`;
-  }
-  html+=`<div style="display:flex;gap:8px;margin-top:8px">
-    <button onclick="closeOptModal()" style="flex:1;height:44px;border-radius:12px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-weight:700;font-size:14px;cursor:pointer">Annuler</button>
-    <button onclick="confirmOpt()" style="flex:1;height:44px;border-radius:12px;background:var(--accent);border:none;color:#000;font-weight:800;font-size:14px;cursor:pointer">✓ Ajouter</button>
-  </div>`;
-  document.getElementById('opt-modal-body').innerHTML = html;
-  document.getElementById('opt-modal').style.display = 'flex';
-}
-
-function selChip(el, group){
-  el.parentElement.querySelectorAll('.opt-chip').forEach(b=>b.classList.remove('sel'));
-  el.classList.add('sel');
-}
-
-function confirmOpt(){
-  if(!pendingOptProduct) return;
-  const p = pendingOptProduct;
-  // Garde stock (cohérence avec addProduct)
-  if(typeof p.stock === 'number' && p.stock >= 0){
-    const inCart = cart.filter(r => r.pid === p.id).reduce((s,r) => s + r.qty, 0);
-    if(p.stock === 0 || inCart >= p.stock){
-      showCartToast(p.stock === 0 ? '✕ Produit épuisé' : '✕ Stock atteint ('+p.stock+' max)');
-      closeOptModal();
-      return;
-    }
-  }
-  const pick = (group) => {
-    const el = document.querySelector('#opt-'+group+'-btns .opt-chip.sel');
-    const i = el ? parseInt(el.dataset.idx, 10) : -1;
-    return (i >= 0 && i < _optLists[group].length) ? _optLists[group][i] : null;
-  };
-  const variant = pick('variant');
-  if(_optLists.variant.length && !variant){ showCartToast('Choisissez une taille'); return; }
-  const siropEl = document.querySelector('#opt-sirop-btns .opt-chip.sel');
-  changeQty(makeLine(p, {
-    variant,
-    cuisson: pick('cuisson'),
-    garniture: pick('garniture'),
-    sirop: !!(siropEl && siropEl.dataset.sirop === '1')
-  }), 1);
-  closeOptModal();
-}
-
-function closeOptModal(){
-  document.getElementById('opt-modal').style.display = 'none';
-  pendingOptProduct = null;
-}
-
-function updateCartBar(){
-  const count = cart.reduce((s,r)=>s+r.qty,0);
-  const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
-  const bar = document.getElementById('cart-bar');
-  bar.style.display = count ? 'flex' : 'none';
-  document.getElementById('cart-count').textContent = count+' article'+(count>1?'s':'');
-  document.getElementById('cart-total-bar').textContent = total.toFixed(2).replace('.',',')+'€';
-}
 
 function switchTab(id){
   const tabs=document.getElementById('menu-tabs');
   tabs.dataset.active=id;
   renderMenu();
 }
-
-function openCartPanel(){
-  const panel = document.getElementById('cart-panel');
-  panel.style.display='flex';
-  renderCartPanel();
-}
-function closeCartPanel(){ document.getElementById('cart-panel').style.display='none'; }
-
-function renderCartPanel(){
-  const total = cart.reduce((s,r)=>s+r.qty*r.price,0);
-  document.getElementById('cp-items').innerHTML = cart.map((r, idx)=>{
-    const optTxt = [r.cuisson, r.garniture, r.sirop ? '+ sirop' : ''].filter(Boolean).join(' · ');
-    return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)">
-      <div style="flex:1">
-        <div style="font-size:15px;font-weight:600">${escHtml(r.name)}</div>
-        ${optTxt?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${escHtml(optTxt)}</div>`:''}
-        <div style="font-size:12px;color:#888">${fmtEur(r.price)}€/u</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <button data-cart-idx="${idx}" data-cart-delta="-1" aria-label="Retirer un ${escHtml(r.name)}" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
-        <span style="font-family:'Bebas Neue',sans-serif;font-size:22px">${r.qty}</span>
-        <button data-cart-idx="${idx}" data-cart-delta="1" aria-label="Ajouter un ${escHtml(r.name)}" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
-      </div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:65px;text-align:right">${(r.qty*r.price).toFixed(2).replace('.',',')}€</div>
-    </div>`;
-  }).join('');
-  document.getElementById('cp-total').textContent = total.toFixed(2).replace('.',',')+'€';
-  document.getElementById('cp-send').disabled = !cart.length;
-}
-
-// Délégation pour les boutons +/- du panier (remplace onclick inline)
-document.getElementById('cp-items').addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-cart-idx]');
-  if(!btn) return;
-  const idx = parseInt(btn.dataset.cartIdx);
-  const delta = parseInt(btn.dataset.cartDelta);
-  const r = cart[idx];
-  if(!r) return;
-  // Garde stock sur l'incrément (cohérence)
-  if(delta > 0){
-    const p = (menu?.products||[]).find(x => x.id === r.pid);
-    if(p && typeof p.stock === 'number' && p.stock >= 0){
-      const inCart = cart.filter(c => c.pid === r.pid).reduce((s,c) => s + c.qty, 0);
-      if(p.stock === 0 || inCart >= p.stock){
-        showCartToast(p.stock === 0 ? '✕ Produit épuisé' : '✕ Stock atteint ('+p.stock+' max)');
-        return;
-      }
-    }
-  }
-  changeQty(r, delta);
-  renderCartPanel();
-});
-
-// Étape 1 : ouvre un modal de confirmation avec récap du panier.
-// Empêche les double-clics accidentels (le bouton "Confirmer la commande" est dans
-// la sticky cart-bar, facile à toucher par mégarde sur mobile).
-function sendOrder(){
-  if(!cart.length) return;
-  const count = cart.reduce((s,r) => s+r.qty, 0);
-  const total = cart.reduce((s,r) => s+r.qty*r.price, 0);
-  const itemsList = cart.map(r => {
-    const opts = [r.cuisson, r.garniture, r.sirop ? '+ sirop' : ''].filter(Boolean).join(' · ');
-    return `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px">
-      <div style="flex:1;min-width:0"><span style="font-weight:700">${r.qty}× ${escHtml(r.name)}</span>${opts?`<div style="color:var(--accent);font-size:11px">${escHtml(opts)}</div>`:''}</div>
-      <div style="font-family:'Bebas Neue',sans-serif;color:var(--green);white-space:nowrap">${(r.qty*r.price).toFixed(2).replace('.',',')}€</div>
-    </div>`;
-  }).join('');
-  document.getElementById('confirm-order-body').innerHTML = `
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px;margin-bottom:4px">Confirmer la commande ?</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Table ${escHtml(String(tableNum))} · ${count} article${count>1?'s':''}</div>
-    <div style="max-height:40vh;overflow-y:auto;margin-bottom:14px">${itemsList}</div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid var(--border);margin-bottom:16px">
-      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Total TTC</div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--green)">${total.toFixed(2).replace('.',',')}€</div>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button onclick="closeConfirmOrderModal()" style="flex:1;height:48px;border-radius:12px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-weight:700;font-size:14px;cursor:pointer">← Modifier</button>
-      <button onclick="confirmAndSendOrder()" id="confirm-send-btn" style="flex:2;height:48px;border-radius:12px;background:var(--accent);border:none;color:#000;font-weight:800;font-size:15px;cursor:pointer">✓ Envoyer</button>
-    </div>
-  `;
-  document.getElementById('confirm-order-modal').style.display = 'flex';
-}
-
-function closeConfirmOrderModal(){
-  document.getElementById('confirm-order-modal').style.display = 'none';
-}
-window.closeConfirmOrderModal = closeConfirmOrderModal;
-
-// Étape 2 : envoi réel à Firestore après confirmation explicite.
-// Format strict imposé par les règles : clés ⊆ {tableId, tableNum, items, note,
-// status, source, sentAt, clientUid}, source 'client', status 'pending',
-// clientUid = uid anonyme courant, 1 à 40 lignes, note ≤ 500, tableId string ≤ 40.
-// Idempotence : id généré côté client (doc(collection(...))), conservé tant que
-// l'envoi n'a pas réussi → un nouvel essai réécrit le MÊME document (pas de doublon).
-const MAX_LINES = 40;
-function resetSendButtons(){
-  const confirmBtn = document.getElementById('confirm-send-btn');
-  const cpBtn = document.getElementById('cp-send');
-  if(confirmBtn){ confirmBtn.disabled=false; confirmBtn.textContent='✓ Envoyer'; }
-  if(cpBtn){ cpBtn.disabled=!cart.length; cpBtn.textContent='✅ Confirmer la commande'; }
-}
-function onOrderSent(ref){
-  if(_pendingOrderRef !== ref){ // panier modifié entre-temps : le 1er envoi est quand même arrivé
-    showCartToast('✓ Commande précédente reçue — vérifiez votre panier');
-    return;
-  }
-  _pendingOrderRef = null;
-  cart=[];
-  const noteEl = document.getElementById('cp-note');
-  if(noteEl) noteEl.value = '';
-  updateCartBar();
-  closeCartPanel();
-  closeConfirmOrderModal();
-  resetSendButtons();
-  showConfirmation();
-}
-async function confirmAndSendOrder(){
-  if(!cart.length || _sending) return;
-  if(cart.length > MAX_LINES){
-    alert('Commande trop longue ('+cart.length+' lignes, '+MAX_LINES+' max). Envoyez-la en deux fois ou appelez un serveur.');
-    return;
-  }
-  const confirmBtn = document.getElementById('confirm-send-btn');
-  const cpBtn = document.getElementById('cp-send');
-  if(confirmBtn){ confirmBtn.disabled=true; confirmBtn.textContent='⏳ Envoi...'; }
-  if(cpBtn){ cpBtn.disabled=true; cpBtn.textContent='Envoi en cours...'; }
-  _sending = true;
-  const isRetry = !!_pendingOrderRef;
-  let slowTimer = null;
-  try{
-    await authReady;
-    const uid = auth.currentUser && auth.currentUser.uid;
-    if(!uid){ const err = new Error('auth'); err.code = 'unauthenticated'; throw err; }
-    // Sanitization de la note : strip HTML/JS/contrôles, normalise espaces, max 500
-    const note = sanitizeOrderNote(document.getElementById('cp-note')?.value||'');
-    if(!_pendingOrderRef) _pendingOrderRef = doc(collection(db,'orders'));
-    const ref = _pendingOrderRef;
-    const data = {
-      tableId: String(tableId || ''),
-      tableNum: String(tableNum),
-      items: cart.map(r=>({
-        pid: r.pid,
-        name: r.name,
-        price: Number(r.price) || 0,
-        qty: Number(r.qty) || 0,
-        tva: Number(r.tva) || 10,
-        cuisson: r.cuisson || null,
-        garniture: r.garniture || null,
-        cat: r.cat || null,
-        variant: r.variant || null,
-        sirop: !!r.sirop
-      })),
-      note,
-      status: 'pending',
-      source: 'client',
-      sentAt: serverTimestamp(),
-      clientUid: uid
-    };
-    // Réseau lent / hors ligne : le SDK garde l'écriture en file et la rejouera.
-    // Après 15 s on rend la main (un nouvel essai réutilise le même id).
-    slowTimer = setTimeout(() => {
-      if(_pendingOrderRef !== ref) return;
-      _sending = false;
-      resetSendButtons();
-      alert('Connexion lente : la commande partira dès que le réseau revient. Vous pouvez réessayer sans risque de doublon, ou appeler un serveur.');
-    }, 15000);
-    await setDoc(ref, data);
-    clearTimeout(slowTimer);
-    _sending = false;
-    onOrderSent(ref);
-  }catch(e){
-    clearTimeout(slowTimer);
-    _sending = false;
-    resetSendButtons();
-    console.warn('[client] envoi commande:', e && (e.code || e.message));
-    if(e && e.code === 'permission-denied' && isRetry){
-      // Le document existe déjà (1er essai arrivé) → le public ne peut pas le réécrire.
-      alert('Votre commande a probablement déjà été reçue. Appelez un serveur pour vérifier avant de renvoyer.');
-    } else {
-      alert('Erreur de connexion. Réessayez (sans risque de doublon) ou appelez un serveur.');
-    }
-  }
-}
-window.confirmAndSendOrder = confirmAndSendOrder;
-
-// ── Fix #8 : Sanitization de la note client (envoyée au resto) ──
-// Avant : replace(/[<>]/g,'') laissait passer "javascript:", entités HTML,
-// retours à la ligne abusifs. Maintenant : strip toutes balises, contrôles,
-// limite multi-newlines, max 500 caractères.
-function sanitizeOrderNote(raw){
-  let s = String(raw || '');
-  // Tronque d'abord pour limiter le coût des regex
-  s = s.slice(0, 500);
-  // Retire toutes balises HTML/XML
-  s = s.replace(/<[^>]*>/g, '');
-  // Retire les protocoles dangereux (javascript:, data:, vbscript:)
-  s = s.replace(/(javascript|data|vbscript):/gi, '');
-  // Caractères de contrôle (sauf \n \t) → espace
-  s = s.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, ' ');
-  // Max 3 newlines consécutifs
-  s = s.replace(/\n{4,}/g, '\n\n\n');
-  // Trim et normalise espaces multiples internes
-  s = s.trim().replace(/[ \t]{3,}/g, '  ');
-  return s.slice(0, 500);
-}
-window.sanitizeOrderNote = sanitizeOrderNote;
-
-function showConfirmation(){
-  document.getElementById('confirm-screen').style.display='flex';
-  setTimeout(()=>{
-    document.getElementById('confirm-screen').style.display='none';
-    renderMenu();
-  }, 3000);
-}
-
-window.switchTab=switchTab; window.changeQty=changeQty; window.addProduct=addProduct;
-window.openCartPanel=openCartPanel; window.closeCartPanel=closeCartPanel;
-window.renderCartPanel=renderCartPanel; window.sendOrder=sendOrder;
-window.selChip=selChip; window.confirmOpt=confirmOpt; window.closeOptModal=closeOptModal;
+window.switchTab=switchTab;
 </script>
 
 <style>
@@ -874,7 +475,8 @@ body{display:flex;flex-direction:column}
 .mtab.active{background:rgba(245,166,35,.15);border-color:var(--accent);color:var(--accent)}
 
 /* Products */
-#menu-content{flex:1;overflow-y:auto;padding-bottom:100px}
+#menu-content{flex:1;overflow-y:auto;padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+.menu-footnote{font-size:10px;color:var(--muted);text-align:center;padding:16px;letter-spacing:.3px;font-weight:600;text-transform:uppercase}
 .sec-sep{padding:8px 16px;font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--muted);background:rgba(255,255,255,.02);border-top:1px solid var(--border);margin-top:6px}
 .prod-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
 .prod-card.sold-out{opacity:.5}
@@ -884,14 +486,8 @@ body{display:flex;flex-direction:column}
 .prod-name{font-size:15px;font-weight:600;margin-bottom:2px}
 .prod-sub{font-size:12px;color:var(--muted);margin-bottom:6px;line-height:1.4}
 .prod-price{font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--green)}
+.prod-variants{font-size:11px;color:var(--text);font-weight:600;margin-top:2px;line-height:1.4}
 .prod-actions{flex-shrink:0}
-.add-btn{height:36px;padding:0 16px;border-radius:20px;background:rgba(245,166,35,.15);border:1px solid rgba(245,166,35,.3);color:var(--accent);font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
-.add-btn:active{background:rgba(245,166,35,.3)}
-.qty-ctrl{display:flex;align-items:center;gap:8px}
-.qty-ctrl button{width:32px;height:32px;border-radius:50%;border:none;font-size:18px;font-weight:700;cursor:pointer}
-.qty-ctrl button:first-child{background:rgba(232,64,64,.12);color:var(--red)}
-.qty-ctrl button:last-child{background:rgba(34,201,122,.12);color:var(--green)}
-.qty-ctrl span{font-family:'Bebas Neue',sans-serif;font-size:22px;min-width:24px;text-align:center}
 
 /* Search + filters */
 #search-bar{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
@@ -907,70 +503,23 @@ body{display:flex;flex-direction:column}
 .skel-img{width:64px;height:64px;border-radius:12px;flex-shrink:0}
 .skel-content{flex:1;display:flex;flex-direction:column;gap:8px}
 
-/* Cart toast — feedback ajout/retrait */
-#cart-toast{position:fixed;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px 18px;border-radius:24px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:50;opacity:0;pointer-events:none;transition:opacity .2s,transform .25s cubic-bezier(.34,1.56,.64,1);max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#cart-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-
-/* Cart bar */
-#cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--accent);padding:14px 20px calc(14px + env(safe-area-inset-bottom));display:none;align-items:center;justify-content:space-between;cursor:pointer;z-index:40}
-#cart-count{font-size:14px;font-weight:700;color:#000}
-#cart-total-bar{font-family:'Bebas Neue',sans-serif;font-size:20px;color:#000}
-.cart-arrow{font-size:18px;color:#000}
-
-/* Cart panel */
-#cart-panel{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;display:none;align-items:flex-end}
-.cart-inner{background:var(--surface);border-radius:24px 24px 0 0;width:100%;max-height:88vh;display:flex;flex-direction:column}
-.cp-handle{width:40px;height:4px;border-radius:2px;background:var(--border);margin:12px auto 4px}
-.cp-header{padding:10px 16px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
-.cp-header h3{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px}
-.cp-close{width:32px;height:32px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:16px;cursor:pointer}
-#cp-items{flex:1;overflow-y:auto;padding:0 16px}
-.cp-footer{padding:14px 16px;border-top:1px solid var(--border)}
-#cp-note{width:100%;height:50px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--text);resize:none;margin-bottom:10px;font-family:'DM Sans',sans-serif}
-#cp-note:focus{border-color:var(--accent);outline:none}
-.cp-total-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-.cp-total-lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-#cp-total{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--green)}
-#cp-send{width:100%;height:54px;border-radius:var(--radius);background:var(--accent);color:#000;font-size:16px;font-weight:800;cursor:pointer;border:none;letter-spacing:.5px;transition:opacity .15s}
-#cp-send:disabled{opacity:.4;cursor:not-allowed}
-
-/* Confirmation screen */
-#confirm-screen{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px}
-.confirm-icon{font-size:72px;animation:pop .4s ease}
-@keyframes pop{0%{transform:scale(0)}70%{transform:scale(1.2)}100%{transform:scale(1)}}
-.confirm-title{font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:2px;color:var(--green)}
-.confirm-sub{font-size:14px;color:var(--muted);text-align:center;line-height:1.6}
-
-/* Options modal */
-#opt-modal{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:150;display:none;align-items:center;justify-content:center;padding:16px}
-#opt-modal-inner{background:var(--surface);border-radius:20px;width:100%;max-width:360px;padding:20px;border:1px solid var(--border)}
-.opt-chip{height:36px;padding:0 14px;border-radius:20px;background:var(--card);border:1.5px solid var(--border);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
-.opt-chip:active{transform:scale(.95)}
-.opt-chip.sel{border-color:var(--accent);background:rgba(245,166,35,.12);color:var(--accent)}
+/* Toast — feedback (allergies appliquées) */
+#client-toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px 18px;border-radius:24px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:50;opacity:0;pointer-events:none;transition:opacity .2s,transform .25s cubic-bezier(.34,1.56,.64,1);max-width:80vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#client-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
 /* Allergies modal */
 #allergies-modal{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:160;display:none;align-items:center;justify-content:center;padding:16px}
 #allergies-modal-inner{background:var(--surface);border-radius:20px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;padding:24px 20px 20px;border:1px solid var(--border);position:relative}
 #allergies-modal-close{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:14px;cursor:pointer;z-index:1}
 
-/* Confirmation order modal */
-#confirm-order-modal{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:170;display:none;align-items:flex-end;justify-content:center;padding:0}
-#confirm-order-inner{background:var(--surface);border-radius:20px 20px 0 0;width:100%;max-width:520px;padding:24px 20px 24px calc(20px);border:1px solid var(--border);border-bottom:none;animation:slideUp .25s cubic-bezier(.34,1.56,.64,1)}
-@keyframes slideUp{from{transform:translateY(40px);opacity:0}to{transform:translateY(0);opacity:1}}
-
-/* Mention TVA dans le panier */
-#cp-tva-mention{font-size:10px;color:var(--muted);text-align:center;margin-bottom:10px;letter-spacing:.3px;font-weight:600;text-transform:uppercase}
 #allergies-checkboxes label:has(input:checked){border-color:var(--accent) !important;background:rgba(245,166,35,.08) !important}
 .chip-allergies[aria-pressed="true"]{background:rgba(232,64,64,.15) !important;border-color:rgba(232,64,64,.5) !important;color:#ff7878 !important}
 
 /* Pastille allergènes sur card produit */
 .prod-allergens-hint{font-size:10px;font-weight:700;color:#e84040;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.25);padding:2px 8px;border-radius:8px;margin-top:4px;display:inline-block;letter-spacing:.3px}
 
-/* Badge "Épuisé" / "Stock atteint" */
+/* Badge "Épuisé" */
 .badge-soldout{font-size:12px;font-weight:700;color:var(--red);background:rgba(232,64,64,.1);padding:6px 14px;border-radius:20px;white-space:nowrap}
-
-/* Stock warn "Plus que N en stock" */
-.stock-warn{font-size:10px;font-weight:700;color:#f5a623;background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.25);padding:2px 8px;border-radius:8px;margin-top:4px;display:inline-block;letter-spacing:.3px}
 
 /* Product detail modal */
 #detail-modal{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;display:none;align-items:flex-end;justify-content:center;padding:0}
@@ -981,7 +530,7 @@ body{display:flex;flex-direction:column}
 .detail-img img{width:100%;height:100%;object-fit:cover}
 .detail-img.placeholder{display:flex;align-items:center;justify-content:center;font-size:80px;opacity:.3}
 #detail-close{position:absolute;top:12px;right:12px;width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);z-index:10}
-.detail-body{padding:20px 18px 100px}
+.detail-body{padding:20px 18px calc(28px + env(safe-area-inset-bottom))}
 .detail-name{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;line-height:1.05;margin-bottom:6px}
 .detail-price{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--accent);letter-spacing:1px;margin-bottom:14px}
 .detail-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
@@ -994,22 +543,19 @@ body{display:flex;flex-direction:column}
 .detail-section-label{font-size:10px;font-weight:800;color:var(--muted);letter-spacing:1.2px;text-transform:uppercase;margin-bottom:6px}
 .detail-section-text{font-size:14px;line-height:1.5;color:var(--text)}
 .detail-allergens-list{display:flex;flex-wrap:wrap;gap:6px}
-#detail-cta{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:0 auto;padding:14px 16px;background:linear-gradient(180deg,transparent,var(--surface) 30%);z-index:5}
-#detail-cta button{width:100%;height:52px;border:none;border-radius:14px;background:var(--accent);color:#1a1100;font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
-#detail-cta button:active{transform:scale(.98)}
+#detail-variants{white-space:pre-line}
 .prod-card{cursor:pointer}
-.prod-card .add-btn{cursor:pointer}
 </style>
 </head>
 <body>
 
 <div id="app-header">
-  <div class="table-pill">TABLE <span id="table-display">?</span></div>
+  <div class="table-pill" id="table-pill" style="display:none">TABLE <span id="table-display"></span></div>
   <div style="display:flex;align-items:center;gap:10px">
     <img id="resto-logo" alt="" style="display:none;width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0">
     <div>
       <div id="resto-name">La <span style="color:var(--accent)">Marmite</span> Express</div>
-      <div class="tagline">COMMANDER EN LIGNE</div>
+      <div class="tagline">LA CARTE</div>
     </div>
   </div>
 </div>
@@ -1045,61 +591,12 @@ body{display:flex;flex-direction:column}
   <div id="menu-content"></div>
 </div>
 
-<!-- Cart sticky bar -->
-<div id="cart-bar" onclick="openCartPanel()">
-  <div id="cart-count">0 article</div>
-  <div id="cart-total-bar">0,00€</div>
-  <div class="cart-arrow">→</div>
-</div>
-
-<!-- Cart panel -->
-<div id="cart-panel" role="dialog" aria-modal="true" aria-labelledby="cart-panel-title" onclick="if(event.target===this)closeCartPanel()">
-  <div class="cart-inner">
-    <div class="cp-handle"></div>
-    <div class="cp-header">
-      <h3 id="cart-panel-title">🛒 Votre commande</h3>
-      <button class="cp-close" onclick="closeCartPanel()" aria-label="Fermer le panier">✕</button>
-    </div>
-    <div id="cp-items"></div>
-    <div class="cp-footer">
-      <textarea id="cp-note" placeholder="Note pour la cuisine (allergies, cuisson…)" maxlength="500" aria-label="Note pour la cuisine"></textarea>
-      <div class="cp-total-row">
-        <div class="cp-total-lbl">Total</div>
-        <div id="cp-total">0,00€</div>
-      </div>
-      <div id="cp-tva-mention">Prix TTC, TVA incluse — service compris</div>
-      <button id="cp-send" onclick="sendOrder()" disabled>✅ Confirmer la commande</button>
-    </div>
-  </div>
-</div>
-
-<!-- Options modal -->
-<div id="opt-modal" role="dialog" aria-modal="true" aria-label="Options du plat" onclick="if(event.target===this)closeOptModal()">
-  <div id="opt-modal-inner">
-    <div id="opt-modal-body"></div>
-  </div>
-</div>
-
 <!-- "Mes allergies" modal -->
 <div id="allergies-modal" role="dialog" aria-modal="true" aria-labelledby="allergies-modal-title" onclick="if(event.target===this)closeAllergiesModal()">
   <div id="allergies-modal-inner">
     <button id="allergies-modal-close" onclick="closeAllergiesModal()" aria-label="Fermer">✕</button>
     <div id="allergies-modal-body"></div>
   </div>
-</div>
-
-<!-- Modal confirmation commande -->
-<div id="confirm-order-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-order-title" onclick="if(event.target===this)closeConfirmOrderModal()">
-  <div id="confirm-order-inner">
-    <div id="confirm-order-body"></div>
-  </div>
-</div>
-
-<!-- Confirmation -->
-<div id="confirm-screen">
-  <div class="confirm-icon">🎉</div>
-  <div class="confirm-title">Commande envoyée !</div>
-  <div class="confirm-sub">Votre commande a bien été transmise.<br>Un serveur s'occupera de vous.</div>
 </div>
 
 <!-- Product detail modal (clic sur plat) -->
@@ -1115,6 +612,10 @@ body{display:flex;flex-direction:column}
       <div class="detail-name" id="detail-name"></div>
       <div class="detail-price" id="detail-price"></div>
       <div class="detail-section-text" id="detail-desc" style="color:#c8c8d0"></div>
+      <div class="detail-section" id="detail-variants-sec" style="display:none">
+        <div class="detail-section-label">📏 Tailles &amp; suppléments</div>
+        <div class="detail-section-text" id="detail-variants"></div>
+      </div>
       <div class="detail-section" id="detail-garniture-sec" style="display:none">
         <div class="detail-section-label">🍟 Garniture</div>
         <div class="detail-section-text" id="detail-garniture"></div>
@@ -1127,9 +628,6 @@ body{display:flex;flex-direction:column}
         <div class="detail-section-label">⚠️ Allergènes</div>
         <div class="detail-allergens-list" id="detail-allergens"></div>
       </div>
-    </div>
-    <div id="detail-cta">
-      <button onclick="addProductFromDetail()">+ Ajouter au panier</button>
     </div>
   </div>
 </div>

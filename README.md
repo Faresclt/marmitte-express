@@ -12,11 +12,10 @@ App mono-page par rôle, chaque HTML est autonome. Partage via Firestore (source
 |------|------|-------------|
 | `index.html` | Landing + choix rôle | Arrivée |
 | `serveur.html` | Prise commande + plan de salle | Serveur |
-| `client.html` | Menu via QR code | Client à table |
+| `client.html` | Carte en lecture seule via QR code (pas de commande) | Client à table |
 | `cuisine.html` | Dashboard kanban temps réel + speech synthesis | Cuisine |
 | `marmite-express-caisse.html` | POS encaissement + TVA + historique | Gérant |
 | `qrcodes.html` | Génération planche QR codes A4 | Admin (one-shot) |
-| `setup-images.html` | Upload + génération IA images menu | Admin |
 
 ## Stack
 

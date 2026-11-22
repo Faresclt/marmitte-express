@@ -26,7 +26,7 @@
 <script src="assets/js/sw-register.js"></script>
 <script>
 /* Brand pre-boot — voir index.html pour la justification.
-   Variante serveur : cibles #resto-logo (img) + #pin-logo (PIN screen). */
+   Variante serveur : cible #resto-logo (img). */
 (function(){
   try {
     function read(k){
@@ -74,7 +74,7 @@ let _orderInFlight = false;
 // Idempotence : id de commande généré côté client, gardé tant que l'envoi n'a
 // pas réussi → un nouvel essai réécrit le MÊME document (pas de doublon).
 let _pendingOrderRef = null;
-function cartChanged(){ _pendingOrderRef = null; }
+function cartChanged(){ _pendingOrderRef = null; saveCart(); }
 
 // Get table number from URL: client.html?table=3
 const params = new URLSearchParams(window.location.search);
@@ -82,10 +82,83 @@ let tableNum = params.get('table') ? String(params.get('table')).slice(0, 20) : 
 let tableId = params.get('id') ? String(params.get('id')).slice(0, 40) : (tableNum ? 't'+tableNum : null);
 
 let menu = null;
-let cart = [];
+let cart = [];          // panier de la table courante
 let productImages = {};
 // Contrat service worker : ne pas recharger la page pendant une saisie.
 window.__isBusy = () => cart.length > 0 || _orderInFlight;
+
+// ── Un panier par table ──
+// Changer de table ne perd plus rien : le panier (lignes + note + id de commande
+// en attente) est rangé sous son tableId, puis restauré au retour sur la table.
+// Persisté en localStorage → un rechargement de page ne perd rien non plus.
+// Un panier n'est vidé qu'après l'envoi réussi de SA commande.
+// Entrée : { num, items, note, pendingId, ts }. Les paniers de plus de 12 h
+// (service précédent) sont ignorés au chargement.
+const CARTS_KEY = 'serveur_carts';
+const CART_TTL_MS = 12 * 3600 * 1000;
+function loadCarts(){
+  const out = Object.create(null); // pas de prototype : une clé "__proto__" reste une clé
+  try{
+    const raw = JSON.parse(localStorage.getItem(CARTS_KEY) || '{}');
+    if(!raw || typeof raw !== 'object') return out;
+    const now = Date.now();
+    for(const [k, e] of Object.entries(raw)){
+      if(!e || typeof e !== 'object' || !Array.isArray(e.items)) continue;
+      if(!(now - Number(e.ts) < CART_TTL_MS)) continue;
+      const items = e.items.filter(r => r && typeof r === 'object'
+        && (typeof r.pid === 'string' || typeof r.pid === 'number')
+        && typeof r.name === 'string'
+        && Number(r.qty) > 0 && Number.isFinite(Number(r.price)));
+      const note = typeof e.note === 'string' ? e.note.slice(0, 500) : '';
+      if(!items.length && !note) continue;
+      out[String(k).slice(0, 40)] = {
+        num: String(e.num || '').slice(0, 20),
+        items,
+        note,
+        pendingId: (typeof e.pendingId === 'string' && /^[A-Za-z0-9]{1,40}$/.test(e.pendingId)) ? e.pendingId : null,
+        ts: Number(e.ts)
+      };
+    }
+  }catch(_){ /* stockage corrompu ou indisponible → paniers vides */ }
+  return out;
+}
+const cartsByTable = loadCarts();
+function persistCarts(){
+  try { localStorage.setItem(CARTS_KEY, JSON.stringify(cartsByTable)); } catch(_){}
+}
+// Range le panier courant (lignes + note + id en attente) sous la table courante
+function saveCart(){
+  if(!tableId) return;
+  const note = String(document.getElementById('cp-note')?.value || '').slice(0, 500);
+  if(cart.length || note){
+    cartsByTable[tableId] = {
+      num: String(tableNum || ''),
+      items: cart.map(r => ({...r})),
+      note,
+      pendingId: _pendingOrderRef ? _pendingOrderRef.id : null,
+      ts: Date.now()
+    };
+  } else {
+    delete cartsByTable[tableId];
+  }
+  persistCarts();
+}
+// Recharge le panier de la table courante (vide si aucun)
+function restoreCart(){
+  const e = tableId ? cartsByTable[tableId] : null;
+  cart = e ? e.items.map(r => ({...r})) : [];
+  _pendingOrderRef = (e && e.pendingId) ? doc(db, 'orders', e.pendingId) : null;
+  const noteEl = document.getElementById('cp-note');
+  if(noteEl) noteEl.value = e ? e.note : '';
+  const errEl = document.getElementById('cp-error');
+  if(errEl) errEl.style.display = 'none';
+  const btn = document.getElementById('cp-send');
+  if(btn && !_orderInFlight) btn.textContent = _pendingOrderRef ? '✅ Réessayer (sans doublon)' : '✅ Confirmer la commande';
+}
+function cartCountFor(id){
+  const e = cartsByTable[id];
+  return e ? e.items.reduce((s, r) => s + (Number(r.qty) || 0), 0) : 0;
+}
 
 // ── Prix / options (même logique que la caisse) ──
 const SIROP_PRICE = 0.5;
@@ -118,6 +191,10 @@ function updateTableDisplay(){
   document.title = tableNum ? `Table ${tableNum} — Commander` : 'Serveur — La Marmite Express';
 }
 updateTableDisplay();
+restoreCart();   // table venue de l'URL : reprend son panier sauvegardé
+updateCartBar();
+// La note fait partie du panier de la table : sauvegardée à chaque frappe
+document.getElementById('cp-note').addEventListener('input', saveCart);
 
 // Show table picker if no table selected
 function showTablePicker(){
@@ -148,17 +225,22 @@ function showTablePicker(){
     const numHtml = escHtml(el.number || '');
     const seats = Number(el.seats) || 0;
     const x = px(el.x,0), y = px(el.y,0);
+    // Pastille « panier en cours » (nombre seulement, jamais de donnée texte)
+    const pending = (el.type==='table-round' || el.type==='table-rect') ? cartCountFor(String(el.id ?? '')) : 0;
+    const badge = pending ? `<div style="position:absolute;top:-8px;right:-8px;min-width:24px;height:24px;padding:0 6px;border-radius:12px;background:var(--accent);color:#000;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">🛒${pending}</div>` : '';
     if(el.type==='table-round'){
       const sz=px(el.size,90);
       elHtml+=`<div data-tidx="${idx}" style="position:absolute;left:${x}px;top:${y}px;width:${sz}px;height:${sz}px;border-radius:50%;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="${hoverOn}" onmouseout="${hoverOff}">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;color:#22c97a;line-height:1">${numHtml}</div>
         <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
+        ${badge}
       </div>`;
     } else if(el.type==='table-rect'){
       const sz=px(el.size,110);
       elHtml+=`<div data-tidx="${idx}" style="position:absolute;left:${x}px;top:${y}px;width:${sz*1.4}px;height:${sz}px;border-radius:12px;background:rgba(34,201,122,.1);border:2.5px solid #22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;user-select:none" onmouseover="${hoverOn}" onmouseout="${hoverOff}">
         <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:#22c97a;line-height:1">${numHtml}</div>
         <div style="font-size:10px;color:var(--muted);font-weight:600">${seats} cvts</div>
+        ${badge}
       </div>`;
     } else if(el.type==='bar'){
       elHtml+=`<div style="position:absolute;left:${x}px;top:${y}px;width:${px(el.w,160)}px;height:${px(el.h,55)}px;border-radius:10px;background:rgba(74,158,255,.1);border:2px solid rgba(74,158,255,.4);display:flex;align-items:center;justify-content:center;gap:6px">
@@ -259,36 +341,25 @@ function showTablePicker(){
 }
 
 function pickTable(id, num){
+  saveCart(); // range le panier de la table quittée (no-op si aucune)
   tableId = String(id || '').slice(0, 40);
   tableNum = String(num || '').slice(0, 20);
+  restoreCart(); // reprend le panier de la table choisie
   updateTableDisplay();
+  updateCartBar();
   document.getElementById('table-picker').style.display='none';
   document.getElementById('app').style.display='flex';
   renderMenu();
 }
 
-// Change table button — confirme si la commande en cours sera perdue
-// Audit serveur #8 : si un PIN serveur est défini (≠ '0000'), on le redemande
-// pour éviter qu'un client laissé seul avec la tablette change la table de
-// destination (et reçoive les commandes d'une autre table).
+// Changer de table : le panier en cours reste rangé sous sa table (rien n'est
+// perdu). Bloqué seulement pendant un envoi (10 s max avant reprise de main).
 function changeTable(){
-  if(cart.length > 0){
-    const total = cart.reduce((s,r)=>s+(Number(r.qty)||0)*(Number(r.price)||0),0);
-    const msg = `⚠ Changer de table maintenant ?\n\n${cart.length} article(s) — ${total.toFixed(2).replace('.',',')}€\nLa commande en cours sera PERDUE.\n\nPour conserver, confirme d'abord la commande.`;
-    if(!confirm(msg)) return;
+  if(_orderInFlight){
+    showServeurNotif('⏳ Envoi en cours — patiente quelques secondes');
+    return;
   }
-  // PIN guard (si le restaurant utilise un PIN serveur)
-  if(window._serveurPin && window._serveurPin !== '0000'){
-    const entered = prompt('🔒 Code PIN serveur requis pour changer de table :');
-    if(entered === null) return;
-    if(entered !== window._serveurPin){
-      alert('Code PIN incorrect.');
-      return;
-    }
-  }
-  cart = [];
-  cartChanged();
-  updateCartBar();
+  saveCart();
   document.getElementById('app').style.display='none';
   showTablePicker();
 }
@@ -310,42 +381,15 @@ async function loadImages(batchCount){
   renderMenu();
 }
 
-// ── PIN serveur ──
-// Source : config/staffcfg.serveurPin (doc lisible par le personnel seulement,
-// publié par la caisse). Transition : si staffcfg n'existe pas encore, on
-// retombe sur l'ancien config/menu.serveurPin. Le PIN reste un garde-fou
-// anti-erreur (la vraie protection = appareil enregistré, cf. requireStaff).
-// Tant que la source n'est pas connue, aucun PIN saisi ne déverrouille.
-const _pinSrc = { staff: undefined, staffExists: false };
-window._pinResolved = false;
-function resolveServeurPin(){
-  if(!menu || _pinSrc.staff === undefined) return; // attendre menu + staffcfg
-  const pin = _pinSrc.staffExists ? _pinSrc.staff : (menu.serveurPin ?? null);
-  window._serveurPin = (pin === null || pin === undefined || pin === '') ? null : String(pin);
-  window._pinResolved = true;
-  // Pas de PIN, PIN par défaut, ou déjà déverrouillé pour la session → app directe
-  if(!window._serveurPin || window._serveurPin === '0000' || sessionStorage.getItem('serveur_unlocked')==='1'){
-    unlockApp();
-  }
-}
-onSnapshot(doc(db, 'config', 'staffcfg'), snap => {
-  _pinSrc.staffExists = snap.exists() && (snap.data() || {}).serveurPin !== undefined;
-  _pinSrc.staff = _pinSrc.staffExists ? (snap.data() || {}).serveurPin : null;
-  resolveServeurPin();
-}, err => {
-  // Illisible (appareil non enregistré + protection active → écran requireStaff) :
-  // on retombe sur l'ancien emplacement pour ne pas bloquer la transition.
-  console.warn('[serveur] config/staffcfg illisible:', err && (err.code || err.message));
-  _pinSrc.staffExists = false;
-  _pinSrc.staff = null;
-  resolveServeurPin();
-});
+// Plus de PIN serveur (retiré le 19/11 : 0000 par défaut = pas de PIN, et
+// « PIN oublié ? » le contournait). La protection = appareil enregistré
+// (requireStaff ci-dessus). L'app s'ouvre dès que la carte est chargée.
+let _appStarted = false;
 
 // Load menu
 onSnapshot(doc(db, 'config', 'menu'), snap => {
   if(snap.exists()){
     menu = snap.data();
-    resolveServeurPin();
     const b = menu.branding||{};
     if(b.name) { const safe = escHtml(b.name); document.getElementById('resto-name').innerHTML = safe.replace(/(\S+)$/, '<span style="color:var(--accent)">$1</span>'); document.title = b.name + ' — Serveur'; }
     const accent = safeColor(b.accent);
@@ -358,47 +402,38 @@ onSnapshot(doc(db, 'config', 'menu'), snap => {
         logoEl.style.display = 'block';
       } else { logoEl.style.display = 'none'; }
     }
-    // Met aussi à jour le PIN screen logo (live sync)
-    const pinLogoEl = document.getElementById('pin-logo');
-    if(pinLogoEl){
-      if(logo){
-        pinLogoEl.innerHTML = '';
-        const pimg = document.createElement('img');
-        pimg.src = logo;
-        pimg.alt = b.name || '';
-        pimg.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:14px;display:block;margin:0 auto';
-        pinLogoEl.appendChild(pimg);
-      } else {
-        pinLogoEl.innerHTML = '<span id="pin-logo-default">🍽️</span>';
-      }
-    }
     // Persiste en cache pour la prochaine visite (élimine le FOUC)
     window.BrandCache?.save(b);
     renderMenu();
     if(menu.imageBatches && menu.imageBatches > 0){
       loadImages(menu.imageBatches);
     }
+    if(!_appStarted) startApp();
+    else if(document.getElementById('table-picker').style.display === 'flex') showTablePicker(); // plan de salle republié
   } else {
     document.getElementById('loading').innerHTML='<div style="text-align:center;padding:40px"><div style="font-size:48px">⚠️</div><div style="color:#888;margin-top:12px">Carte non disponible.<br>Appelez un serveur.</div></div>';
   }
 });
 
-function unlockApp(){
-  sessionStorage.setItem('serveur_unlocked','1');
-  const pin = document.getElementById('pin-screen');
-  if(pin) pin.style.display='none';
+// Ouverture de l'app au premier chargement de la carte (plus d'écran PIN)
+function startApp(){
+  _appStarted = true;
   document.getElementById('loading').style.display='none';
-  // If table already set (from URL), go to menu directly
+  // Table déjà fixée (URL) → carte directe, sinon plan de salle
   if(tableNum && tableId){
     document.getElementById('app').style.display='flex';
   } else {
-    // Show table picker
     showTablePicker();
   }
-  // Start listening to orders for notifications
-  startOrderNotifications();
 }
-window.unlockApp = unlockApp;
+
+// Permission de notification : demandée au premier toucher (geste utilisateur,
+// exigé par Safari/Firefox) puisqu'il n'y a plus de saisie de PIN.
+document.addEventListener('click', () => {
+  try {
+    if('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  } catch(_){}
+}, { once: true, capture: true });
 
 // ── Order notifications (kitchen → serveur) ──
 let knownReadyOrders = new Set();
@@ -414,11 +449,8 @@ function startOrderNotifications(){
   if(orderListenerStarted) return;
   orderListenerStarted = true;
 
-  // Audit serveur #12 : permission demandée — OK car appelée depuis unlockApp
-  // qui est lui-même déclenché par PIN OK (user gesture).
-  if('Notification' in window && Notification.permission === 'default'){
-    Notification.requestPermission();
-  }
+  // Audit serveur #12 : la permission de notification est demandée au premier
+  // toucher (listener 'click' once plus haut), plus ici (pas de geste utilisateur).
 
   // Audit serveur #4 : query Firestore strict — status='ready' uniquement.
   // Avant : onSnapshot collection complet → lecture de TOUS les orders à chaque
@@ -447,15 +479,19 @@ function startOrderNotifications(){
         if(!_firstOrderSnapshot){
           const tNum = order.tableNum || order.tableId || '?';
           showServeurNotif('🟢 Commande prête — Table '+tNum);
-          if(Notification.permission === 'granted'){
-            const n = new Notification('Commande prête !', {
-              body: 'Table '+tNum+' — à servir',
-              icon: 'icon-192.png',
-              tag: 'serveur-ready-'+id, // évite doublons
-              renotify: false
-            });
-            setTimeout(() => { try { n.close(); } catch(e){} }, 8000);
-          }
+          // try : `Notification` absent (Safari iOS hors PWA) ou constructeur
+          // interdit (Chrome Android) ne doit pas casser le traitement du snapshot.
+          try {
+            if('Notification' in window && Notification.permission === 'granted'){
+              const n = new Notification('Commande prête !', {
+                body: 'Table '+tNum+' — à servir',
+                icon: 'icon-192.png',
+                tag: 'serveur-ready-'+id, // évite doublons
+                renotify: false
+              });
+              setTimeout(() => { try { n.close(); } catch(e){} }, 8000);
+            }
+          } catch(e){ /* toast + son déjà joués */ }
         }
       }
     });
@@ -466,14 +502,19 @@ function startOrderNotifications(){
       if(!seenIds.has(id)) knownReadyOrders.delete(id);
     });
     _firstOrderSnapshot = false;
+  }, err => {
+    console.warn('[serveur] écoute « commande prête » :', err && (err.code || err.message));
   });
 }
+// Écoute « commande prête » démarrée dès le chargement (avant : après le PIN)
+startOrderNotifications();
 
 function showServeurNotif(msg){
   // Audit serveur #3 : singleton audioCtx.
   try{
     if(!_serveurAudioCtx) _serveurAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const ctx = _serveurAudioCtx;
+    if(ctx.state === 'suspended') ctx.resume().catch(()=>{});
     const o = ctx.createOscillator(); const g = ctx.createGain();
     o.connect(g); g.connect(ctx.destination);
     o.frequency.setValueAtTime(660, ctx.currentTime);
@@ -530,12 +571,12 @@ function renderMenu(){
     if(sec.name) html+=`<div class="sec-sep">${escHtml(String(sec.name).toUpperCase())}</div>`;
     sec.items.forEach(p=>{
       const inCart = cart.filter(r=>r.pid===p.id).reduce((s,r)=>s+r.qty,0);
-      const img = safeUrl((p.pdj && menu.platDuJour && menu.platDuJour.imgUrl) ? menu.platDuJour.imgUrl : (p.imgUrl || productImages[p.id] || null));
+      const img = safeUrl(p.imgUrl || productImages[p.id] || null);
       // Audit serveur #1 : XSS — escHtml partout sur les contenus produits dérivés de Firebase.
       // Avant : ${p.name} brut → admin malicieux qui tape "<scr"+"ipt>alert(1)" en nom
       // de produit exécutait du JS sur la tablette serveur. Idem alt="${p.name}" (XSS via
       // <img onerror=...> si name = '"><img onerror=...>').
-      const safeName = escHtml(p.pdj && menu.platDuJour && menu.platDuJour.nom ? menu.platDuJour.nom : p.name);
+      const safeName = escHtml(p.name);
       const safeSub = escHtml(p.sub || '');
       const imgHtml = img
         ? `<div class="prod-img"><img src="${escHtml(img)}" alt="${safeName}" loading="lazy"></div>`
@@ -846,11 +887,39 @@ async function sendOrder(){
   const isRetry = !!_pendingOrderRef;
   if(!_pendingOrderRef) _pendingOrderRef = doc(collection(db,'orders'));
   const ref = _pendingOrderRef;
+  // Même id = même commande (le ref peut être recréé depuis le panier sauvegardé)
+  const sameRef = (r) => !!r && r.id === ref.id;
+  saveCart(); // id en attente persisté avec le panier de la table
+
+  // Contenu figé AVANT toute attente : la table et le panier envoyés sont ceux
+  // du clic, même si la serveuse change de table pendant un envoi lent.
+  const sendTableId = tableId;
+  const sendTableNum = tableNum;
+  const orderData = {
+    tableId: String(sendTableId),
+    tableNum: String(sendTableNum),
+    items: cart.map(r=>({
+      pid: r.pid,
+      name: r.name,
+      price: Number(r.price) || 0,
+      qty: Number(r.qty) || 0,
+      tva: Number(r.tva) || 10,
+      cuisson: r.cuisson || null,
+      garniture: r.garniture || null,
+      cat: r.cat || null,
+      variant: r.variant || null,
+      sirop: !!r.sirop
+    })),
+    note: String(document.getElementById('cp-note')?.value||'').slice(0, 500),
+    status: 'pending',
+    // Audit serveur #7 : source='serveur' (la cuisine distingue serveur / client QR)
+    source: 'serveur'
+  };
 
   // Réseau lent / hors ligne : le SDK garde l'écriture en file et la rejouera.
   // Après 10 s on rend la main : réessayer réécrit le même document.
   const timeoutId = setTimeout(()=>{
-    if(_pendingOrderRef !== ref) return;
+    if(!sameRef(_pendingOrderRef)) return;
     _orderInFlight = false;
     btn.disabled = !cart.length;
     btn.textContent = '✅ Réessayer (sans doublon)';
@@ -859,7 +928,6 @@ async function sendOrder(){
   }, 10000);
 
   try{
-    const note = String(document.getElementById('cp-note')?.value||'').slice(0, 500);
     // Nouvel essai : si le 1er envoi est en fait arrivé, on ne le réécrit pas
     // (la cuisine a pu le faire avancer entre-temps).
     let already = false;
@@ -867,30 +935,23 @@ async function sendOrder(){
       try { already = (await getDocFromServer(ref)).exists(); } catch(_) { /* hors ligne → setDoc mis en file */ }
     }
     if(!already){
-      await setDoc(ref, {
-        tableId: String(tableId),
-        tableNum: String(tableNum),
-        items: cart.map(r=>({
-          pid: r.pid,
-          name: r.name,
-          price: Number(r.price) || 0,
-          qty: Number(r.qty) || 0,
-          tva: Number(r.tva) || 10,
-          cuisson: r.cuisson || null,
-          garniture: r.garniture || null,
-          cat: r.cat || null,
-          variant: r.variant || null,
-          sirop: !!r.sirop
-        })),
-        note,
-        status: 'pending',
-        // Audit serveur #7 : source='serveur' (la cuisine distingue serveur / client QR)
-        source: 'serveur',
-        sentAt: serverTimestamp()
-      });
+      await setDoc(ref, { ...orderData, sentAt: serverTimestamp() });
     }
     clearTimeout(timeoutId);
-    if(_pendingOrderRef !== ref){ // panier modifié entre-temps : le 1er envoi est quand même arrivé
+    if(tableId !== sendTableId){
+      // Table changée pendant l'envoi (après reprise de main) : on vide le panier
+      // de la table d'origine seulement s'il n'a pas été modifié depuis.
+      const e = cartsByTable[sendTableId];
+      if(e && e.pendingId === ref.id){
+        delete cartsByTable[sendTableId];
+        persistCarts();
+        showServeurNotif('✓ Commande table ' + sendTableNum + ' bien reçue');
+      } else {
+        showServeurNotif('✓ Commande précédente table ' + sendTableNum + ' bien reçue — vérifie son panier');
+      }
+      return;
+    }
+    if(!sameRef(_pendingOrderRef)){ // panier modifié entre-temps : le 1er envoi est quand même arrivé
       showServeurNotif('✓ Commande précédente bien reçue — vérifie le panier avant de renvoyer');
       return;
     }
@@ -900,6 +961,7 @@ async function sendOrder(){
     // (ex: "sans oignon" écrit pour la table 5 ne doit pas rester pour la 12)
     const noteEl = document.getElementById('cp-note');
     if(noteEl) noteEl.value = '';
+    saveCart(); // panier vide → entrée de la table supprimée (et persistée)
     const errEl = document.getElementById('cp-error');
     if(errEl) errEl.style.display = 'none';
     updateCartBar();
@@ -912,7 +974,7 @@ async function sendOrder(){
     errEl.style.display='block';
     console.error('Firebase error:',e);
   } finally {
-    if(_pendingOrderRef === ref || _pendingOrderRef === null){
+    if(!_pendingOrderRef || sameRef(_pendingOrderRef)){
       _orderInFlight = false;
       btn.disabled = !cart.length;
       btn.textContent = '✅ Confirmer la commande';
@@ -1011,81 +1073,9 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 .opt-chip:active{transform:scale(.95)}
 .opt-chip.sel{border-color:var(--accent);background:rgba(245,166,35,.12);color:var(--accent)}
 
-/* PIN lock screen */
-#pin-screen{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:0}
-.pin-logo{font-size:48px;margin-bottom:8px}
-.pin-title{font-family:'Bebas Neue',sans-serif;font-size:24px;letter-spacing:2px;margin-bottom:4px}
-.pin-title span{color:var(--accent)}
-.pin-sub{font-size:12px;color:var(--muted);margin-bottom:24px}
-.pin-dots{display:flex;gap:12px;margin-bottom:24px}
-.pin-dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);transition:all .15s}
-.pin-dot.filled{background:var(--accent);border-color:var(--accent)}
-.pin-numpad{display:grid;grid-template-columns:repeat(3,72px);gap:10px}
-.pin-key{height:58px;border-radius:14px;background:var(--card);border:1px solid var(--border);color:var(--text);font-size:22px;font-weight:600;cursor:pointer;transition:all .1s;display:flex;align-items:center;justify-content:center}
-.pin-key:active{transform:scale(.92);background:var(--accent);color:#000}
-.pin-key.del{background:rgba(232,64,64,.08);color:var(--red);border-color:rgba(232,64,64,.15);font-size:18px}
-.pin-key.zero{grid-column:span 2}
-.pin-error{font-size:12px;color:var(--red);margin-top:12px;height:16px;opacity:0;transition:opacity .2s}
-.pin-forgot{margin-top:18px;font-size:12px;color:var(--muted);text-decoration:underline;background:none;border:none;cursor:pointer;padding:6px 12px;font-family:inherit}
-.pin-forgot:active{color:var(--accent)}
-@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
-.shake{animation:shake .4s ease}
 </style>
 </head>
 <body>
-
-<!-- PIN LOCK SCREEN -->
-<div id="pin-screen">
-  <div class="pin-logo" id="pin-logo"></div>
-  <script>
-  /* Décide ce qu'on affiche dans #pin-logo AVANT le first paint :
-     - Logo custom si en cache, sinon emoji 🍽️ par défaut. */
-  (function(){
-    var el = document.getElementById('pin-logo');
-    if (!el) return;
-    var pre = window.__brandPreBoot || {};
-    if (pre.logoUrl) {
-      var img = document.createElement('img');
-      img.src = pre.logoUrl;
-      img.alt = pre.name || '';
-      img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:14px;display:block;margin:0 auto';
-      el.appendChild(img);
-    } else {
-      el.textContent = '🍽️';
-    }
-  })();
-  </script>
-  <div class="pin-title">Espace <span>Serveur</span></div>
-  <div class="pin-sub">Entrez le code d'accès</div>
-  <div class="pin-dots" id="pin-dots">
-    <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
-  </div>
-  <div class="pin-numpad">
-    <button class="pin-key" onclick="pinPress('1')">1</button>
-    <button class="pin-key" onclick="pinPress('2')">2</button>
-    <button class="pin-key" onclick="pinPress('3')">3</button>
-    <button class="pin-key" onclick="pinPress('4')">4</button>
-    <button class="pin-key" onclick="pinPress('5')">5</button>
-    <button class="pin-key" onclick="pinPress('6')">6</button>
-    <button class="pin-key" onclick="pinPress('7')">7</button>
-    <button class="pin-key" onclick="pinPress('8')">8</button>
-    <button class="pin-key" onclick="pinPress('9')">9</button>
-    <button class="pin-key zero" onclick="pinPress('0')">0</button>
-    <button class="pin-key del" onclick="pinPress('del')">⌫</button>
-  </div>
-  <div class="pin-error" id="pin-error">Code incorrect</div>
-  <button class="pin-forgot" onclick="forgotPin()">PIN oublié ?</button>
-</div>
-
-<script>
-function forgotPin(){
-  if(!confirm('Réinitialiser l\'accès serveur ?\n\nLe code PIN sera ignoré pour cette session.\nPour le retirer définitivement, va dans Caisse → Admin → Code PIN serveur et mets 0000, puis Publier.')) return;
-  try { sessionStorage.setItem('serveur_unlocked','1'); } catch(e){}
-  if(window.unlockApp) window.unlockApp();
-  else window.location.reload();
-}
-window.forgotPin = forgotPin;
-</script>
 
 <div id="app-header">
   <a href="index.html" style="text-decoration:none">
@@ -1159,65 +1149,6 @@ window.forgotPin = forgotPin;
   <div class="confirm-title">Commande envoyée !</div>
   <div class="confirm-sub">Commande transmise à la caisse et la cuisine.<br>Table prête à servir.</div>
 </div>
-
-<!-- PIN logic -->
-<script>
-let pinEntry = '';
-
-function pinPress(v){
-  if(v==='del'){
-    pinEntry=pinEntry.slice(0,-1);
-  } else {
-    if(pinEntry.length>=4) return;
-    pinEntry+=v;
-  }
-  updatePinDots();
-  if(pinEntry.length===4) checkPin();
-}
-
-function updatePinDots(){
-  const dots=document.querySelectorAll('#pin-dots .pin-dot');
-  dots.forEach((d,i)=>d.classList.toggle('filled',i<pinEntry.length));
-}
-
-function checkPin(){
-  // PIN pas encore chargé (config/staffcfg / config/menu) : aucun code ne
-  // déverrouille — avant, n'importe quel code passait pendant le chargement.
-  if(!window._pinResolved){
-    const errEl = document.getElementById('pin-error');
-    errEl.textContent = 'Chargement… réessaie dans un instant';
-    errEl.style.opacity = '1';
-    setTimeout(()=>{ errEl.style.opacity='0'; errEl.textContent='Code incorrect'; pinEntry=''; updatePinDots(); }, 1200);
-    return;
-  }
-  const correctPin = window._serveurPin;
-  if(!correctPin || correctPin==='0000' || pinEntry===correctPin){
-    // Success
-    if(window.unlockApp) window.unlockApp();
-  } else {
-    // Wrong
-    const dots=document.getElementById('pin-dots');
-    dots.classList.add('shake');
-    document.getElementById('pin-error').style.opacity='1';
-    setTimeout(()=>{
-      dots.classList.remove('shake');
-      document.getElementById('pin-error').style.opacity='0';
-      pinEntry='';
-      updatePinDots();
-    },900);
-  }
-}
-
-// Keyboard support
-document.addEventListener('keydown', e=>{
-  const pinVisible = document.getElementById('pin-screen')?.style.display!=='none';
-  if(!pinVisible) return;
-  if(e.key>='0'&&e.key<='9') pinPress(e.key);
-  else if(e.key==='Backspace') pinPress('del');
-});
-
-window.pinPress = pinPress;
-</script>
 
 </body>
 </html>

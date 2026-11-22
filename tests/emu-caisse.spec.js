@@ -137,7 +137,7 @@ test('annulation d\'une vente → doc cancel séparé, vente d\'origine intacte'
   expect(local.cancelled).toBe(true);
 });
 
-test('enregistrement des appareils puis protection : inconnu bloqué, client QR OK', async ({ page, browser }) => {
+test('enregistrement des appareils puis protection : inconnu bloqué, client QR en lecture seule', async ({ page, browser }) => {
   await openCaisse(page);
   // La caisse s'enregistre, publie le menu et active la protection
   await page.evaluate(async (code) => { await window.__staff.ready(); await window.__staff.enroll(code, 'Caisse', 'caisse'); }, CODE);
@@ -146,7 +146,7 @@ test('enregistrement des appareils puis protection : inconnu bloqué, client QR 
   await expect.poll(async () => !!(await adminGet('config/menu')), { timeout: 15_000 }).toBe(true);
   const menu = await adminGet('config/menu');
   expect(menu.fields.serveurPin).toBeUndefined();               // PIN plus dans le doc public
-  await expect.poll(async () => !!(await adminGet('config/staffcfg')), { timeout: 15_000 }).toBe(true);
+  // v84 : plus de PIN serveur → plus de config/staffcfg publié
   await page.evaluate(() => window.__staff.setEnforce(true));
 
   // Un autre appareil (contexte vierge) sur la cuisine → écran bloquant
@@ -171,7 +171,7 @@ test('enregistrement des appareils puis protection : inconnu bloqué, client QR 
   await expect(p2.getByText('Appareil non enregistré')).toHaveCount(0, { timeout: 20_000 });
   await ctx2.close();
 
-  // Client QR (non enregistré) : peut toujours commander
+  // Client QR (non enregistré) : voit la carte, ne peut plus commander (v84)
   const ctx3 = await browser.newContext({ bypassCSP: true, serviceWorkers: 'block' });
   const p3 = await ctx3.newPage();
   await p3.goto('client.html?table=1&emu', { waitUntil: 'domcontentloaded' });
@@ -184,11 +184,44 @@ test('enregistrement des appareils puis protection : inconnu bloqué, client QR 
       return 'ok';
     } catch (e) { return e.code; }
   });
-  expect(created).toBe('ok');
+  expect(created).toBe('permission-denied');
+  await expect(p3.locator('button', { hasText: /Ajouter|Envoyer|Panier|Commander/ })).toHaveCount(0);
+  expect(await p3.evaluate(() => typeof window.sendOrder)).toBe('undefined');
   await ctx3.close();
 });
 
-for (const p of ['serveur.html', 'cuisine.html', 'client.html?table=1', 'ticket.html?id=ABCDEFGHJK', 'index.html', 'qrcodes.html', 'setup-images.html']) {
+test('v84 : fonctions inutiles retirées de la caisse, réglages publiés seuls', async ({ page }) => {
+  await adminSet('security/policy', { enforce: false });   // test d'interface, indépendant de la protection
+  const errors = await openCaisse(page);
+  const r = await page.evaluate(() => ({
+    publier: [...document.querySelectorAll('button')].some(b => /Publier/.test(b.textContent)),
+    exportPanel: !!document.getElementById('panel-export'),
+    split: !!document.getElementById('split-section'),
+    photoIA: !!document.getElementById('pm-ai-btn'),
+    allergenesIA: !!document.getElementById('btn-suggest-allergens'),
+    pdjIA: !!document.getElementById('pdj-btn-desc') || !!document.getElementById('pdj-btn-img'),
+    mail: !!document.getElementById('s-mail-worker-url'),
+    pinServeur: !!document.getElementById('s-serveur-pin'),
+    tva: !!document.getElementById('s-tva'),
+    stockModes: [...document.querySelectorAll('input[name=pm-stock-mode]')].map(i => i.value),
+    fns: ['clearHistory', 'resetToDefault', 'exportData', 'sendReceiptByEmail', 'sendReceiptBySMS', 'suggestAllergensViaIA', 'changeSplit']
+      .filter(f => typeof window[f] === 'function'),
+  }));
+  expect(r).toEqual({ publier: false, exportPanel: false, split: false, photoIA: false, allergenesIA: false, pdjIA: false,
+    mail: false, pinServeur: false, tva: false, stockModes: ['unlimited', 'out'], fns: [] });
+  // Un réglage modifié part tout seul (plus de bouton Publier) : saveSettings programme la publication
+  const scheduled = await page.evaluate(() => { let n = 0; const o = window.scheduleAutoPublish;
+    window.scheduleAutoPublish = () => { n++; }; try { saveSettings(); } finally { window.scheduleAutoPublish = o; } return n; });
+  expect(scheduled).toBe(1);
+  // Fiche produit : « Épuisé » / « Disponible » seulement
+  const stock = await page.evaluate(() => { openEditProduct('p7'); document.querySelector('input[name=pm-stock-mode][value=out]').checked = true;
+    return saveProduct().then(() => products.find(p => p.id === 'p7').stock); });
+  expect(stock).toBe(0);
+  await page.evaluate(() => { const p = products.find(x => x.id === 'p7'); p.stock = -1; saveAll(); });
+  expect(errors.filter(e => !/\[SW\]|REST poll|permission|403/i.test(e))).toEqual([]);
+});
+
+for (const p of ['serveur.html', 'cuisine.html', 'client.html?table=1', 'client.html', 'ticket.html?id=ABCDEFGHJK', 'index.html', 'qrcodes.html']) {
   test(`chargement sans erreur JS : ${p}`, async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.goto(p + (p.includes('?') ? '&' : '?') + 'emu', { waitUntil: 'domcontentloaded' });
@@ -249,4 +282,81 @@ test('cartes 2026 appliquées une fois : prix, nouveautés, retraits, cafés, or
   const day = await page.evaluate(() => serviceDayKey());
   const last = await page.evaluate((d) => JSON.parse(localStorage.getItem('sales_' + d)).filter(s => !s._fromCloud).pop(), day);
   expect([last.total, last.payType, last.items[0].name]).toEqual([1.9, 'cash', 'Café']);
+});
+
+// ── Test à blanc v84 : le circuit réel du resto (serveuse → cuisine → serveuse) ──
+const decode = (v) => {
+  if (!v || typeof v !== 'object') return v;
+  if ('stringValue' in v) return v.stringValue;
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('doubleValue' in v) return v.doubleValue;
+  if ('nullValue' in v) return null;
+  if ('timestampValue' in v) return v.timestampValue;
+  if ('arrayValue' in v) return (v.arrayValue.values || []).map(decode);
+  if ('mapValue' in v) return Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, decode(x)]));
+  return v;
+};
+
+async function openEnrolled(browser, url) {
+  const ctx = await browser.newContext({ bypassCSP: true, serviceWorkers: 'block' });
+  const pg = await ctx.newPage();
+  const errors = collectConsoleErrors(pg);
+  pg.on('dialog', (d) => d.accept());
+  await pg.goto(url, { waitUntil: 'domcontentloaded' });
+  await pg.waitForFunction(() => !!window.__staff, null, { timeout: 45_000 });
+  await pg.evaluate(async (code) => { await window.__staff.ready(); await window.__staff.enroll(code, 'Test', 'test'); }, CODE);
+  await pg.reload({ waitUntil: 'domcontentloaded' });
+  await pg.waitForFunction(() => !!(window.__staff && window.__staff.status().isStaff), null, { timeout: 45_000 });
+  return { ctx, pg, errors };
+}
+
+test('test à blanc : serveuse → cuisine → « prête » ; panier gardé par table ; annulation', async ({ browser }) => {
+  await adminSet('security/policy', { enforce: true });    // conditions réelles : protection active, appareils enregistrés
+  const m = decode({ mapValue: { fields: (await adminGet('config/menu')).fields } });
+  const noCuisine = new Set((m.cats || []).filter((c) => c.noCuisine).map((c) => c.id));
+  const plat = (m.products || []).find((p) => p.active !== false && !noCuisine.has(p.cat) && !p.hasCuisson && !p.hasGarniture
+    && !p.hasSirop && !(Array.isArray(p.variants) ? p.variants.length : p.variants));
+  expect(plat, 'un plat sans option pour la cuisine').toBeTruthy();
+
+  // Serveuse (téléphone enregistré) à la table 5
+  const S = await openEnrolled(browser, 'serveur.html?table=5&id=t5&emu');
+  await S.pg.waitForFunction(() => getComputedStyle(document.getElementById('app')).display !== 'none', null, { timeout: 30_000 });
+  await S.pg.evaluate((pid) => window.addProduct(pid), plat.id);
+  await expect(S.pg.locator('#cart-count')).toContainText('1');
+  // Passer à la table 6 puis revenir : le panier de la 5 n'est pas perdu
+  await S.pg.evaluate(() => window.pickTable('t6', '6'));
+  await expect(S.pg.locator('#cart-count')).toContainText('0');
+  await S.pg.evaluate(() => window.pickTable('t5', '5'));
+  await expect(S.pg.locator('#cart-count')).toContainText('1');
+  await S.pg.evaluate(() => window.sendOrder());
+
+  let order;
+  await expect.poll(async () => {
+    const docs = (await adminList('orders')).map((d) => ({ id: d.name.split('/').pop(), ...decode({ mapValue: { fields: d.fields } }) }));
+    order = docs.find((o) => o.tableId === 't5' && o.source === 'serveur');
+    return order && order.status;
+  }, { timeout: 20_000 }).toBe('pending');
+  expect(order.items.map((i) => i.pid)).toEqual([plat.id]);
+  await expect(S.pg.locator('#cart-count')).toContainText('0');   // panier vidé après envoi réussi
+
+  // Cuisine (tablette enregistrée) : la commande arrive, on la fait avancer
+  const K = await openEnrolled(browser, 'cuisine.html?emu');
+  const btn = (act) => K.pg.locator(`button[data-act="${act}"][data-id="${order.id}"]`);
+  await expect(btn('preparing')).toBeVisible({ timeout: 30_000 });
+  await btn('preparing').click();
+  await expect.poll(async () => decode((await adminGet('orders/' + order.id)).fields.status), { timeout: 15_000 }).toBe('preparing');
+  await btn('ready').click();
+  await expect.poll(async () => decode((await adminGet('orders/' + order.id)).fields.status), { timeout: 15_000 }).toBe('ready');
+  // La serveuse est prévenue
+  await expect(S.pg.getByText(/prête/i).first()).toBeVisible({ timeout: 20_000 });
+  // « Annuler » (anciennement ✕) : libellé explicite, commande annulée
+  await expect(btn('clear')).toHaveText(/Annuler/);
+  await btn('clear').click();
+  await expect.poll(async () => decode((await adminGet('orders/' + order.id)).fields.status), { timeout: 15_000 }).toBe('cancelled');
+
+  const noise = (e) => /\[SW\]|REST poll|permission|403|Notification/i.test(e);
+  expect(S.errors.filter((e) => !noise(e))).toEqual([]);
+  expect(K.errors.filter((e) => !noise(e))).toEqual([]);
+  await S.ctx.close(); await K.ctx.close();
 });

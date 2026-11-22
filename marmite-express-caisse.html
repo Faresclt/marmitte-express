@@ -125,7 +125,6 @@ window.initFirebaseListeners = function(){
       }
     }
     if(typeof renderSalle === 'function') renderSalle();
-    if(typeof renderSalleRegister === 'function') renderSalleRegister();
     showFirebaseStatus('connected');
   });
 
@@ -260,18 +259,12 @@ window.initFirebaseListeners = function(){
       const httpsOnly = (u) => (typeof u === 'string' && /^https:\/\/[^\s"'<>]+$/i.test(u)) ? u : '';
       if(httpsOnly(s.googleReviewUrl)) settings.googleReviewUrl = httpsOnly(s.googleReviewUrl);
       if(httpsOnly(s.tripadvisorUrl))  settings.tripadvisorUrl  = httpsOnly(s.tripadvisorUrl);
-      // Le worker mail reçoit e-mails clients + tickets : n'accepter qu'un
-      // worker Cloudflare (sinon un attaquant redirige tout vers son serveur).
-      if(typeof s.mailWorkerUrl === 'string' && /^https:\/\/[a-z0-9.-]+\.(workers\.dev|pages\.dev)(\/[^\s"'<>]*)?$/i.test(s.mailWorkerUrl)) settings.mailWorkerUrl = s.mailWorkerUrl;
-      if(s.mailSender)      settings.mailSender      = String(s.mailSender).slice(0, 80);
       // Toggles d'affichage cross-device (booléens : tester le type, pas la valeur)
-      if(typeof s.showStockBadge === 'boolean') settings.showStockBadge = s.showStockBadge;
       if(typeof s.pdjPromptDaily === 'boolean') settings.pdjPromptDaily = s.pdjPromptDaily;
       if(s.legal && typeof s.legal === 'object'){
         settings.legal = { ...(settings.legal||{}), ...s.legal };
       }
       LS.set('settings', settings);
-      if(typeof updateMailWorkerStatus === 'function') updateMailWorkerStatus();
       if(typeof updateLegalStatus === 'function') updateLegalStatus();
       // Applique les toggles d'affichage reçus d'un autre appareil
       if(typeof window.renderMenu === 'function') { try { window.renderMenu(); } catch(e){} }
@@ -561,7 +554,6 @@ document.addEventListener('DOMContentLoaded', () => {
       <div id="pos-clock" style="margin-left:auto"><div class="t">--:--</div><div class="d">--</div></div>
       <button class="hbtn hbtn-table" onclick="openSalle()" style="margin-left:8px">🗺️ Salle</button>
       <button class="hbtn" onclick="quickShowCA()" style="margin-left:6px;background:rgba(34,201,122,.12);border:1px solid rgba(34,201,122,.3);color:var(--green)" title="Chiffre d'affaires du jour">💰 CA</button>
-      <button class="hbtn" onclick="publishMenu()" style="margin-left:6px;background:rgba(155,107,255,.12);border:1px solid rgba(155,107,255,.3);color:#9b6bff" title="Publier la carte sur Firebase pour les serveurs">☁️ Publier</button>
       <div id="fb-status" style="display:none;align-items:center;gap:5px;height:30px;padding:0 10px;border-radius:20px;border:1px solid;font-size:10px;font-weight:700;margin-left:4px;flex-shrink:0">
         <div class="fs-dot" style="width:7px;height:7px;border-radius:50%;background:var(--muted)"></div>
         <span class="fs-txt">Firebase</span>
@@ -620,7 +612,6 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="aside-sep"></div>
       <div class="aside-section">Réglages</div>
       <button class="aside-btn" onclick="showPanel('settings',this)"><span class="ai">⚙️</span><span>Paramètres</span></button>
-      <button class="aside-btn" onclick="showPanel('export',this)"><span class="ai">💾</span><span>Export / Import</span></button>
       <div class="aside-sep"></div>
       <div class="aside-section">Journée</div>
       <button class="aside-btn" onclick="showPanel('historique',this);renderHistorique()"><span class="ai">📊</span><span>Historique</span></button>
@@ -705,16 +696,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="apanel-title">⚙️ Paramètres</div>
         <div class="apanel-sub">Options générales de la caisse</div>
         <div class="toggle-row"><span class="toggle-lbl">Afficher les photos sur les cartes</span><label class="toggle"><input type="checkbox" id="s-showimg" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
-        <div class="toggle-row"><span class="toggle-lbl">Mode table activé par défaut</span><label class="toggle"><input type="checkbox" id="s-tablemode" onchange="saveSettings()"><div class="toggle-track"></div></label></div>
         <div class="toggle-row"><span class="toggle-lbl">Afficher les descriptions courtes</span><label class="toggle"><input type="checkbox" id="s-showsub" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
-        <div class="toggle-row"><span class="toggle-lbl">Afficher le stock restant sur les cartes <span style="font-size:10px;color:var(--muted)">(le badge ÉPUISÉ reste toujours visible)</span></span><label class="toggle"><input type="checkbox" id="s-showstock" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
         <div class="toggle-row"><span class="toggle-lbl">Popup "Plat du jour" à la première ouverture du jour</span><label class="toggle"><input type="checkbox" id="s-pdjprompt" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
-        <div class="form-group" style="margin-top:8px"><label class="form-label">Devise</label>
-          <select class="form-input" id="s-currency" onchange="saveSettings()"><option value="€">€ Euro</option><option value="$">$ Dollar</option><option value="£">£ Livre</option><option value="CHF">CHF Franc suisse</option><option value="XPF">XPF Franc CFP</option></select>
-        </div>
-        <div class="form-group"><label class="form-label">Taux de TVA affiché (%)</label>
-          <input class="form-input" type="number" id="s-tva" value="5.5" placeholder="5.5" oninput="saveSettings()" style="max-width:120px">
-        </div>
 
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
           <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🥩 Options produits</div>
@@ -730,7 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
           <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">⭐ Avis clients</div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Les liens apparaîtront en bas du ticket de caisse (imprimé / SMS / mail) pour inciter à laisser un avis.</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Les liens apparaîtront en bas du ticket de caisse (imprimé / QR) pour inciter à laisser un avis.</div>
           <div class="form-group">
             <label class="form-label">Lien Avis Google</label>
             <input class="form-input" id="s-google-review" placeholder="https://g.page/r/votre-resto/review" oninput="saveSettings()">
@@ -743,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
           <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🏢 Informations légales (mentions obligatoires)</div>
           <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
-            Ces informations apparaîtront sur tous les tickets (imprimés, email, QR).
+            Ces informations apparaîtront sur tous les tickets (imprimés et QR).
             <strong>Obligatoires en France</strong> selon l'arrêté du 27 mars 1987 et l'article 290 quater du CGI.
           </div>
           <div class="form-row">
@@ -756,29 +739,6 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="form-group"><label class="form-label">Code APE/NAF</label><input class="form-input" id="s-legal-ape" placeholder="5610A" oninput="saveSettings()"></div>
           </div>
           <div id="legal-status" style="font-size:12px;font-weight:600;margin-top:6px"></div>
-        </div>
-        <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">📧 Envoi des tickets par email</div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
-            <strong style="color:var(--text)">9000 emails/mois gratuits</strong> via Brevo + Cloudflare Worker.
-            Setup unique ~15 min : créez un compte gratuit sur <a href="https://www.brevo.com" target="_blank" style="color:var(--accent);font-weight:700">Brevo</a>
-            + un compte <a href="https://cloudflare.com" target="_blank" style="color:var(--accent);font-weight:700">Cloudflare</a> (zéro CB), déployez le worker.
-            <a href="#" onclick="showEmailHelp();return false" style="color:var(--accent);font-weight:700">📖 Guide complet</a>
-          </div>
-          <div class="form-group"><label class="form-label">URL du Worker email</label><input class="form-input" id="s-mail-worker-url" placeholder="https://caisse-mailer.username.workers.dev" oninput="saveSettings()"></div>
-          <div class="form-group"><label class="form-label">Email expéditeur (doit être vérifié sur Brevo)</label><input class="form-input" id="s-mail-sender" type="email" placeholder="contact@votre-resto.fr" oninput="saveSettings()"></div>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <input class="form-input" id="s-mail-test" type="email" placeholder="votre@email.fr (test)" style="max-width:240px">
-            <button onclick="testMailWorker()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(74,158,255,.12);color:var(--blue);border:1px solid rgba(74,158,255,.3);font-weight:700;font-size:13px">✉️ Tester l'envoi</button>
-            <div id="mail-worker-status" style="font-size:12px;font-weight:600"></div>
-          </div>
-        </div>
-        <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🤖 Génération IA</div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Photos et descriptions du Plat du Jour générées via <strong style="color:#22c97a">Pollinations.ai</strong> (gratuit, illimité, aucune clé requise).</div>
-          <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:rgba(34,201,122,.08);border:1px solid rgba(34,201,122,.25);border-radius:8px;font-size:12px;color:#22c97a;font-weight:600">
-            <span style="font-size:16px">✓</span> IA active — aucune configuration requise
-          </div>
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
           <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🔒 Code PIN de la caisse</div>
@@ -796,18 +756,6 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div id="pin-msg" style="font-size:12px;margin-top:8px;height:16px"></div>
         </div>
-        <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
-          <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🍽️ Code PIN serveur</div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Protège l'accès à l'app serveur — partagez avec vos serveurs. Publié via Firebase.</div>
-          <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-            <div class="form-group" style="margin-bottom:0">
-              <label class="form-label">Code serveur (4 chiffres)</label>
-              <input class="form-input" type="text" id="s-serveur-pin" maxlength="4" pattern="[0-9]*" inputmode="numeric" placeholder="0000" style="max-width:120px;letter-spacing:6px;font-size:20px;text-align:center">
-            </div>
-            <button onclick="saveServeurPin()" style="height:44px;padding:0 18px;border-radius:var(--radius-sm);background:rgba(74,158,255,.1);color:var(--blue);border:1px solid rgba(74,158,255,.2);font-weight:700;font-size:13px">✓ Enregistrer</button>
-          </div>
-          <div id="serveur-pin-msg" style="font-size:12px;margin-top:8px;height:16px"></div>
-        </div>
         <!-- Sécurité v5 : appareils du resto enregistrés -->
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
           <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px;margin-bottom:4px">🔒 Sécurité des appareils</div>
@@ -822,29 +770,6 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
 
-      <!-- EXPORT -->
-      <div class="admin-panel" id="panel-export">
-        <div class="apanel-title">💾 Export / Import / Backup</div>
-        <div class="apanel-sub">Sauvegardez ou restaurez toute votre configuration</div>
-        <div style="display:flex;flex-direction:column;gap:10px;max-width:460px">
-          <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Local (fichier)</div>
-          <button onclick="exportData()" style="height:48px;border-radius:var(--radius);background:rgba(74,158,255,.12);color:var(--blue);border:1px solid rgba(74,158,255,.25);font-weight:700;font-size:14px">⬇️ Exporter la configuration (.json)</button>
-          <label style="height:48px;border-radius:var(--radius);background:rgba(34,201,122,.1);color:var(--green);border:1px solid rgba(34,201,122,.2);font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative">
-            ⬆️ Importer une configuration
-            <input type="file" accept=".json" onchange="importData(event)" style="position:absolute;opacity:0;inset:0;cursor:pointer">
-          </label>
-          
-          <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-top:16px;margin-bottom:4px">☁️ Firebase (cloud)</div>
-          <button onclick="backupToFirebase()" style="height:48px;border-radius:var(--radius);background:rgba(155,107,255,.12);color:var(--purple);border:1px solid rgba(155,107,255,.25);font-weight:700;font-size:14px">☁️ Sauvegarder vers Firebase</button>
-          <button onclick="restoreFromFirebase()" style="height:48px;border-radius:var(--radius);background:rgba(155,107,255,.08);color:var(--purple);border:1px solid rgba(155,107,255,.15);font-weight:700;font-size:13px">⬇️ Restaurer depuis Firebase</button>
-          <div id="backup-status" style="font-size:12px;color:var(--muted);min-height:20px"></div>
-          <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px">💡 Le backup cloud sauvegarde : produits, catégories, paramètres, apparence, historique des ventes. Si tu changes de navigateur ou d'appareil, tu peux tout restaurer en un clic.</div>
-          
-          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-            <button onclick="if(confirm('Remettre tous les produits par défaut ?')){resetToDefault();}" style="height:48px;width:100%;border-radius:var(--radius);background:rgba(232,64,64,.08);color:var(--red);border:1px solid rgba(232,64,64,.15);font-weight:700;font-size:13px">⚠️ Remettre les données par défaut</button>
-          </div>
-        </div>
-      </div>
 
       <!-- HISTORIQUE -->
       <div class="admin-panel" id="panel-historique">
@@ -856,7 +781,6 @@ document.addEventListener('DOMContentLoaded', () => {
           <button onclick="openCashFundModal()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(245,166,35,.12);color:var(--accent);border:1px solid rgba(245,166,35,.3);font-weight:700;font-size:12px">💰 Fond de caisse</button>
           <button onclick="closeRegisterZ()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(34,201,122,.12);color:var(--green);border:1px solid rgba(34,201,122,.3);font-weight:700;font-size:12px">📋 Clôture Z du jour</button>
           <button onclick="exportHistory()" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(74,158,255,.1);color:var(--blue);border:1px solid rgba(74,158,255,.2);font-weight:700;font-size:12px">⬇️ Exporter CSV</button>
-          <button onclick="if(confirm('Effacer tout l\'historique du jour ?\\n\\n⚠ Action sensible — PIN admin requis ensuite.\\nLes données sont archivées en LS (récupérables via DevTools sous sales_cleared_*).')){clearHistory();renderHistorique();}" style="height:40px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(232,64,64,.08);color:var(--red);border:1px solid rgba(232,64,64,.15);font-weight:700;font-size:12px;margin-left:auto">🗑️ Effacer</button>
         </div>
       </div>
 
@@ -964,31 +888,6 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     </div>
 
-    <!-- Zone split (diviser l'addition) — info uniquement -->
-    <div id="split-section">
-      <div class="split-row">
-        <span class="split-label">✂️ Diviser par :</span>
-        <div class="split-ctrl">
-          <button class="sc-btn" onclick="changeSplit(-1)" aria-label="Diminuer le nombre de parts">−</button>
-          <span class="sc-val" id="split-val">1</span>
-          <button class="sc-btn" onclick="changeSplit(1)" aria-label="Augmenter le nombre de parts">+</button>
-        </div>
-      </div>
-      <div class="split-result" id="split-result" style="display:none">
-        <div class="sr-item">
-          <div class="sr-lbl">PAR PERSONNE</div>
-          <div class="sr-val" id="split-per-person">0,00€</div>
-        </div>
-        <div class="sr-item">
-          <div class="sr-lbl">TOTAL</div>
-          <div class="sr-val" id="split-total-ref" style="color:var(--muted)">0,00€</div>
-        </div>
-      </div>
-      <!-- Fix #5 : disclaimer pour clarifier que c'est un calcul d'info, pas un split réel -->
-      <div id="split-info-note" style="display:none;font-size:10px;color:var(--muted);text-align:center;margin-top:6px;line-height:1.4;padding:0 8px">
-        ℹ️ Info de calcul uniquement — le débit reste en 1 transaction. Pour des paiements séparés, utilise "Répartir par convive" dans le plan de salle.
-      </div>
-    </div>
 
     <!-- Zone espèces avec pavé numérique (cachée par défaut) -->
     <div id="cash-section">
@@ -1152,23 +1051,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <span class="iu-txt" id="pm-img-label">Ajouter une photo</span>
         <span class="iu-hint">JPG / PNG — max 15 Mo</span>
       </div>
-      <!-- Génération IA intégrée : photo produit sans quitter la fiche.
-           (setup-images.html reste pour la génération en lot) -->
-      <div style="margin:-4px 0 14px">
-        <button type="button" onclick="togglePmAI()" id="pm-ai-btn" style="width:100%;height:38px;border-radius:var(--radius-sm);background:rgba(155,107,255,.10);border:1px dashed rgba(155,107,255,.35);color:#b18cff;font-weight:700;font-size:12px;cursor:pointer">🎨 Générer une photo avec l'IA</button>
-        <div id="pm-ai-panel" style="display:none;margin-top:10px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px">
-          <label class="form-label" style="font-size:10px">Description de la photo (modifiable avant de générer)</label>
-          <textarea class="form-textarea" id="pm-ai-prompt" style="min-height:54px;font-size:12px" placeholder="Ex : assiette de bavette grillée, sauce échalote…"></textarea>
-          <div id="pm-ai-preview-wrap" style="display:none;margin:10px 0;text-align:center">
-            <img id="pm-ai-preview" style="max-width:100%;max-height:220px;border-radius:8px;border:1px solid var(--border)" alt="Aperçu IA">
-            <div id="pm-ai-status" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:10px">
-            <button type="button" onclick="genProdImageAI()" id="pm-ai-gen" style="flex:1;height:36px;border-radius:var(--radius-sm);background:#9b6bff;color:#fff;font-weight:700;font-size:12px;border:none;cursor:pointer">✨ Générer</button>
-            <button type="button" onclick="usePmAIImage()" id="pm-ai-use" style="flex:1;height:36px;border-radius:var(--radius-sm);background:var(--green);color:#000;font-weight:700;font-size:12px;border:none;cursor:pointer;display:none">✓ Utiliser cette photo</button>
-          </div>
-        </div>
-      </div>
       <div class="form-group"><label class="form-label">Nom du produit *</label><input class="form-input" id="pm-name" placeholder="Ex: Burger Maison"></div>
       <div class="form-group"><label class="form-label">Description courte</label><textarea class="form-textarea" id="pm-sub" placeholder="Ingrédients, précisions…"></textarea></div>
       <div class="form-row">
@@ -1204,16 +1086,11 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-        <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">📦 Gestion du stock</div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">📦 Disponibilité</div>
         <div id="pm-stock-radios" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
           <label class="stock-radio" data-mode="unlimited" style="flex:1;min-width:130px;display:flex;align-items:center;gap:6px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s">
             <input type="radio" name="pm-stock-mode" value="unlimited" checked style="margin:0">
-            <span>♾️ Illimité</span>
-          </label>
-          <label class="stock-radio" data-mode="limited" style="flex:1;min-width:130px;display:flex;align-items:center;gap:6px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s">
-            <input type="radio" name="pm-stock-mode" value="limited" style="margin:0">
-            <span>🔢 Limité à</span>
-            <input class="form-input" id="pm-stock-limit" type="number" min="1" placeholder="N" value="10" style="width:60px;height:30px;padding:0 8px;font-size:13px;margin-left:auto" onclick="document.querySelector('input[name=pm-stock-mode][value=limited]').checked=true;updateStockRadioVisuals()">
+            <span>✅ Disponible</span>
           </label>
           <label class="stock-radio" data-mode="out" style="flex:1;min-width:130px;display:flex;align-items:center;gap:6px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s">
             <input type="radio" name="pm-stock-mode" value="out" style="margin:0">
@@ -1251,8 +1128,6 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="form-group">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
             <label class="form-label" style="margin:0">Allergènes (cocher tout ce qui s'applique)</label>
-            <button type="button" onclick="suggestAllergensViaIA()" id="btn-suggest-allergens" style="height:28px;padding:0 10px;border-radius:6px;background:rgba(155,107,255,.12);border:1px solid rgba(155,107,255,.3);color:#9b6bff;font-weight:700;font-size:11px;cursor:pointer;text-transform:none;letter-spacing:0">🤖 Suggérer via IA</button>
-            <span id="suggest-allergens-status" style="font-size:11px;color:var(--muted)"></span>
           </div>
           <div id="pm-allergens" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:6px"></div>
         </div>
@@ -1325,10 +1200,6 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="form-group">
         <label class="form-label">Nom du plat du jour <span style="color:var(--accent)">*</span></label>
         <input class="form-input" id="pdj-nom" placeholder="Ex : Pâtes Carbonara maison">
-      </div>
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <button onclick="generatePdjDesc()" id="pdj-btn-desc" style="flex:1;height:40px;border-radius:var(--radius-sm);background:rgba(155,107,255,.12);color:#9b6bff;border:1px solid rgba(155,107,255,.3);font-weight:700;font-size:12px">✨ Générer description IA</button>
-        <button onclick="generatePdjImage()" id="pdj-btn-img" style="flex:1;height:40px;border-radius:var(--radius-sm);background:rgba(0,212,170,.1);color:#00d4aa;border:1px solid rgba(0,212,170,.3);font-weight:700;font-size:12px">🎨 Générer photo IA</button>
       </div>
       <div class="form-group">
         <label class="form-label">Description courte</label>
@@ -1710,7 +1581,7 @@ let products = LS.get('products', DEFAULT_PRODUCTS);
   LS.set('allergen_version', ALLERGEN_VERSION);
 })();
 var branding = LS.get('branding', {name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'});
-let settings = LS.get('settings', {showImg:true,tableMode:false,showSub:true,currency:'€',tva:5.5,cuissons:'Bleu,Saignant,À point,Bien cuit',garnitures:'Frites maison,Salade,Pommes de terre sautées,Pâtes'});
+let settings = LS.get('settings', {showImg:true,showSub:true,currency:'€',cuissons:'Bleu,Saignant,À point,Bien cuit',garnitures:'Frites maison,Salade,Pommes de terre sautées,Pâtes'});
 
 // Horodate les produits modifiés LOCALEMENT (différents de la dernière version
 // cloud reçue). Le listener menu adopte une version cloud seulement si elle est
@@ -1811,7 +1682,7 @@ function scheduleAutoPublish(){
 // ═══════════════════════════════════════════════════════════════
 let ticket = [];       // {id, name, price, qty, personId}
 let currentCat = '';
-// cashStr, hasDot, splitN now declared in payment section
+// cashStr, hasDot now declared in payment section
 
 // Table / persons state
 let persons = [];      // {id, name, color, paid}
@@ -2103,10 +1974,8 @@ function cardHTML(p){
     :'';
   const sub=settings.showSub&&p.sub?`<div class="mcard-sub">${esc(p.sub)}</div>`:'';
   const isOutOfStock = p.stock!==undefined && p.stock>=0 && p.stock===0;
-  // Badge ÉPUISÉ toujours affiché (info critique). Le compteur "STOCK: n"
-  // est désactivable via Réglages → Affichage (settings.showStockBadge).
-  const stockBadge = isOutOfStock ? '<span style="position:absolute;top:6px;right:6px;background:var(--red);color:#fff;font-size:8px;font-weight:800;padding:2px 7px;border-radius:20px;letter-spacing:.5px;z-index:2">ÉPUISÉ</span>' :
-    (settings.showStockBadge!==false && p.stock!==undefined && p.stock>=0 && p.stock<=5) ? `<span style="position:absolute;top:6px;right:6px;background:rgba(245,166,35,.9);color:#000;font-size:8px;font-weight:800;padding:2px 7px;border-radius:20px;letter-spacing:.5px;z-index:2">STOCK: ${p.stock}</span>` : '';
+  // Seul « ÉPUISÉ » est affiché : personne ne compte le stock (v84).
+  const stockBadge = isOutOfStock ? '<span style="position:absolute;top:6px;right:6px;background:var(--red);color:#fff;font-size:8px;font-weight:800;padding:2px 7px;border-radius:20px;letter-spacing:.5px;z-index:2">ÉPUISÉ</span>' : '';
   return `<div class="mcard${p.pdj?' pdj':''}${isOutOfStock?' out-of-stock':''}" onclick="${isOutOfStock?'toast(\'Produit épuisé\',\'r\')':'addToTicket('+jsArg(p.id)+')'}">
     ${p.pdj?'<span class="pdj-tag">Aujourd\'hui</span>':''}
     ${stockBadge}
@@ -2707,7 +2576,7 @@ function payAllAndClose(){
 // ═══════════════════════════════════════════════════════════════
 //  PAYMENT — SIMPLIFIÉ
 // ═══════════════════════════════════════════════════════════════
-let payCallback=null, currentPayType='', cashStr='0', hasDot=false, splitN=1;
+let payCallback=null, currentPayType='', cashStr='0', hasDot=false;
 // Garde anti-double-encaissement : un double-tap accidentel sur "Valider"
 // déclenchait 2× nextReceiptNumber + 2× saveToHistory + 2× cb. En service
 // tactile c'est très fréquent. Le flag est reset par closePay().
@@ -2739,7 +2608,7 @@ function openPay(){
 function openPayFor(amount, cb, items){
   // Fix #4 : reset complet de l'état entre 2 paiements (anciennement
   // _currentTip pouvait être hérité d'une session précédente)
-  payCallback=cb; cashStr='0'; hasDot=false; currentPayType=''; splitN=1;
+  payCallback=cb; cashStr='0'; hasDot=false; currentPayType='';
   // Articles réellement encaissés (convive / non attribués) : le ticket
   // imprimé doit correspondre au montant payé, pas à toute la table (M3).
   window._payItems = Array.isArray(items) ? items.map(r=>({...r})) : null;
@@ -2755,9 +2624,6 @@ function openPayFor(amount, cb, items){
   document.getElementById('cash-disp').textContent='0,00';
   document.getElementById('change-val').textContent='—';
   document.getElementById('change-val').className='cv u';
-  // Reset split display
-  document.getElementById('split-val').textContent='1';
-  document.getElementById('split-result').style.display='none';
   // Reset tip
   const tipSec = document.getElementById('tip-section');
   if(tipSec) tipSec.style.display = 'none';
@@ -2778,7 +2644,7 @@ function openPayFor(amount, cb, items){
 }
 function closePay(){
   document.getElementById('pay-overlay').classList.remove('show');
-  payCallback=null; currentPayType=''; splitN=1; isValidating=false;
+  payCallback=null; currentPayType=''; isValidating=false;
   window._payItems = null;
   // Fix #15 : libère le scroll du body
   document.body.style.overflow = '';
@@ -2804,34 +2670,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ── Split (diviser l'addition) — calcul d'info uniquement, pas de débit réel séparé ──
-function changeSplit(delta){
-  splitN = Math.max(1, Math.min(20, splitN + delta));
-  document.getElementById('split-val').textContent = splitN;
-  const amount = parseFloat(document.getElementById('pay-overlay').dataset.amount)||0;
-  const resultEl = document.getElementById('split-result');
-  const noteEl = document.getElementById('split-info-note');
-  if(splitN > 1){
-    resultEl.style.display = 'grid';
-    if(noteEl) noteEl.style.display = 'block';
-    // Fix #6 : calcul en centimes pour éviter les flottants fantômes
-    const totalCents = Math.round(amount * 100);
-    const perPersonCents = Math.floor(totalCents / splitN);
-    const remainder = totalCents - (perPersonCents * splitN);
-    const perPerson = perPersonCents / 100;
-    // Si reste != 0, la N-ième personne paie le reliquat (1-19 centimes)
-    let perPersonLbl = fmt(perPerson);
-    if(remainder > 0){
-      const lastPersonCents = perPersonCents + remainder;
-      perPersonLbl = `${splitN-1}× ${fmt(perPerson)} + 1× ${fmt(lastPersonCents/100)}`;
-    }
-    document.getElementById('split-per-person').textContent = perPersonLbl;
-    document.getElementById('split-total-ref').textContent = fmt(amount);
-  } else {
-    resultEl.style.display = 'none';
-    if(noteEl) noteEl.style.display = 'none';
-  }
-}
 
 // ── Ajouter des articles depuis le modal table → POS ──
 function goToPOSForTable(){
@@ -3080,9 +2918,7 @@ function showPrintOption(){
     printToast.id = 'print-toast';
     printToast.innerHTML = `<span>🧾 Ticket :</span>
       <button onclick="printReceipt();this.parentElement.remove()" data-primary="1">🖨️ Imprimer</button>
-      <button onclick="sendReceiptByEmail();this.parentElement.remove()">📧 Email</button>
       <button onclick="shareReceiptByQR();this.parentElement.remove()">📱 QR</button>
-      <button onclick="sendReceiptBySMS();this.parentElement.remove()">💬 SMS</button>
       <button onclick="this.parentElement.remove()" data-muted="1">✕</button>`;
     printToast.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:12px 16px;display:flex;align-items:center;gap:8px;z-index:1001;box-shadow:0 8px 40px rgba(0,0,0,.6);animation:sup .2s ease;flex-wrap:wrap;max-width:90vw';
     printToast.querySelectorAll('button').forEach(b=>{
@@ -3322,93 +3158,6 @@ function buildReceiptContent(r){
   return { text, html, subject: 'Ticket N° '+(r.number||'')+' — '+restoName+' — '+r.date, tableName, restoName };
 }
 
-// ── Envoi par EMAIL : modale + Worker Cloudflare (Brevo) ──
-function sendReceiptByEmail(){
-  if(!lastReceipt) return;
-  const workerUrl = (settings.mailWorkerUrl || '').trim().replace(/\/$/, '');
-  // L'expéditeur est désormais fixé côté worker (SENDER_EMAIL) : seule l'URL compte.
-  const isConfigured = !!workerUrl && !!window.FB;
-  openContactModal({
-    kind: 'email',
-    title: '📧 Envoyer le ticket par email',
-    placeholder: 'client@exemple.fr',
-    inputType: 'email',
-    helpText: isConfigured
-      ? 'Envoi automatique via Brevo — le client recevra le ticket en quelques secondes.'
-      : '⚠️ Worker email non configuré → l\'app Mail de votre appareil va s\'ouvrir. Configurez le Worker dans Paramètres pour un envoi 100% auto.',
-    onSubmit: async (addr) => {
-      if(!addr || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)){
-        toast('Email invalide','r'); return false;
-      }
-      const content = buildReceiptContent(lastReceipt);
-      if(isConfigured){
-        try{
-          toast('📤 Envoi en cours…','o');
-          // Nouveau contrat du worker : {ticketId, to}. Le worker relit le
-          // ticket dans Firestore et construit le mail lui-même (avant : il
-          // relayait n'importe quel HTML vers n'importe qui = relais de spam).
-          const ticketId = await createReceiptTicket(lastReceipt);
-          const res = await fetch(workerUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticketId, to: addr })
-          });
-          const data = await res.json().catch(()=>({}));
-          if(!res.ok || data.ok === false){
-            const errMsg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || res.statusText;
-            console.error('[mail worker]', data);
-            toast('Erreur envoi : '+errMsg, 'r');
-            return false;
-          }
-          toast('✓ Ticket envoyé à '+addr, 'g');
-          return true;
-        }catch(err){
-          console.error('[mail worker]', err);
-          toast('Erreur réseau : '+(err.message||'inconnue'),'r');
-          return false;
-        }
-      } else {
-        window.location.href = 'mailto:'+encodeURIComponent(addr)+
-          '?subject='+encodeURIComponent(content.subject)+
-          '&body='+encodeURIComponent(content.text);
-        return true;
-      }
-    }
-  });
-}
-window.sendReceiptByEmail = sendReceiptByEmail;
-
-// ── Envoi par SMS : ouvre l'app Messages avec numéro et corps pré-remplis ──
-// (Pas d'envoi automatique : aucune API SMS gratuite en 2026 pour des tiers)
-function sendReceiptBySMS(){
-  if(!lastReceipt) return;
-  openContactModal({
-    kind: 'sms',
-    title: '💬 Envoyer le ticket par SMS',
-    placeholder: '06 12 34 56 78',
-    inputType: 'tel',
-    helpText: 'L\'app Messages va s\'ouvrir avec le ticket pré-rempli — appuyez sur Envoyer dans Messages pour finaliser. (Tablette sans SIM ? Utilisez plutôt le QR code ou l\'email.)',
-    onSubmit: (phone) => {
-      const cleaned = (phone||'').replace(/[\s.\-()]/g,'');
-      if(!cleaned || !/^\+?\d{8,15}$/.test(cleaned)){
-        toast('Numéro invalide','r'); return false;
-      }
-      const r = lastReceipt;
-      const tbl = r.tableId ? salleElements.find(e=>e.id===r.tableId) : null;
-      const tableName = tbl ? 'Table '+(tbl.number||'') : 'Vente directe';
-      let body = (branding.name||'La Marmite Express')+' — '+tableName+'\n';
-      body += 'Total : '+r.total.toFixed(2)+'€\n';
-      body += r.date+' '+r.time;
-      if(settings.googleReviewUrl) body += '\nAvis : '+settings.googleReviewUrl;
-      const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
-      const sep = isIOS ? '&' : '?';
-      window.location.href = 'sms:'+cleaned+sep+'body='+encodeURIComponent(body);
-      return true;
-    }
-  });
-}
-window.sendReceiptBySMS = sendReceiptBySMS;
-
 // ── Partage par QR code : pas de SIM, pas de mail, juste un scan ──
 // Crée un ticket dans Firebase tickets/{shortId}, génère un QR pointant
 // vers ticket.html?id={shortId}. Marche même sur tablette sans SIM.
@@ -3482,15 +3231,6 @@ function generateShortId(){
   return s;
 }
 
-function calculateTVATotal(items){
-  let t = 0;
-  items.forEach(i => {
-    const tva = (typeof i.tva === 'number') ? i.tva : 10;
-    const ht = i.price * i.qty / (1 + tva/100);
-    t += (i.price * i.qty) - ht;
-  });
-  return Math.round(t * 100) / 100;
-}
 
 function showQRModal(url){
   const m = document.createElement('div');
@@ -3517,131 +3257,10 @@ function showQRModal(url){
 }
 
 // ── Modale réutilisable pour saisir email/téléphone ──
-function openContactModal(cfg){
-  const existing = document.getElementById('contact-modal');
-  if(existing) existing.remove();
-  const m = document.createElement('div');
-  m.id = 'contact-modal';
-  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;animation:sup .15s ease';
-  m.innerHTML = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:24px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.6)">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px;margin-bottom:6px">${esc(cfg.title)}</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.5">${esc(cfg.helpText)}</div>
-      <input id="contact-input" class="form-input" type="${cfg.inputType}" placeholder="${esc(cfg.placeholder)}" autocomplete="off" autocapitalize="off" style="width:100%;margin-bottom:14px">
-      <div style="display:flex;gap:10px;justify-content:flex-end">
-        <button onclick="document.getElementById('contact-modal').remove()" style="height:42px;padding:0 18px;border-radius:var(--radius-sm);background:var(--card);border:1px solid var(--border);color:var(--text);font-weight:700">Annuler</button>
-        <button id="contact-send" style="height:42px;padding:0 22px;border-radius:var(--radius-sm);background:var(--accent);color:#000;font-weight:800;border:none">Envoyer ✓</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(m);
-  const inp = document.getElementById('contact-input');
-  setTimeout(()=>inp.focus(), 50);
-  const send = async () => {
-    const btn = document.getElementById('contact-send');
-    btn.disabled = true; btn.textContent = 'Envoi…';
-    const ok = await cfg.onSubmit(inp.value.trim());
-    if(ok){
-      m.remove();
-    } else {
-      btn.disabled = false; btn.textContent = 'Envoyer ✓';
-    }
-  };
-  document.getElementById('contact-send').onclick = send;
-  inp.onkeydown = (e) => { if(e.key==='Enter') send(); };
-  m.onclick = (e) => { if(e.target === m) m.remove(); };
-}
-window.openContactModal = openContactModal;
 
-// ── Status & test Worker email dans admin ──
-function updateMailWorkerStatus(){
-  const el = document.getElementById('mail-worker-status');
-  if(!el) return;
-  const ok = !!settings.mailWorkerUrl; // expéditeur fixé côté worker désormais
-  if(ok){
-    el.innerHTML = '<span style="color:#22c97a">✓ Configuré — envoi 100% auto activé (9000/mois)</span>';
-  } else {
-    el.innerHTML = '<span style="color:var(--muted)">Non configuré — fallback Mail natif</span>';
-  }
-}
-window.updateMailWorkerStatus = updateMailWorkerStatus;
 
-async function testMailWorker(){
-  const addr = (document.getElementById('s-mail-test')||{}).value || '';
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)){
-    toast('Entrez une adresse email valide pour tester','r'); return;
-  }
-  const workerUrl = ((document.getElementById('s-mail-worker-url')||{}).value || settings.mailWorkerUrl || '').trim().replace(/\/$/, '');
-  if(!workerUrl){
-    toast('Remplissez l\'URL du worker','r'); return;
-  }
-  if(!window.FB){ toast('Firebase requis','r'); return; }
-  toast('📤 Test en cours…','o');
-  try{
-    // Le worker n'envoie plus que des tickets existants : on crée un ticket
-    // de test à 0 € et on l'envoie.
-    const ticketId = await createReceiptTicket({
-      number: 'TEST', items: [{ name: 'Test de configuration', qty: 1, price: 0, tva: 10 }],
-      total: 0, totalHT: 0, totalTVA: 0, tvaRates: {}, payType: 'test',
-      date: new Date().toLocaleDateString('fr-FR'), time: new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})
-    });
-    const res = await fetch(workerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticketId, to: addr })
-    });
-    const data = await res.json().catch(()=>({}));
-    if(!res.ok || data.ok === false){
-      const errMsg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || res.statusText;
-      console.error('[mail worker test]', data);
-      toast('Échec : '+errMsg, 'r');
-      return;
-    }
-    toast('✓ Email de test envoyé à '+addr, 'g');
-  }catch(err){
-    console.error('[mail worker test]', err);
-    toast('Erreur réseau : '+(err.message||'vérifiez l\'URL du worker'),'r');
-  }
-}
-window.testMailWorker = testMailWorker;
 
 // ── Guide pas-à-pas Worker email ──
-function showEmailHelp(){
-  const m = document.createElement('div');
-  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto';
-  m.innerHTML = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:24px;max-width:640px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.6)">
-      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:14px">
-        <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:1px">📖 Configurer l'envoi email (15 min, gratuit)</div>
-        <button onclick="this.closest('[style*=fixed]').remove()" style="background:none;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1">✕</button>
-      </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Setup unique pour envoyer <strong style="color:var(--text)">9000 emails/mois gratuits</strong> via Brevo + Cloudflare Worker (aucune CB).</div>
-      <ol style="line-height:1.8;font-size:13px;color:var(--text);padding-left:20px">
-        <li><strong>Compte Brevo</strong> (5 min) — <a href="https://www.brevo.com" target="_blank" style="color:var(--accent);font-weight:700">brevo.com</a> → Sign up free → confirmez votre email. Menu : <em>SMTP & API → API Keys → Generate</em> (notez la clé <code style="background:var(--card);padding:1px 6px;border-radius:4px">xkeysib-…</code>).</li>
-        <li><strong>Vérifiez votre email expéditeur</strong> chez Brevo : <em>Senders → Add a sender</em>, entrez l'email d'envoi (ex. contact@votre-resto.fr), confirmez via le lien reçu.</li>
-        <li><strong>Compte Cloudflare</strong> (2 min) — <a href="https://dash.cloudflare.com/sign-up" target="_blank" style="color:var(--accent);font-weight:700">cloudflare.com</a> → créez un compte.</li>
-        <li><strong>Créez un Worker</strong> : Workers &amp; Pages → Create Worker → nom <code>caisse-mailer</code> → Deploy → <em>Edit code</em> → supprimez tout → collez le contenu de <a href="https://github.com/faresclt/marmitte-express/blob/main/worker/brevo-mailer.js" target="_blank" style="color:var(--accent);font-weight:700">brevo-mailer.js</a> → <em>Save and Deploy</em>. Notez l'URL <code>https://caisse-mailer.XXX.workers.dev</code>.</li>
-        <li><strong>Variables du Worker</strong> : Settings → Variables → ajoutez :
-          <div style="background:var(--card);padding:10px;border-radius:8px;margin:6px 0;font-family:monospace;font-size:11px;line-height:1.6">
-            BREVO_API_KEY = xkeysib-…<br>
-            SENDER_EMAIL = contact@votre-resto.fr<br>
-            SENDER_NAME = ${esc(branding.name || 'Votre Restaurant')}<br>
-            ALLOWED_ORIGIN = ${esc(window.location.origin)}
-          </div>
-          Save and Deploy.
-        </li>
-        <li><strong>Collez l'URL du Worker</strong> + l'email expéditeur dans les champs ci-dessous → <em>Tester l'envoi</em>.</li>
-      </ol>
-      <div style="margin-top:16px;padding:12px;background:rgba(34,201,122,.1);border:1px solid rgba(34,201,122,.3);border-radius:8px;font-size:12px;color:var(--green);line-height:1.5">
-        💡 Plus de détails dans le guide complet : <a href="https://github.com/faresclt/marmitte-express/blob/main/worker/README.md" target="_blank" style="color:var(--green);text-decoration:underline;font-weight:700">worker/README.md</a>
-      </div>
-      <button onclick="this.closest('[style*=fixed]').remove()" style="margin-top:16px;width:100%;height:44px;border-radius:var(--radius-sm);background:var(--accent);color:#000;font-weight:800;border:none">J'ai compris</button>
-    </div>
-  `;
-  m.onclick = (e) => { if(e.target === m) m.remove(); };
-  document.body.appendChild(m);
-}
-window.showEmailHelp = showEmailHelp;
 
 // ═══ MOBILE NAV ═══
 function mobShowMenu(){
@@ -3929,7 +3548,6 @@ function openAddProduct(){
     if(el) el.style.display = 'none';
     if(chev) chev.textContent = '▼';
   });
-  resetPmAI(); // panneau photo IA remis à zéro à chaque ouverture (sinon la photo IA d'une fiche annulée s'appliquait au produit suivant)
   document.getElementById('prod-modal').classList.add('show');
 }
 function openEditProduct(id){
@@ -3949,9 +3567,7 @@ function openEditProduct(id){
   document.getElementById('pm-tva').value=String(p.tva||10);
   document.getElementById('pm-stock').value=(p.stock===undefined||p.stock===null||p.stock<0)?'':p.stock;
   // Set stock radio mode based on stored value
-  if(p.stock === 0) setStockMode('out');
-  else if(p.stock > 0){ setStockMode('limited', p.stock); }
-  else setStockMode('unlimited');
+  setStockMode(p.stock === 0 ? 'out' : 'unlimited');
   document.getElementById('pm-description').value=p.description||'';
   document.getElementById('pm-garniture-text').value=p.garniture||'';
   document.getElementById('pm-sauces').value=p.sauces||'';
@@ -3974,7 +3590,6 @@ function openEditProduct(id){
     if(chev) chev.textContent = '▼';
   });
   autoExpandPmSections(p);
-  resetPmAI(); // panneau photo IA remis à zéro à chaque ouverture (sinon la photo IA d'une fiche annulée s'appliquait au produit suivant)
   document.getElementById('prod-modal').classList.add('show');
 }
 function buildProdCatSelect(sel){ const s=document.getElementById('pm-cat'); s.innerHTML=cats.map(c=>`<option value="${c.id}"${c.id===sel?' selected':''}>${c.icon} ${c.name}</option>`).join(''); }
@@ -4000,7 +3615,7 @@ function showSectionSuggest(val){
 }
 function hideSectionSuggest(){ document.getElementById('section-suggest').style.display='none'; }
 
-function closeProdModal(){ resetPmAI(); document.getElementById('prod-modal').classList.remove('show'); }
+function closeProdModal(){ document.getElementById('prod-modal').classList.remove('show'); }
 function handleProdImg(e){
   const f=e.target.files[0]; if(!f) return;
   if(f.size>15*1024*1024){ toast('Image trop lourde (max 15 Mo)','r'); return; }
@@ -4020,71 +3635,6 @@ function handleProdImg(e){
   }; r.readAsDataURL(f);
 }
 
-// ── Génération IA intégrée à la fiche produit ──
-// Praticité : plus besoin d'aller dans setup-images.html pour UNE photo.
-// Prompt pré-rempli depuis nom+description, modifiable, preview avant adoption.
-let _pmAIUrl=null;        // dernière URL générée (preview)
-let _pmImgUrlDraft=null;  // URL validée par "Utiliser" → appliquée au save
-function resetPmAI(){
-  _pmAIUrl=null; _pmImgUrlDraft=null;
-  const panel=document.getElementById('pm-ai-panel');
-  if(panel) panel.style.display='none';
-  const prompt=document.getElementById('pm-ai-prompt'); if(prompt) prompt.value='';
-  const wrap=document.getElementById('pm-ai-preview-wrap'); if(wrap) wrap.style.display='none';
-  const gen=document.getElementById('pm-ai-gen'); if(gen){ gen.disabled=false; gen.textContent='✨ Générer'; }
-  const use=document.getElementById('pm-ai-use'); if(use) use.style.display='none';
-}
-function togglePmAI(){
-  const panel=document.getElementById('pm-ai-panel');
-  const open=panel.style.display==='none';
-  panel.style.display=open?'block':'none';
-  if(open && !document.getElementById('pm-ai-prompt').value.trim()){
-    const nm=document.getElementById('pm-name').value.trim();
-    const sub=document.getElementById('pm-sub').value.trim();
-    document.getElementById('pm-ai-prompt').value=nm?(nm+(sub?', '+sub:'')):'';
-  }
-}
-function genProdImageAI(){
-  const desc=document.getElementById('pm-ai-prompt').value.trim()||document.getElementById('pm-name').value.trim();
-  if(!desc){ toast('Renseigne d\'abord le nom du produit','o'); return; }
-  // Même style que les photos existantes du menu (cohérence visuelle)
-  const prompt=desc+', professional food photography, dark slate background, moody studio lighting, restaurant menu photo, no text';
-  _pmAIUrl='https://image.pollinations.ai/prompt/'+encodeURIComponent(prompt)+'?width=1024&height=1024&nologo=true&model=flux&seed='+Math.floor(Math.random()*1e9);
-  const img=document.getElementById('pm-ai-preview');
-  const wrap=document.getElementById('pm-ai-preview-wrap');
-  const status=document.getElementById('pm-ai-status');
-  const genBtn=document.getElementById('pm-ai-gen');
-  const useBtn=document.getElementById('pm-ai-use');
-  wrap.style.display='block'; img.style.opacity='.35';
-  status.textContent='⏳ Génération en cours (10-30 s)…';
-  genBtn.disabled=true; genBtn.textContent='⏳ Génération…';
-  useBtn.style.display='none';
-  img.onload=()=>{
-    img.style.opacity='1';
-    status.textContent='Pas satisfait ? Modifie la description et régénère.';
-    genBtn.disabled=false; genBtn.textContent='↻ Régénérer';
-    useBtn.style.display='block';
-  };
-  img.onerror=()=>{
-    status.textContent='❌ Échec de génération — réessaie dans quelques secondes.';
-    genBtn.disabled=false; genBtn.textContent='✨ Générer';
-  };
-  img.src=_pmAIUrl;
-}
-function usePmAIImage(){
-  if(!_pmAIUrl) return;
-  _pmImgUrlDraft=_pmAIUrl;
-  // La photo IA remplace tout upload en attente — sinon le bloc upload
-  // Storage du save réécraserait p.imgUrl avec l'ancienne image.
-  editingProdImg=null;
-  const prev=document.getElementById('pm-img-preview');
-  prev.src=_pmAIUrl; prev.style.display='block';
-  document.getElementById('pm-img-ph').style.display='none';
-  document.getElementById('pm-img-label').style.display='none';
-  toast('🎨 Photo IA sélectionnée — enregistre le produit pour valider','g');
-}
-window.togglePmAI=togglePmAI; window.genProdImageAI=genProdImageAI; window.usePmAIImage=usePmAIImage;
-
 async function saveProduct(){
   const nm=document.getElementById('pm-name').value.trim(); if(!nm) return toast('Nom requis','r');
   const price=parseFloat(document.getElementById('pm-price').value); if(isNaN(price)||price<0) return toast('Prix invalide','r');
@@ -4101,16 +3651,9 @@ async function saveProduct(){
   const hasCuisson=document.getElementById('pm-cuisson').checked;
   const hasGarniture=document.getElementById('pm-garniture').checked;
   const tva=parseFloat(document.getElementById('pm-tva').value)||10;
-  // Stock : lit depuis les 3 radios (qui mettent à jour pm-stock en hidden)
-  // Stockage interne : -1 = illimité, 0 = épuisé, N = limité
+  // Disponibilité : -1 = disponible (stock non suivi), 0 = épuisé (v84 : plus de comptage)
   const stockMode = document.querySelector('input[name=pm-stock-mode]:checked')?.value || 'unlimited';
-  let stock;
-  if(stockMode === 'unlimited') stock = -1;
-  else if(stockMode === 'out') stock = 0;
-  else {
-    const limit = parseInt(document.getElementById('pm-stock-limit').value);
-    stock = (isNaN(limit) || limit < 1) ? -1 : limit;
-  }
+  const stock = stockMode === 'out' ? 0 : -1;
   document.getElementById('pm-stock').value = stock < 0 ? '' : stock; // pour compat anciens consommateurs
   
   // Fiche détail client
@@ -4146,30 +3689,6 @@ async function saveProduct(){
     products.push({id:prodId,cat,name:nm,sub:document.getElementById('pm-sub').value.trim(),price,section,pdj,active:document.getElementById('pm-active').checked,hasCuisson,hasGarniture,tva,stock,description,garniture:garnitureText,sauces,allergens,vegetarian,vegan,glutenFree,spicy,alcohol});
   }
   
-  // Photo IA validée dans la fiche → URL directe (même pattern que la
-  // génération en lot de setup-images). Prioritaire sur l'ancien imgUrl.
-  if(_pmImgUrlDraft){
-    const p=products.find(x=>x.id===prodId);
-    const draft=_pmImgUrlDraft;
-    _pmImgUrlDraft=null;
-    // On rapatrie l'image dans notre Storage : sinon chaque client chargerait
-    // la photo chez un service tiers (IP + n° de table transmis) et elle
-    // disparaîtrait le jour où ce service change. Repli sur l'URL directe.
-    let finalUrl = draft;
-    try {
-      if(window.FB && window.FB.uploadBlob){
-        toast('📤 Enregistrement de la photo…','o');
-        const res = await fetch(draft);
-        if(res.ok){
-          const blob = await res.blob();
-          if(/^image\/(png|jpe?g|webp)$/.test(blob.type) && blob.size < 5*1024*1024){
-            finalUrl = await window.FB.uploadBlob('products/'+prodId+'_ai_'+Date.now()+(blob.type==='image/png'?'.png':'.jpg'), blob);
-          }
-        }
-      }
-    } catch(e){ console.warn('[photo IA] upload Storage impossible, URL directe conservée:', e?.code || e?.message || e); }
-    if(p){ p.imgUrl=finalUrl; p.updatedAt=Date.now(); }
-  }
 
   // Upload image to Firebase Storage if new image
   if(editingProdImg && window.FB && window.FB.uploadImage){
@@ -4229,53 +3748,6 @@ function resyncFromFirestore(){
 // ── 🤖 Suggérer les allergènes via IA (Pollinations text, gratuit) ──
 // Inspecte le nom + description courte + description longue + garniture/sauce
 // pour cocher automatiquement les 14 allergènes INCO 2014 probables.
-async function suggestAllergensViaIA(){
-  const name = document.getElementById('pm-name').value.trim();
-  if(!name){ toast('Renseigne d\'abord le nom du produit','r'); return; }
-  const sub  = document.getElementById('pm-sub').value.trim();
-  const desc = document.getElementById('pm-description').value.trim();
-  const garn = document.getElementById('pm-garniture-text').value.trim();
-  const sauc = document.getElementById('pm-sauces').value.trim();
-  const btn = document.getElementById('btn-suggest-allergens');
-  const status = document.getElementById('suggest-allergens-status');
-  btn.disabled = true; btn.textContent = '⏳ Analyse…';
-  status.textContent = '';
-  const ingredients = [sub, desc, garn, sauc].filter(Boolean).join(' · ');
-  // Liste passée à l'IA = libellés officiels INCO 2014 (Annexe II Règlement UE 1169/2011)
-  const prompt = `Tu es un expert en réglementation alimentaire INCO 2014 (Annexe II du règlement européen 1169/2011). Pour le plat français suivant, identifie les allergènes parmi cette liste EXACTE (recopie strictement les libellés tels quels) : "Céréales contenant du gluten", "Crustacés", "Œufs", "Poissons", "Arachides", "Soja", "Lait", "Fruits à coque", "Céleri", "Moutarde", "Graines de sésame", "Sulfites", "Lupin", "Mollusques". Réponds UNIQUEMENT par un JSON array de strings (sans rien d'autre, pas de markdown, pas d'explications), avec uniquement les allergènes présents. Si aucun, réponds [].
-
-Nom : ${name}
-${ingredients ? 'Description/ingrédients : ' + ingredients : ''}
-
-Réponse JSON :`;
-  try {
-    const url = 'https://text.pollinations.ai/' + encodeURIComponent(prompt);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 20000);
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(timer);
-    if(!res.ok) throw new Error('HTTP ' + res.status);
-    const text = (await res.text()).trim();
-    // Parse le JSON (l'IA peut renvoyer avec du texte autour parfois)
-    const match = text.match(/\[[\s\S]*?\]/);
-    if(!match) throw new Error('Format IA inattendu');
-    const arr = JSON.parse(match[0]);
-    if(!Array.isArray(arr)) throw new Error('Pas un array');
-    // Tolère anciens libellés IA ("Gluten" → "Céréales contenant du gluten") puis valide
-    const normalized = migrateAllergenLabels(arr);
-    const valid = normalized.filter(a => ALLERGENS_LIST.includes(a));
-    // Pré-coche
-    buildAllergenCheckboxes(valid);
-    status.innerHTML = valid.length > 0
-      ? `<span style="color:var(--green)">✓ ${valid.length} allergène(s) suggéré(s) — vérifie et ajuste</span>`
-      : '<span style="color:var(--muted)">Aucun allergène détecté</span>';
-  } catch(e){
-    console.warn('suggestAllergens:', e);
-    status.innerHTML = '<span style="color:var(--red)">✗ Erreur IA — saisis manuellement</span>';
-  }
-  btn.disabled = false; btn.textContent = '🤖 Suggérer via IA';
-}
-window.suggestAllergensViaIA = suggestAllergensViaIA;
 
 // ── Toggle section repliable du modal produit ──
 function togglePmCollapsible(id){
@@ -4311,13 +3783,9 @@ function autoExpandPmSections(p){
 window.autoExpandPmSections = autoExpandPmSections;
 
 // ── Helpers UI radios stock ──
-function setStockMode(mode, value){
+function setStockMode(mode){
   const radio = document.querySelector(`input[name=pm-stock-mode][value=${mode}]`);
   if(radio){ radio.checked = true; }
-  if(mode === 'limited' && value !== undefined && value > 0){
-    const limitInput = document.getElementById('pm-stock-limit');
-    if(limitInput) limitInput.value = value;
-  }
   updateStockRadioVisuals();
 }
 window.setStockMode = setStockMode;
@@ -4342,20 +3810,12 @@ document.addEventListener('change', (e) => {
 function applySettingsForm(){
   try { renderSecurityPanel(); } catch(e){}
   document.getElementById('s-showimg').checked=settings.showImg!==false;
-  document.getElementById('s-tablemode').checked=!!settings.tableMode;
   document.getElementById('s-showsub').checked=settings.showSub!==false;
-  document.getElementById('s-showstock').checked=settings.showStockBadge!==false;
   document.getElementById('s-pdjprompt').checked=settings.pdjPromptDaily!==false;
-  document.getElementById('s-currency').value=settings.currency||'€';
-  document.getElementById('s-tva').value=settings.tva||5.5;
   document.getElementById('s-cuissons').value=settings.cuissons||'Bleu,Saignant,À point,Bien cuit';
   document.getElementById('s-garnitures').value=settings.garnitures||'Frites maison,Salade,Pommes de terre sautées,Pâtes';
-  document.getElementById('s-serveur-pin').value=LS.get('serveur_pin','0000');
   const gr=document.getElementById('s-google-review'); if(gr) gr.value=settings.googleReviewUrl||'';
   const ta=document.getElementById('s-tripadvisor');   if(ta) ta.value=settings.tripadvisorUrl||'';
-  const mwu=document.getElementById('s-mail-worker-url'); if(mwu) mwu.value=settings.mailWorkerUrl||'';
-  const ms =document.getElementById('s-mail-sender');     if(ms)  ms.value =settings.mailSender||'';
-  updateMailWorkerStatus();
   // Infos légales
   const lg = settings.legal || {};
   const lr=document.getElementById('s-legal-raison');   if(lr) lr.value=lg.raison||'';
@@ -4367,22 +3827,14 @@ function applySettingsForm(){
 }
 function saveSettings(){
   settings.showImg=document.getElementById('s-showimg').checked;
-  settings.tableMode=document.getElementById('s-tablemode').checked;
   settings.showSub=document.getElementById('s-showsub').checked;
-  settings.showStockBadge=document.getElementById('s-showstock').checked;
   settings.pdjPromptDaily=document.getElementById('s-pdjprompt').checked;
-  settings.currency=document.getElementById('s-currency').value;
-  settings.tva=parseFloat(document.getElementById('s-tva').value)||5.5;
   settings.cuissons=document.getElementById('s-cuissons').value.trim();
   settings.garnitures=document.getElementById('s-garnitures').value.trim();
   const gr = document.getElementById('s-google-review');
   const ta = document.getElementById('s-tripadvisor');
   if(gr) settings.googleReviewUrl = gr.value.trim();
   if(ta) settings.tripadvisorUrl  = ta.value.trim();
-  const mwu = document.getElementById('s-mail-worker-url');
-  const ms  = document.getElementById('s-mail-sender');
-  if(mwu) settings.mailWorkerUrl = mwu.value.trim();
-  if(ms)  settings.mailSender    = ms.value.trim();
   // Infos légales
   settings.legal = settings.legal || {};
   const lr = document.getElementById('s-legal-raison');
@@ -4395,7 +3847,9 @@ function saveSettings(){
   if(la) settings.legal.adresse  = la.value.trim();
   if(lt) settings.legal.tvaIntra = lt.value.replace(/\s/g,'').trim().toUpperCase();
   if(lp) settings.legal.ape      = lp.value.trim().toUpperCase();
-  LS.set('settings',settings); updateMailWorkerStatus(); updateLegalStatus();
+  LS.set('settings',settings); updateLegalStatus();
+  // Plus de bouton « Publier » (v84) : les réglages partent seuls vers les autres appareils
+  if(typeof scheduleAutoPublish === 'function') scheduleAutoPublish();
   if(typeof renderMenu==='function') renderMenu(); // applique les toggles d'affichage immédiatement
   toast('Paramètres sauvegardés');
 }
@@ -4413,50 +3867,13 @@ function savePIN(){
   setTimeout(()=>msg.textContent='',3000);
 }
 
-function saveServeurPin(){
-  const n=document.getElementById('s-serveur-pin').value.trim();
-  const msg=document.getElementById('serveur-pin-msg');
-  if(!/^\d{4}$/.test(n)){ msg.style.color='var(--red)'; msg.textContent='Le code doit contenir exactement 4 chiffres'; return; }
-  LS.set('serveur_pin',n);
-  publishStaffConfig();
-  msg.style.color='var(--green)'; msg.textContent='✓ Code serveur enregistré et envoyé aux téléphones';
-  setTimeout(()=>msg.textContent='',5000);
-}
 
-// ── EXPORT / IMPORT ──
-function exportData(){
-  const data={cats,products,branding,settings,exportDate:new Date().toISOString()};
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='caisse-config-'+Date.now()+'.json'; a.click();
-  toast('✓ Configuration exportée');
-}
-function importData(e){
-  const f=e.target.files[0]; if(!f) return;
-  const r=new FileReader(); r.onload=ev=>{
-    try{
-      const d=JSON.parse(ev.target.result);
-      if(d.cats) cats=d.cats;
-      if(d.products){
-        // Migration allergènes INCO sur import (fichier peut contenir anciens libellés)
-        d.products.forEach(p => { if(Array.isArray(p.allergens)) p.allergens = migrateAllergenLabels(p.allergens); });
-        products=d.products;
-      }
-      if(d.branding) branding=d.branding;
-      if(d.settings) settings=d.settings;
-      saveAll(); refreshAdmin(); applyBranding(); toast('✓ Configuration importée');
-    }catch(err){ toast('Fichier invalide','r'); }
-  }; r.readAsText(f);
-}
-function resetToDefault(){ cats=[...DEFAULT_CATS]; products=DEFAULT_PRODUCTS.map(p=>({...p})); branding={name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'}; settings={showImg:true,tableMode:false,showSub:true,currency:'€',tva:5.5}; saveAll(); refreshAdmin(); applyBranding(); toast('Données remises par défaut'); }
 
 // ═══════════════════════════════════════════════════════════════
 //  CLOUD BACKUP (Firebase)
 // ═══════════════════════════════════════════════════════════════
 async function backupToFirebase(){
   if(!window.FB){ toast('Firebase non connecté','r'); return; }
-  const statusEl=document.getElementById('backup-status');
-  statusEl.textContent='☁️ Sauvegarde en cours…';
-  statusEl.style.color='var(--accent)';
   
   try{
     // Les VENTES ne sont plus dans ce backup : elles partent une par une dans
@@ -4480,80 +3897,13 @@ async function backupToFirebase(){
     await window.FB.set('backups', 'latest', backup);
     await window.FB.set('backups', serviceDayKey(), backup);
 
-    statusEl.textContent='✅ Sauvegardé le '+backup.backupLabel;
-    statusEl.style.color='var(--green)';
-    toast('☁️ Backup cloud effectué !','g');
+    // Sauvegarde automatique (30 s après une vente) : silencieuse si elle réussit
   }catch(e){
     console.error('Backup error:', e);
-    statusEl.textContent='❌ Erreur lors du backup cloud';
-    statusEl.style.color='var(--red)';
-    toast('Erreur de backup','r');
+    toast('Sauvegarde cloud échouée (réseau ?)','r');
   }
 }
 
-async function restoreFromFirebase(){
-  if(!window.FB){ toast('Firebase non connecté','r'); return; }
-  if(!confirm('Restaurer depuis le cloud ? Cela écrasera toutes vos données locales.')) return;
-  
-  const statusEl=document.getElementById('backup-status');
-  statusEl.textContent='⬇️ Restauration en cours…';
-  statusEl.style.color='var(--accent)';
-  
-  try{
-    // Avant : getDocs/collection appelés depuis ce script classique →
-    // ReferenceError, la restauration n'a JAMAIS fonctionné. Passe par window.FB.
-    let backup = await window.FB.getOnce('backups', 'latest');
-    if(!backup) backup = await window.FB.getOnce('config', 'backup').catch(()=>null); // ancien format
-
-    if(!backup){ statusEl.textContent='❌ Aucun backup trouvé sur Firebase'; statusEl.style.color='var(--red)'; toast('Aucun backup trouvé','r'); return; }
-    
-    // Restore data
-    if(backup.cats) { cats=backup.cats; }
-    if(backup.products) {
-      // Migration allergènes INCO sur restore cloud
-      backup.products.forEach(p => { if(Array.isArray(p.allergens)) p.allergens = migrateAllergenLabels(p.allergens); });
-      products=backup.products;
-    }
-    if(backup.branding) { branding=backup.branding; }
-    if(backup.settings) { settings=backup.settings; }
-    if(backup.salleLayout) { LS.set('salleLayout', backup.salleLayout); }
-    if(backup.tableData) { LS.set('tableData', backup.tableData); }
-    // Ancien format uniquement : historique embarqué dans le backup
-    if(backup.salesHistory){
-      Object.entries(backup.salesHistory).forEach(([key, data]) => {
-        if(/^sales_\d{4}-\d{2}-\d{2}$/.test(key) && Array.isArray(data)) LS.set(key, mergeSales(LS.get(key, []), data));
-      });
-    }
-    // Ventes des 62 derniers jours depuis sales/{jour}/v (fusion, sans doublon)
-    statusEl.textContent='⬇️ Récupération des ventes…';
-    let restoredSales = 0;
-    for(let i=0; i<62; i++){
-      const day = serviceDayKey(Date.now() - i*86400000);
-      const remote = await fetchSalesFromFirebase(day);
-      if(remote && remote.length){
-        const k = 'sales_'+day, before = LS.get(k, []);
-        const merged = mergeSales(before, remote);
-        if(merged.length !== before.length){ LS.set(k, merged); restoredSales += merged.length - before.length; }
-      }
-    }
-    console.log('[restore] '+restoredSales+' vente(s) récupérée(s) depuis le cloud');
-
-    saveAll();
-    refreshAdmin();
-    applyBranding();
-    renderTabs();
-    renderMenu();
-    
-    statusEl.textContent='✅ Restauré depuis le backup du '+backup.backupLabel;
-    statusEl.style.color='var(--green)';
-    toast('☁️ Données restaurées depuis Firebase !','g');
-  }catch(e){
-    console.error('Restore error:', e);
-    statusEl.textContent='❌ Erreur lors de la restauration';
-    statusEl.style.color='var(--red)';
-    toast('Erreur de restauration','r');
-  }
-}
 
 // Auto-backup: save to Firebase after each payment (debounced)
 let autoBackupTimer = null;
@@ -4564,7 +3914,6 @@ function scheduleAutoBackup(){
   }, 30000); // 30 seconds after last payment
 }
 window.backupToFirebase = backupToFirebase;
-window.restoreFromFirebase = restoreFromFirebase;
 
 // ═══════════════════════════════════════════════════════════════
 //  UTILS
@@ -6001,9 +5350,6 @@ window.forceRepoll = async function(){
   return window.diagOrders();
 };
 
-function showOrderNotif(order){
-  // Notification now handled inside importOrderToTable
-}
 
 // Publish menu to Firebase so waiter app can use it
 // silent=true → pas de toast (utilisé par auto-publish)
@@ -6082,12 +5428,6 @@ async function rotateEnrollCodeUI(){
 }
 window.rotateEnrollCodeUI = rotateEnrollCodeUI;
 
-// PIN serveur → config/staffcfg (lisible par les appareils du resto seulement)
-function publishStaffConfig(){
-  if(!(window.FB && window.FB.set)) return;
-  window.FB.set('config', 'staffcfg', { serveurPin: LS.get('serveur_pin','0000'), updatedAt: Date.now() })
-    .catch(e => console.warn('[staffcfg]', e?.code || e?.message || e));
-}
 
 function publishMenu(silent){
   if(!window.FB){ if(!silent) toast('Firebase non connecté','r'); return; }
@@ -6120,23 +5460,15 @@ function publishMenu(silent){
       garnitures: (settings.garnitures||'').split(',').map(s=>s.trim()).filter(Boolean)
     },
     settings: {
-      currency: settings.currency || '€',
-      tva: settings.tva || 5.5,
       googleReviewUrl: settings.googleReviewUrl || '',
       tripadvisorUrl: settings.tripadvisorUrl || '',
-      mailWorkerUrl: settings.mailWorkerUrl || '',
-      mailSender: settings.mailSender || '',
       legal: settings.legal || {},
       // Préférences d'affichage cross-device (toggles Admin → Paramètres)
-      showStockBadge: settings.showStockBadge !== false,
       pdjPromptDaily: settings.pdjPromptDaily !== false
     },
     salleLayout: salleElements,
-    // serveurPin N'EST PLUS publié ici : config/menu est lisible par tout le
-    // monde (carte QR). Il part dans config/staffcfg (réservé au personnel).
     publishedAt: window.FB.ts()
   };
-  publishStaffConfig();
   
   // ── Compress & publish images ──
   const imgMap = {};
@@ -6497,19 +5829,6 @@ setInterval(syncUnsyncedSales, 120000);
 // quel serveur pouvait wipe le CA du jour). On archive sous une clé
 // `sales_cleared_YYYY-MM-DD_HHMMSS` plutôt que de detruire, pour
 // conformité NF525 (art. 286-I-3 bis CGI : inaltérabilité des données).
-function clearHistory(){
-  if(!requireAdminPin('Effacer historique du jour')) return;
-  const key = getTodayKey();
-  const current = LS.get(key, []);
-  if(current.length){
-    // Archive sous une clé horodatée — récupérable via DevTools en cas d'erreur
-    const archiveKey = 'sales_cleared_' + localDateKey(new Date()) + '_' + Date.now();
-    LS.set(archiveKey, current);
-    console.log('[clearHistory] Archived '+current.length+' sales to LS key:', archiveKey);
-  }
-  LS.set(key, []);
-  toast('✓ Historique effacé (archivé en LS sous sales_cleared_*)', 'o');
-}
 
 // Fusionne deux listes de ventes en dédupliquant via ts + tableLabel
 // Audit stats #3 : dédup par receiptNumber en PRIORITÉ (clé NF525 stable),
@@ -7184,7 +6503,6 @@ window.selectPayType = selectPayType;
 window.mobShowMenu = mobShowMenu;
 window.mobShowTicket = mobShowTicket;
 window.payAllAndClose = payAllAndClose;
-window.changeSplit = changeSplit;
 window.goToPOSForTable = goToPOSForTable;
 window.saveAndReturnToTable = saveAndReturnToTable;
 window.unlinkTable = unlinkTable;
@@ -7194,7 +6512,6 @@ window.selectOptChip = selectOptChip;
 window.confirmOptions = confirmOptions;
 window.closeOptionsModal = closeOptionsModal;
 window.renderHistorique = renderHistorique;
-window.clearHistory = clearHistory;
 window.exportHistory = exportHistory;
 
 applyBranding();
@@ -7287,63 +6604,8 @@ function handlePdjImg(e) {
   r.readAsDataURL(f);
 }
 
-async function generatePdjDesc() {
-  // Description IA via Pollinations text-mode (gratuit, 0 cle).
-  const nom = document.getElementById('pdj-nom').value.trim();
-  if (!nom) return toast('Saisis d\'abord le nom du plat', 'o');
-  const btn = document.getElementById('pdj-btn-desc');
-  btn.textContent = '⏳ Génération...'; btn.disabled = true;
-  try {
-    const prompt = `Genere une description courte et appetissante (10-14 mots max) pour un plat de restaurant appele "${nom}". Reponds uniquement avec la description, sans guillemets ni ponctuation finale.`;
-    const res = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const desc = (await res.text()).trim().replace(/^["']|["']$/g, '');
-    if (desc) { document.getElementById('pdj-desc').value = desc; toast('Description generee !', 'g'); }
-    else toast('Erreur IA', 'r');
-  } catch(e) { console.error(e); toast('Erreur connexion IA', 'r'); }
-  btn.textContent = '✨ Générer description IA'; btn.disabled = false;
-}
 
-// Fallback Pollinations.ai : 0 key, 0 quota, gratuit illimité.
-async function generateImagePollinations(prompt, opts = {}) {
-  const seed = opts.seed || Math.floor(Math.random() * 1e9);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Pollinations HTTP ' + res.status);
-  const blob = await res.blob();
-  return await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = reject;
-    r.readAsDataURL(blob);
-  });
-}
 
-async function generatePdjImage() {
-  const nom = document.getElementById('pdj-nom').value.trim();
-  if (!nom) return toast('Saisis d\'abord le nom du plat', 'o');
-  const btn = document.getElementById('pdj-btn-img');
-  const status = document.getElementById('pdj-ia-img-status');
-  btn.textContent = '⏳ Génération image...'; btn.disabled = true;
-  const prompt = 'A cinematic, high-end product photograph of "' + nom + '" for a French brasserie menu. Placed on a wet, dark charcoal slate stone surface with fine water droplets catching the light. Fresh, natural ingredients evoking the flavor profile artistically scattered around the base. Background is a softly blurred warm-lit bar or restaurant interior with amber and golden bokeh. Main light source: soft warm light from upper-left, creating rich golden highlights and deep shadows. Shallow depth of field. Color palette: deep dark blacks, warm amber and golden tones. Mood: sophisticated, artisanal, appetizing, French brasserie premium quality. Photorealistic, ultra-detailed.';
-
-  status.textContent = '🎨 Pollinations IA (gratuit) genere la photo...';
-  // Pollinations only (Gemini retire — pas besoin de cle API)
-  try {
-    pdjImgData = await generateImagePollinations(prompt);
-    const prev = document.getElementById('pdj-img-preview');
-    prev.src = pdjImgData;
-    prev.style.display = 'block';
-    document.getElementById('pdj-img-ph').style.display = 'none';
-    status.textContent = '✅ Photo générée (Pollinations) !';
-    toast('Photo générée !', 'g');
-  } catch (e) {
-    console.error('[IA] Pollinations fail:', e);
-    status.textContent = '❌ Génération impossible — importe une photo manuellement';
-    toast('Génération IA indisponible', 'r');
-  }
-  btn.textContent = '🎨 Générer photo IA'; btn.disabled = false;
-}
 
 function savePlatDuJour() {
   const nom = document.getElementById('pdj-nom').value.trim();
@@ -7388,8 +6650,6 @@ window.openPdjModal = openPdjModal;
 window.closePdjModal = closePdjModal;
 window.pdjLoadProductImg = pdjLoadProductImg;
 window.handlePdjImg = handlePdjImg;
-window.generatePdjDesc = generatePdjDesc;
-window.generatePdjImage = generatePdjImage;
 window.savePlatDuJour = savePlatDuJour;
 window.closePdjDaily = closePdjDaily;
 

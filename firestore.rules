@@ -98,26 +98,11 @@ service cloud.firestore {
     }
 
     match /orders/{id} {
-      allow read, update, delete: if isTeam();
-      // Commande client (QR) : format strict. Les prix envoyés sont ignorés
-      // par la caisse (recalculés depuis le menu) — voir importOrder.
-      allow create: if isTeam() || (
-        isAuth()
-        && request.resource.data.keys().hasOnly(['tableId', 'tableNum', 'items', 'note', 'status', 'source', 'sentAt', 'clientUid'])
-        && request.resource.data.source == 'client'
-        && request.resource.data.status == 'pending'
-        && request.resource.data.clientUid == request.auth.uid
-        && request.resource.data.items is list
-        && request.resource.data.items.size() > 0
-        && request.resource.data.items.size() <= 40
-        && isStr(request.resource.data.get('note', ''), 500)
-        && isStr(request.resource.data.tableId, 40)
-      );
+      // v84 : la carte QR ne sert plus qu'à consulter. Seules les serveuses
+      // (appareils du resto) créent des commandes.
+      allow read, create, update, delete: if isTeam();
     }
 
-    match /payments/{id} {
-      allow read, write: if isTeam();
-    }
 
     // ════════════ ARGENT — inaltérable ════════════
     // Une vente = un document, créé une fois, jamais modifié ni supprimé.
@@ -162,23 +147,6 @@ service cloud.firestore {
       allow get: if true;
       allow list: if false;
       allow create, update, delete: if isTeam();
-    }
-
-    // ════════════ MULTI-TENANT (inactif, inchangé) ════════════
-    function isResto(slug) {
-      return isAuth()
-        && exists(/databases/$(database)/documents/restaurants/$(slug)/users/$(request.auth.uid));
-    }
-    function isAdmin(slug) {
-      return isResto(slug)
-        && get(/databases/$(database)/documents/restaurants/$(slug)/users/$(request.auth.uid)).data.role == 'admin';
-    }
-    match /restaurants/{slug} {
-      allow read: if isResto(slug);
-      allow write: if isAdmin(slug);
-      match /{document=**} {
-        allow read, write: if isAdmin(slug);
-      }
     }
 
     // Tout le reste bloqué

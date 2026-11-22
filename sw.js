@@ -12,7 +12,7 @@
 //  contournant le cache HTTP ({cache:'reload'}). Plus de mÃ©lange
 //  Â« HTML neuf + JS ancien Â» par revalidation en arriÃ¨re-plan : une nouvelle
 //  version arrive en bloc via le bandeau de mise Ã  jour.
-const CACHE_NAME = 'marmite-v83-photos-caisse';
+const CACHE_NAME = 'marmite-v84-serveuses';
 
 // HTML pages CRITIQUES â€” cachÃ©es au install pour cold-boot offline.
 // Sans Ã§a : tablette qui ouvre la caisse en wifi down matin = Ã©cran blanc.

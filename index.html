@@ -278,20 +278,6 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
       </div>
     </a>
 
-    <a href="client.html" class="app-card client">
-      <div class="card-icon-wrap">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-        </svg>
-      </div>
-      <div class="card-title">Client</div>
-      <div class="card-desc">Commande en ligne depuis la table via QR code — menu interactif avec panier</div>
-      <div class="card-badge">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-        Via QR code
-      </div>
-    </a>
-
     <a href="qrcodes.html" class="app-card qrcode">
       <div class="card-icon-wrap">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -319,20 +305,6 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
         Ecran cuisine
       </div>
     </a>
-
-    <a href="setup-images.html" class="app-card setup">
-      <div class="card-icon-wrap">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
-        </svg>
-      </div>
-      <div class="card-title">Images IA</div>
-      <div class="card-desc">Generez des visuels pour vos plats avec l'intelligence artificielle (Pollinations gratuit ou Recraft Premium)</div>
-      <div class="card-badge">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        Intelligence artificielle
-      </div>
-    </a>
   </div>
 
   <!-- Install PWA banner -->
@@ -342,7 +314,7 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
     <button class="btn btn-primary btn-title" id="install-btn" onclick="installPWA()">Installer</button>
   </div>
 
-  <!-- Firebase status -->
+  <!-- État : réseau (navigator.onLine + erreur du listener menu), menu, PWA -->
   <div class="status-section">
     <div class="status-header">
       <div class="status-title">Etat du systeme</div>
@@ -352,8 +324,8 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
       <div class="status-item">
         <div class="status-dot" id="dot-firebase"></div>
         <div class="status-info">
-          <div class="status-label">Firebase</div>
-          <div class="status-val" id="val-firebase">Verification...</div>
+          <div class="status-label">Réseau</div>
+          <div class="status-val" id="val-firebase">Vérification…</div>
         </div>
       </div>
       <div class="status-item">
@@ -384,13 +356,29 @@ body::after{content:'';position:fixed;inset:0;opacity:.015;background-image:url(
 <script type="module">
 import { db, doc, onSnapshot, escHtml, safeUrl, safeColor } from './assets/js/firebase-sync.js';
 
-try {
-  document.getElementById('dot-firebase').classList.add('on');
-  document.getElementById('val-firebase').textContent = 'Connecte';
-  document.getElementById('live-indicator').style.display = 'flex';
+// Ligne « Réseau » : avant, « Connecté » était écrit sans aucune vérification.
+// Maintenant : état réseau du navigateur (événements online/offline) + erreur
+// éventuelle du listener menu ci-dessous. Aucune lecture Firestore en plus.
+// (Pas de test « fromCache » : sans includeMetadataChanges, le passage
+// cache → serveur ne déclenche pas d'événement quand la carte n'a pas changé.)
+let _fbError = false;
+function renderNetStatus(){
+  const online = navigator.onLine !== false;
+  const ok = online && !_fbError;
+  const dot = document.getElementById('dot-firebase');
+  dot.classList.toggle('on', ok);
+  dot.classList.toggle('off', !ok);
+  document.getElementById('val-firebase').textContent = _fbError ? 'Erreur Firebase' : (online ? 'En ligne' : 'Hors ligne');
+  document.getElementById('live-indicator').style.display = ok ? 'flex' : 'none';
+}
+renderNetStatus();
+window.addEventListener('online', renderNetStatus);
+window.addEventListener('offline', renderNetStatus);
 
+try {
   // Check menu
   onSnapshot(doc(db, 'config', 'menu'), snap => {
+    if(_fbError){ _fbError = false; renderNetStatus(); }
     if(snap.exists()){
       const data = snap.data();
       const count = (data.products||[]).length;
@@ -433,10 +421,14 @@ try {
       document.getElementById('dot-menu').classList.add('off');
       document.getElementById('val-menu').textContent = 'Non publie';
     }
+  }, err => {
+    console.warn('[index] listener menu :', err && (err.code || err.message));
+    _fbError = true;
+    renderNetStatus();
   });
 } catch(e){
-  document.getElementById('dot-firebase').classList.add('off');
-  document.getElementById('val-firebase').textContent = 'Erreur connexion';
+  _fbError = true;
+  renderNetStatus();
 }
 
 // PWA status

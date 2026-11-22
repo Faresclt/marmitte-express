@@ -60,11 +60,11 @@ test.describe('serveur.html', () => {
     // Selon serveurPin configuré côté Firestore : PIN screen, sinon le
     // sélecteur de table (#table-picker, écran par défaut au boot), sinon
     // l'app directe si une table est déjà mémorisée.
-    await expect(page.locator('#pin-screen, #table-picker, #app').first()).toBeVisible({ timeout: FIRESTORE_TIMEOUT });
-    const pinVisible = await page.locator('#pin-screen').isVisible().catch(() => false);
+    // v84 : plus de PIN serveur (sécurité = enregistrement de l'appareil)
+    await expect(page.locator('#table-picker, #app').first()).toBeVisible({ timeout: FIRESTORE_TIMEOUT });
     const pickerVisible = await page.locator('#table-picker').isVisible().catch(() => false);
     const appVisible = await page.locator('#app').isVisible().catch(() => false);
-    expect(pinVisible || pickerVisible || appVisible, 'Ni PIN, ni table-picker, ni app visible sur serveur.html').toBe(true);
+    expect(pickerVisible || appVisible, 'Ni table-picker, ni app visible sur serveur.html').toBe(true);
 
     // Le plan doit contenir des tables cliquables une fois Firestore chargé
     if (pickerVisible) {

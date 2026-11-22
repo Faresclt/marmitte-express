@@ -7,11 +7,18 @@
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
   "background_color": "#0a0b0e",
   "theme_color": "#f5a623",
   "orientation": "any",
-  "categories": ["business", "food"],
+  "categories": [
+    "business",
+    "food"
+  ],
   "icons": [
     {
       "src": "icon-192.png",
@@ -44,12 +51,6 @@
       "short_name": "Cuisine",
       "url": "./cuisine.html",
       "description": "Écran cuisine"
-    },
-    {
-      "name": "Images IA",
-      "short_name": "Images",
-      "url": "./setup-images.html",
-      "description": "Générer des images IA"
     }
   ]
 }

@@ -30,7 +30,7 @@ test.describe('mobile 390x844', () => {
 
   test('serveur.html : pas de scroll horizontal', async ({ page }) => {
     await page.goto('serveur.html');
-    await expect(page.locator('#pin-screen, #app').first()).toBeVisible({ timeout: FIRESTORE_TIMEOUT });
+    await expect(page.locator('#table-picker, #app').first()).toBeVisible({ timeout: FIRESTORE_TIMEOUT });
     await expectNoHorizontalScroll(page);
   });
 });

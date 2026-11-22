@@ -63,24 +63,18 @@ test('enforce=true : un anonyme ne peut plus rien toucher', async () => {
   await assertFails(getDocs(collection(db, 'tickets')));
 });
 
-test('enforce=true : le public garde menu, ticket par id, commande client valide', async () => {
+test('enforce=true : le public garde menu et ticket par id, mais ne commande plus (v84)', async () => {
   await seed(true);
   await assertSucceeds(getDoc(doc(nobody(), 'config/menu')));
   await assertSucceeds(getDoc(doc(nobody(), 'tickets/k1')));
   await assertSucceeds(getDoc(doc(nobody(), 'security/policy')));
-  await assertSucceeds(addDoc(collection(anon(), 'orders'), clientOrder('pirate')));
+  await assertFails(addDoc(collection(anon(), 'orders'), clientOrder('pirate')));
+  await assertFails(addDoc(collection(nobody(), 'orders'), clientOrder('pirate')));
 });
 
-test('commande client : format strict', async () => {
+test('enforce=true : seul un appareil enregistré crée une commande', async () => {
   await seed(true);
-  const db = anon();
-  await assertFails(addDoc(collection(db, 'orders'), { ...clientOrder('pirate'), status: 'served' }));
-  await assertFails(addDoc(collection(db, 'orders'), { ...clientOrder('pirate'), source: 'serveur' }));
-  await assertFails(addDoc(collection(db, 'orders'), { ...clientOrder('autre') }));
-  await assertFails(addDoc(collection(db, 'orders'), { ...clientOrder('pirate'), items: [] }));
-  await assertFails(addDoc(collection(db, 'orders'), { ...clientOrder('pirate'), note: 'x'.repeat(501) }));
-  await assertFails(addDoc(collection(db, 'orders'), { ...clientOrder('pirate'), hack: true }));
-  await assertFails(addDoc(collection(nobody(), 'orders'), clientOrder('pirate')));
+  await assertSucceeds(addDoc(collection(staff(), 'orders'), { ...clientOrder('x'), source: 'serveur' }));
 });
 
 test('enforce=true : un appareil enregistré fonctionne normalement', async () => {
