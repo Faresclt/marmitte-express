@@ -201,7 +201,7 @@ function showTablePicker(){
   const picker = document.getElementById('table-picker');
   if(!picker) return;
   if(!menu || !menu.salleLayout || !menu.salleLayout.length){
-    picker.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted)">Plan de salle non disponible.<br>Publiez depuis la caisse.</div>';
+    picker.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted)">Plan de salle non disponible.<br>Publiez depuis la caisse.<div style="margin-top:20px"><a href="index.html" class="tp-back">‹ Accueil</a></div></div>';
     picker.style.display='flex';
     return;
   }
@@ -267,23 +267,30 @@ function showTablePicker(){
   });
   
   picker.innerHTML = `
-    <div style="width:100%;height:100%;display:flex;flex-direction:column">
+    <div id="tp-root" style="width:100%;height:100%;display:flex;flex-direction:column">
       <div style="padding:16px;text-align:center;flex-shrink:0">
+        <div class="tp-bar"><a href="index.html" class="tp-back">‹ Accueil</a>${(tableId && tableNum) ? `<button type="button" id="tp-stay" class="tp-stay">↩ Rester table ${escHtml(tableNum)}</button>` : ''}</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px">🍽️ Choisir une <span style="color:var(--accent)">table</span></div>
         <div style="font-size:12px;color:var(--muted);margin-top:4px">Touchez une table pour prendre la commande</div>
       </div>
-      <div id="plan-scroll" style="flex:1;overflow:hidden;-webkit-overflow-scrolling:touch;position:relative;min-height:0;touch-action:none">
+      <div id="plan-scroll" style="--plan-ar:${maxX+60}/${maxY+60};overflow:hidden;-webkit-overflow-scrolling:touch;position:relative;min-height:0;touch-action:none">
         <div id="plan-wrapper" style="position:relative;width:100%;height:100%;overflow:hidden">
           <div id="plan-inner" style="position:absolute;width:${maxX+60}px;height:${maxY+60}px;transform-origin:top left;left:0;top:0">
             ${elHtml}
           </div>
         </div>
-        <div style="position:absolute;bottom:8px;right:12px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;padding:5px 9px;border-radius:8px;pointer-events:none">2 doigts: zoom · double-tap: reset</div>
+        <div id="plan-hint" style="position:absolute;bottom:8px;right:12px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:5px 9px;border-radius:8px;pointer-events:none">Pincer pour zoomer · toucher deux fois pour recadrer</div>
       </div>
+      <div id="table-quick">${elements.map((el,idx)=>({el,idx})).filter(o=>isTable(o.el)).sort((a,b)=>String(a.el.number??'').localeCompare(String(b.el.number??''),'fr',{numeric:true})).map(o=>`<button type="button" class="tq-btn${cartCountFor(String(o.el.id ?? ''))?' has-cart':''}" data-tidx="${o.idx}">${escHtml(o.el.number||'')}</button>`).join('')}</div>
     </div>`;
   picker.style.display='flex';
-  // Délégation : choix de table par index (jamais de donnée dans un onclick)
-  document.getElementById('plan-inner').addEventListener('click', (e) => {
+  // « Rester sur cette table » : même effet qu'un toucher sur sa propre table
+  const stay = document.getElementById('tp-stay');
+  if(stay) stay.addEventListener('click', () => pickTable(tableId, tableNum));
+  // Délégation : choix de table par index (jamais de donnée dans un onclick).
+  // Sur #tp-root pour couvrir le plan ET la grille de boutons (portrait) ;
+  // l'écouteur en capture de #plan-scroll stoppe toujours pan et double-tap avant.
+  document.getElementById('tp-root').addEventListener('click', (e) => {
     const t = e.target.closest('[data-tidx]');
     if(!t) return;
     const el = elements[parseInt(t.dataset.tidx, 10)];
@@ -695,7 +702,7 @@ const _optLabel = 'font-size:11px;font-weight:700;letter-spacing:1px;color:var(-
 function optGroup(id, title, labels){
   return `<div style="margin-bottom:16px">
       <div style="${_optLabel}">${title}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px" id="${id}">
+      <div style="display:flex;flex-wrap:wrap;gap:8px" id="${id}">
         ${labels.map((l,i)=>`<button type="button" class="opt-chip${i===0?' sel':''}" data-idx="${i}" onclick="selChip(this)">${escHtml(l)}</button>`).join('')}
       </div>
     </div>`;
@@ -719,7 +726,7 @@ function openOptionsModal(p){
   if(p.hasSirop){
     html+=`<div style="margin-bottom:16px">
       <div style="${_optLabel}">🍯 Supplément</div>
-      <div style="display:flex;gap:6px" id="opt-sirop-btns">
+      <div style="display:flex;flex-wrap:wrap;gap:8px" id="opt-sirop-btns">
         <button type="button" class="opt-chip sel" data-sirop="0" onclick="selChip(this)">Sans sirop</button>
         <button type="button" class="opt-chip" data-sirop="1" onclick="selChip(this)">+ Sirop (+0,50€)</button>
       </div>
@@ -781,10 +788,11 @@ function switchTab(id){
 function openCartPanel(){
   const panel = document.getElementById('cart-panel');
   panel.style.display='flex';
+  document.body.classList.add('cart-open');   // barre orange masquée derrière le volet (tablette)
   document.getElementById('cp-error').style.display='none';
   renderCartPanel();
 }
-function closeCartPanel(){ document.getElementById('cart-panel').style.display='none'; }
+function closeCartPanel(){ document.getElementById('cart-panel').style.display='none'; document.body.classList.remove('cart-open'); }
 
 function renderCartPanel(){
   const total = cart.reduce((s,r)=>s+(Number(r.qty)||0)*(Number(r.price)||0),0);
@@ -796,17 +804,17 @@ function renderCartPanel(){
     const price = Number(r.price) || 0;
     const qty = Number(r.qty) || 0;
     return `<div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)">
-      <div style="flex:1">
+      <div style="flex:1;min-width:0;overflow-wrap:break-word">
         <div style="font-size:15px;font-weight:600">${safeName}</div>
         ${optTxt?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${optTxt}</div>`:''}
         <div style="font-size:12px;color:#888">${fmtEur(price)}€/u</div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <button data-cart-idx="${idx}" data-cart-delta="-1" style="width:30px;height:30px;border-radius:50%;background:rgba(232,64,64,.1);color:#e84040;border:none;font-size:16px;cursor:pointer">−</button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="cp-qty cp-minus" data-cart-idx="${idx}" data-cart-delta="-1" aria-label="Diminuer la quantité">−</button>
         <span style="font-family:'Bebas Neue',sans-serif;font-size:22px">${qty}</span>
-        <button data-cart-idx="${idx}" data-cart-delta="1" style="width:30px;height:30px;border-radius:50%;background:rgba(34,201,122,.1);color:#22c97a;border:none;font-size:16px;cursor:pointer">+</button>
+        <button class="cp-qty cp-plus" data-cart-idx="${idx}" data-cart-delta="1" aria-label="Augmenter la quantité">+</button>
       </div>
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:65px;text-align:right">${(qty*price).toFixed(2).replace('.',',')}€</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:#22c97a;min-width:56px;text-align:right">${(qty*price).toFixed(2).replace('.',',')}€</div>
     </div>`;
   }).join('');
   document.getElementById('cp-total').textContent = total.toFixed(2).replace('.',',')+'€';
@@ -1018,10 +1026,18 @@ html{height:100%;height:100dvh}
 body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 
 /* Header */
-#app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0}
-.table-pill{background:var(--accent);color:#000;font-family:'Bebas Neue',sans-serif;font-size:18px;padding:4px 14px;border-radius:20px;letter-spacing:1px;flex-shrink:0}
+#app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 12px;display:flex;align-items:center;gap:8px;flex-shrink:0}
+/* display:flex + gap : remplace les espaces autour du numéro et du ✎ (supprimés en bout d'élément flex) */
+.table-pill{background:var(--accent);color:#000;font-family:'Bebas Neue',sans-serif;font-size:18px;padding:4px 14px;border-radius:20px;letter-spacing:1px;flex-shrink:0;white-space:nowrap;min-height:44px;display:flex;align-items:center;gap:6px}
 #resto-name{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px}
 .tagline{font-size:10px;color:var(--muted);font-weight:700}
+/* Le lien SERVEUR est l'élément flex : il ne doit pas rétrécir (sinon la pastille se casse en deux) */
+#app-header>a{flex-shrink:0}
+#table-pill-num{font-size:22px;padding:4px 18px}
+.hdr-brand{flex:1;min-width:0}
+#resto-name,.tagline{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Téléphone : nom écrit masqué (il ne tiendrait qu'en « LA MA… »), logo calé à droite s'il est configuré */
+@media (max-width:480px){.hdr-brand{display:none}#resto-logo{margin-left:auto}}
 
 /* Main app */
 #app{flex:1;display:none;flex-direction:column;overflow:hidden;min-height:0}
@@ -1035,7 +1051,8 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 
 /* Products */
 #menu-content{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-bottom:110px;min-height:0}
-.sec-sep{padding:8px 16px;font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--muted);background:rgba(255,255,255,.02);border-top:1px solid var(--border);margin-top:6px}
+/* Pas de border-top : le trait vient de la bordure basse de #menu-tabs ou de la .prod-card précédente (évite le double trait) */
+.sec-sep{padding:8px 16px;font-size:11px;font-weight:800;letter-spacing:1.5px;color:var(--muted);background:rgba(255,255,255,.02)}
 .prod-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
 .prod-card.sold-out{opacity:.5}
 .prod-img{width:64px;height:64px;border-radius:12px;overflow:hidden;flex-shrink:0;background:var(--card)}
@@ -1052,20 +1069,32 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 .qty-ctrl button:first-child{background:rgba(232,64,64,.12);color:var(--red)}
 .qty-ctrl button:last-child{background:rgba(34,201,122,.12);color:var(--green)}
 .qty-ctrl span{font-family:'Bebas Neue',sans-serif;font-size:22px;min-width:24px;text-align:center}
+/* Tablette paysage / grand écran : 2 colonnes au lieu de lignes étirées sur toute la largeur */
+@media (min-width:1000px){
+  #menu-content{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start}
+  #menu-content>:not(.prod-card){grid-column:1/-1}
+  .prod-card{border-right:1px solid var(--border)}
+}
 
 /* Cart bar */
-#cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--accent);padding:14px 20px calc(14px + env(safe-area-inset-bottom));display:none;align-items:center;justify-content:space-between;cursor:pointer;z-index:40}
+/* Padding latéral : contenu regroupé sur 600 px au centre sur tablette, 20 px comme avant sur téléphone */
+#cart-bar{position:fixed;bottom:0;left:0;right:0;background:var(--accent);padding:14px max(20px,calc(50% - 300px)) calc(14px + env(safe-area-inset-bottom));gap:12px;display:none;align-items:center;justify-content:space-between;cursor:pointer;z-index:40}
 #cart-count{font-size:14px;font-weight:700;color:#000}
 #cart-total-bar{font-family:'Bebas Neue',sans-serif;font-size:20px;color:#000}
-.cart-arrow{font-size:18px;color:#000}
+.cart-arrow{font-size:14px;font-weight:800;color:#000;white-space:nowrap}
 
 /* Cart panel */
 #cart-panel{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;display:none;align-items:flex-end}
-.cart-inner{background:var(--surface);border-radius:24px 24px 0 0;width:100%;max-height:88dvh;display:flex;flex-direction:column}
+body.cart-open #cart-bar{visibility:hidden}
+.cart-inner{background:var(--surface);border-radius:24px 24px 0 0;width:100%;max-width:640px;margin:0 auto;max-height:88dvh;display:flex;flex-direction:column}
 .cp-handle{width:40px;height:4px;border-radius:2px;background:var(--border);margin:12px auto 4px;flex-shrink:0}
 .cp-header{padding:10px 16px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
 .cp-header h3{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px}
-.cp-close{width:32px;height:32px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:16px;cursor:pointer}
+.cp-close{width:40px;height:40px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:16px;cursor:pointer}
+/* Boutons − / + du panier : 44 px, signe épais et contrasté */
+.cp-qty{width:44px;height:44px;padding:0;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;line-height:1;flex-shrink:0;cursor:pointer}
+.cp-minus{background:rgba(232,64,64,.18);color:#ff6b6b}
+.cp-plus{background:rgba(34,201,122,.18);color:var(--green)}
 #cp-items{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 16px;min-height:0}
 .cp-footer{padding:14px 16px;border-top:1px solid var(--border)}
 #cp-note{width:100%;height:50px;background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--text);resize:none;margin-bottom:10px;font-family:'DM Sans',sans-serif}
@@ -1085,10 +1114,30 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 
 /* Options modal */
 #opt-modal{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:150;display:none;align-items:center;justify-content:center;padding:16px}
-#opt-modal-inner{background:var(--surface);border-radius:20px;width:100%;max-width:360px;padding:20px;border:1px solid var(--border)}
-.opt-chip{height:36px;padding:0 14px;border-radius:20px;background:var(--card);border:1.5px solid var(--border);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+#opt-modal-inner{background:var(--surface);border-radius:20px;width:100%;max-width:360px;padding:20px;border:1px solid var(--border);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow-y:auto}
+.opt-chip{height:44px;padding:0 16px;border-radius:22px;background:var(--card);border:1.5px solid var(--border);color:var(--text);font-size:14px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
 .opt-chip:active{transform:scale(.95)}
 .opt-chip.sel{border-color:var(--accent);background:rgba(245,166,35,.12);color:var(--accent)}
+
+/* Choix de table : marges de sécurité iPhone (0 ailleurs) + sortie Accueil / Rester sur la table */
+#table-picker{box-sizing:border-box;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+.tp-bar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.tp-back,.tp-stay{min-height:44px;padding:0 16px;display:inline-flex;align-items:center;border-radius:22px;font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px;text-decoration:none;white-space:nowrap;cursor:pointer}
+.tp-back{background:var(--card);border:1px solid var(--border);color:var(--muted)}
+.tp-stay{background:rgba(245,166,35,.15);border:1px solid var(--accent);color:var(--accent)}
+
+/* Plan de salle : pleine hauteur en paysage ; en portrait, plan à sa proportion
+   (repère) + grille de gros boutons triés par numéro, utilisables d'une main */
+#plan-scroll{flex:1}
+#table-quick{display:none}
+@media (orientation:portrait){
+  #plan-scroll{flex:0 0 auto;width:100%;aspect-ratio:var(--plan-ar);max-height:55%}
+  #plan-hint{display:none}
+  #table-quick{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:10px;align-content:start;flex:1;min-height:0;overflow-y:auto;padding:12px 16px 16px;border-top:1px solid var(--border)}
+  .tq-btn{height:56px;border-radius:14px;background:rgba(34,201,122,.1);border:2px solid #22c97a;color:#22c97a;font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:1px}
+  .tq-btn.has-cart{border-color:var(--accent);color:var(--accent);background:rgba(245,166,35,.12)}
+  .tq-btn:active{background:rgba(245,166,35,.2);border-color:var(--accent);color:var(--accent)}
+}
 
 </style>
 </head>
@@ -1100,7 +1149,7 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
   </a>
   <div class="table-pill" id="table-pill-num" onclick="changeTable()" style="cursor:pointer" title="Changer de table">TABLE <span id="table-display">?</span> ✎</div>
   <img id="resto-logo" alt="" style="display:none;width:32px;height:32px;border-radius:7px;object-fit:cover;flex-shrink:0">
-  <div style="flex:1">
+  <div class="hdr-brand">
     <div id="resto-name">La <span style="color:var(--accent)">Marmite</span> Express</div>
     <div class="tagline">PRISE DE COMMANDE</div>
   </div>
@@ -1129,7 +1178,7 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 <div id="cart-bar" onclick="openCartPanel()">
   <div id="cart-count">0 article</div>
   <div id="cart-total-bar">0,00€</div>
-  <div class="cart-arrow">→</div>
+  <div class="cart-arrow">Voir la commande →</div>
 </div>
 
 <!-- Cart panel -->

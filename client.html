@@ -248,7 +248,7 @@ function renderMenu(){
           <div class="prod-name">${p.pdj?'⭐ ':''}${escHtml(p.name)}</div>
           ${displaySub?`<div class="prod-sub">${escHtml(displaySub)}</div>`:''}
           ${vText?`<div class="prod-variants">📏 ${escHtml(vText)}</div>`:''}
-          ${optHint?`<div style="font-size:10px;color:var(--accent);font-weight:600;margin-top:2px">${optHint}</div>`:''}
+          ${optHint?`<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:2px">${optHint}</div>`:''}
           ${allergenHint}
           <div class="prod-price">${priceLabel(p)}</div>
         </div>
@@ -256,14 +256,44 @@ function renderMenu(){
       </div>`;
     });
   });
+  const pdjHtml = renderPdjBanner();
   if(!html){
     const reason = (activeFilters.size > 0 || searchQuery)
       ? 'Aucun plat ne correspond à vos filtres.<br><button onclick="clearFilters()" class="btn btn-ghost btn-sm" style="margin-top:12px">Réinitialiser les filtres</button>'
       : 'Aucun article dans cette catégorie';
-    content.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">🍽️</div>${reason}</div>`;
+    content.innerHTML = pdjHtml + `<div style="padding:40px 20px;text-align:center;color:var(--muted)"><div style="font-size:40px;margin-bottom:12px">🍽️</div>${reason}</div>`;
   } else {
-    content.innerHTML = html + '<div class="menu-footnote">Prix TTC, TVA incluse — service compris</div>';
+    content.innerHTML = pdjHtml + html + '<div class="menu-footnote">Prix TTC, TVA incluse — service compris</div>';
   }
+}
+
+// Bandeau « ⭐ Plat du jour » en tête de la carte, sur tous les onglets.
+// Affichage seul : le nom du jour est le sous-titre (p.sub) saisi par la
+// patronne, jamais le texte d'exemple « Ex : … ». Masqué pendant une recherche
+// texte, et soumis aux mêmes filtres que la liste (allergies déclarées,
+// Végé/Vegan…) pour ne jamais mettre en avant un plat que le client a exclu.
+// Toucher le bandeau ouvre la fiche via la délégation data-action="detail".
+function renderPdjBanner(){
+  if(String(searchQuery || '').trim()) return '';
+  const p = (menu.products||[]).find(x => {
+    if(!x || x.pdj !== true || x.active === false) return false;
+    const sub = String(x.sub ?? '').trim();
+    return !!sub && !/^\s*ex\s*:/i.test(sub) && matchesFilters(x);
+  });
+  if(!p) return '';
+  const name = String(p.sub ?? '').trim();
+  const img = safeUrl(optImg(p.imgUrl || productImages[p.id] || null, 'thumb'));
+  const outOfStock = p.stock === 0;
+  return `<div class="pdj-wrap">
+    <button type="button" class="pdj-banner${outOfStock?' sold-out':''}" data-action="detail" data-pid="${escHtml(p.id)}">
+      ${img ? `<span class="prod-img"><img src="${escHtml(img)}" alt="" decoding="async" width="64" height="64"></span>` : ''}
+      <span class="pdj-info">
+        <span class="pdj-label">⭐ Plat du jour</span>
+        <span class="pdj-name">${escHtml(name)}</span>
+        <span class="pdj-price">${escHtml(priceLabel(p))}${outOfStock ? ' <span class="pdj-soldout">· Épuisé</span>' : ''}</span>
+      </span>
+    </button>
+  </div>`;
 }
 
 // Event delegation : clic sur une carte produit → fiche détaillée
@@ -462,22 +492,27 @@ body{display:flex;flex-direction:column}
 #app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0}
 .table-pill{background:var(--accent);color:#000;font-family:'Bebas Neue',sans-serif;font-size:18px;padding:4px 14px;border-radius:20px;letter-spacing:1px}
 #resto-name{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:1px}
-.tagline{font-size:10px;color:var(--muted);font-weight:700}
+.tagline{font-size:11px;color:var(--muted);font-weight:700}
 
-/* Main app */
-#app{flex:1;display:none;flex-direction:column;overflow:hidden}
+/* Main app — #app défile en entier : recherche et filtres partent avec la
+   liste, seuls les onglets restent collés en haut (#menu-tabs sticky). */
+#app{flex:1;display:none;flex-direction:column;overflow-y:auto;overflow-x:hidden}
 #loading{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted)}
 
 /* Tabs */
-#menu-tabs{display:flex;gap:8px;padding:10px 16px;overflow-x:auto;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;scrollbar-width:none}
+#menu-tabs{display:flex;gap:8px;padding:10px 16px;overflow-x:auto;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;scrollbar-width:none;position:sticky;top:0;z-index:5}
 #menu-tabs::-webkit-scrollbar{display:none}
 .mtab{height:36px;padding:0 16px;border-radius:20px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .15s;flex-shrink:0}
 .mtab.active{background:rgba(245,166,35,.15);border-color:var(--accent);color:var(--accent)}
 
 /* Products */
-#menu-content{flex:1;overflow-y:auto;padding-bottom:calc(24px + env(safe-area-inset-bottom))}
-.menu-footnote{font-size:10px;color:var(--muted);text-align:center;padding:16px;letter-spacing:.3px;font-weight:600;text-transform:uppercase}
-.sec-sep{padding:8px 16px;font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--muted);background:rgba(255,255,255,.02);border-top:1px solid var(--border);margin-top:6px}
+#menu-content{flex:none;padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+.menu-footnote{font-size:11px;color:var(--muted);text-align:center;padding:16px;letter-spacing:.3px;font-weight:600;text-transform:uppercase}
+.sec-sep{padding:8px 16px;font-size:12px;font-weight:800;letter-spacing:1.5px;color:var(--muted);background:rgba(255,255,255,.02);border-top:1px solid var(--border);margin-top:6px}
+/* Première section collée aux onglets : un seul trait (celui de #menu-tabs), pas de bande vide */
+#menu-content > .sec-sep:first-child{margin-top:0;border-top:0}
+/* Première section sous le bandeau « Plat du jour » : le bandeau donne déjà l'espace */
+#menu-content > .pdj-wrap + .sec-sep{margin-top:0}
 .prod-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
 .prod-card.sold-out{opacity:.5}
 .prod-img{width:64px;height:64px;border-radius:12px;overflow:hidden;flex-shrink:0;background:var(--card)}
@@ -494,9 +529,11 @@ body{display:flex;flex-direction:column}
 #search-input{flex:1;height:40px;padding:0 14px;background:var(--card);border:1px solid var(--border);border-radius:20px;color:var(--text);font-size:14px;outline:none;transition:border-color .15s}
 #search-input::placeholder{color:var(--muted-2)}
 #search-input:focus{border-color:var(--accent)}
-#filter-bar{display:flex;gap:6px;padding:8px 16px;overflow-x:auto;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;scrollbar-width:none}
+#filter-bar{display:flex;gap:8px;padding:8px 16px;overflow-x:auto;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;scrollbar-width:none}
 #filter-bar::-webkit-scrollbar{display:none}
-#filter-bar .chip{height:32px;padding:0 12px;font-size:12px;font-weight:700;flex-shrink:0}
+#filter-bar .chip{height:36px;padding:0 14px;font-size:13px;font-weight:700;flex-shrink:0}
+/* Petits téléphones : la 4e puce reste entamée à l'écran (indice qu'on peut faire glisser) */
+@media (max-width:374px){#filter-bar{gap:6px}#filter-bar .chip{padding:0 12px}}
 
 /* Skeleton */
 .skel-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
@@ -516,7 +553,7 @@ body{display:flex;flex-direction:column}
 .chip-allergies[aria-pressed="true"]{background:rgba(232,64,64,.15) !important;border-color:rgba(232,64,64,.5) !important;color:#ff7878 !important}
 
 /* Pastille allergènes sur card produit */
-.prod-allergens-hint{font-size:10px;font-weight:700;color:#e84040;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.25);padding:2px 8px;border-radius:8px;margin-top:4px;display:inline-block;letter-spacing:.3px}
+.prod-allergens-hint{font-size:11px;font-weight:700;color:#e84040;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.25);padding:2px 8px;border-radius:8px;margin-top:4px;display:inline-block;letter-spacing:.3px}
 
 /* Badge "Épuisé" */
 .badge-soldout{font-size:12px;font-weight:700;color:var(--red);background:rgba(232,64,64,.1);padding:6px 14px;border-radius:20px;white-space:nowrap}
@@ -532,7 +569,7 @@ body{display:flex;flex-direction:column}
 #detail-close{position:absolute;top:12px;right:12px;width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;border:none;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);z-index:10}
 .detail-body{padding:20px 18px calc(28px + env(safe-area-inset-bottom))}
 .detail-name{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;line-height:1.05;margin-bottom:6px}
-.detail-price{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--accent);letter-spacing:1px;margin-bottom:14px}
+.detail-price{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--green);letter-spacing:1px;margin-bottom:14px}
 .detail-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
 .detail-tag{font-size:11px;font-weight:700;padding:5px 11px;border-radius:14px;letter-spacing:.4px}
 .detail-tag.veg{background:rgba(34,201,122,.15);color:#22c97a;border:1px solid rgba(34,201,122,.3)}
@@ -540,11 +577,41 @@ body{display:flex;flex-direction:column}
 .detail-tag.spicy{background:rgba(232,64,64,.15);color:#e84040;border:1px solid rgba(232,64,64,.3)}
 .detail-tag.allergen{background:rgba(245,166,35,.12);color:var(--accent);border:1px solid rgba(245,166,35,.25)}
 .detail-section{margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
-.detail-section-label{font-size:10px;font-weight:800;color:var(--muted);letter-spacing:1.2px;text-transform:uppercase;margin-bottom:6px}
+.detail-section-label{font-size:11px;font-weight:800;color:var(--muted);letter-spacing:1.2px;text-transform:uppercase;margin-bottom:6px}
 .detail-section-text{font-size:14px;line-height:1.5;color:var(--text)}
 .detail-allergens-list{display:flex;flex-wrap:wrap;gap:6px}
 #detail-variants{white-space:pre-line}
 .prod-card{cursor:pointer}
+/* Chevron discret : indique qu'on peut toucher le plat pour ouvrir sa fiche */
+.prod-card::after{content:'›';content:'›'/'';flex-shrink:0;font-size:24px;line-height:1;color:var(--muted-2)}
+
+/* Bandeau « Plat du jour » : en tête de la carte, sur tous les onglets */
+.pdj-wrap{padding:12px 16px}
+.pdj-banner{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;background:var(--card);border:1px solid var(--accent);border-radius:var(--radius);color:var(--text);text-align:left;cursor:pointer;transition:background .15s,transform .15s}
+.pdj-banner:active{background:var(--card-hover);transform:scale(.99)}
+.pdj-banner.sold-out{opacity:.6}
+.pdj-banner .prod-img{display:block}
+.pdj-info{display:block;flex:1;min-width:0}
+.pdj-label{display:block;font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:1.5px;line-height:1;text-transform:uppercase;color:var(--accent)}
+.pdj-name{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-size:16px;font-weight:700;line-height:1.25;margin-top:4px}
+.pdj-price{display:block;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:.5px;color:var(--green);margin-top:3px}
+.pdj-soldout{color:var(--red)}
+.pdj-banner::after{content:'›';content:'›'/'';flex-shrink:0;font-size:26px;line-height:1;color:var(--accent)}
+
+/* Carte sur tablette ou téléphone en paysage : grille au lieu d'une seule colonne étirée */
+@media (min-width:720px){
+  #menu-content{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));align-content:start}
+  #menu-content > :not(.prod-card){grid-column:1/-1}  /* séparateurs, bandeau plat du jour, note TTC, état vide : pleine largeur */
+  .prod-card{border-right:1px solid var(--border)}
+  .prod-img{width:88px;height:88px}
+  .prod-name{font-size:16px}
+  .prod-sub{font-size:13px}
+  .pdj-wrap{padding:16px}
+  .pdj-banner{gap:16px;padding:12px 16px;max-width:760px}   /* pas étiré sur 1 280 px */
+  .pdj-label{font-size:17px}
+  .pdj-name{font-size:19px}
+  .pdj-price{font-size:22px}
+}
 </style>
 </head>
 <body>

@@ -547,8 +547,8 @@ else bootFirebaseListeners();
       }
     })();
     </script>
-    <div style="font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:2px;color:#f0f0f0">La <span style="color:#f5a623">Marmite</span> Express</div>
-    <div style="font-size:12px;color:#6b7280;font-weight:700;letter-spacing:1px;margin-top:2px">ACCÈS CAISSE — CODE PIN</div>
+    <div id="pin-title" style="font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:2px;color:#f0f0f0">La <span style="color:#f5a623">Marmite</span> Express</div>
+    <div id="pin-sub" style="font-size:12px;color:#6b7280;font-weight:700;letter-spacing:1px;margin-top:2px">ACCÈS CAISSE — CODE PIN</div>
   </div>
   <!-- Dots -->
   <div style="display:flex;gap:14px;margin-bottom:28px" id="pin-dots">
@@ -560,7 +560,7 @@ else bootFirebaseListeners();
   <!-- Error message -->
   <div id="pin-error" style="height:20px;font-size:12px;color:#e84040;font-weight:700;margin-bottom:12px;opacity:0;transition:opacity .2s">Code incorrect</div>
   <!-- Keypad -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:240px">
+  <div id="pin-pad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:240px">
     <button class="pkb" onclick="pinPress('1')">1</button>
     <button class="pkb" onclick="pinPress('2')">2</button>
     <button class="pkb" onclick="pinPress('3')">3</button>
@@ -611,14 +611,14 @@ else bootFirebaseListeners();
       <span class="tkt-badge" id="tkt-cnt">0</span>
     </div>
     <!-- Barre de liaison table (visible quand on édite une table depuis le plan) -->
-    <div id="table-link-bar" style="display:none">
+    <div id="table-link-bar">
       <div class="tlb-info">
         <span class="tlb-icon">🍽️</span>
         <span class="tlb-name" id="tlb-table-name">Table —</span>
       </div>
       <div class="tlb-actions">
         <button class="tlb-btn tlb-save" onclick="saveAndReturnToTable()">💾 Enregistrer & retour</button>
-        <button class="tlb-btn tlb-unlink" onclick="unlinkTable()">✕</button>
+        <button class="tlb-btn tlb-unlink" onclick="unlinkTable()" title="Détacher la table (vente directe)" aria-label="Détacher la table">✕</button>
       </div>
     </div>
     <div id="person-bar"></div>
@@ -630,7 +630,7 @@ else bootFirebaseListeners();
     </div>
     <div id="tkt-actions">
       <button class="ta ta-del" onclick="clearTicket()">🗑️ Vider</button>
-      <button class="ta ta-und" onclick="undoLast()">↩</button>
+      <button class="ta ta-und" onclick="undoLast()" title="Retirer 1 exemplaire du dernier article du ticket">↩ Annuler</button>
       <button class="ta ta-pay" id="btn-pay" onclick="openPay()" disabled>💳 Payer</button>
     </div>
   </div>
@@ -641,7 +641,7 @@ else bootFirebaseListeners();
   <div id="admin-header">
     <button class="btn-back" onclick="showPOS()" aria-label="Retour caisse" title="Retour caisse">←</button>
     <h1>⚙️ Administration</h1>
-    <div style="margin-left:auto;font-size:12px;color:var(--muted)">Toutes les modifications sont sauvegardées automatiquement</div>
+    <div class="admin-hdr-note" style="margin-left:auto;font-size:12px;color:var(--muted)"><span class="hdr-note-long">Toutes les modifications sont sauvegardées automatiquement</span><span class="hdr-note-short">✓ Sauvegarde auto</span></div>
   </div>
   <div id="admin-body">
     <div id="admin-sidebar">
@@ -724,11 +724,12 @@ else bootFirebaseListeners();
       <div class="admin-panel" id="panel-products">
         <div class="apanel-title">🍽️ Produits</div>
         <div class="apanel-sub">Gérez tous vos articles — cliquez sur une carte pour modifier</div>
-        <button onclick="openPdjModal()" style="height:44px;padding:0 20px;border-radius:var(--radius-sm);background:rgba(245,166,35,.12);color:var(--accent);border:1px solid rgba(245,166,35,.3);font-weight:700;font-size:13px;margin-bottom:8px;width:100%">⭐ Modifier le plat du jour</button>
-        <button onclick="resyncFromFirestore()" id="btn-resync" style="height:38px;padding:0 16px;border-radius:var(--radius-sm);background:rgba(74,158,255,.1);color:var(--blue,#4a9eff);border:1px solid rgba(74,158,255,.25);font-weight:700;font-size:12px;margin-bottom:12px;width:100%">↻ Resynchroniser depuis le cloud (écrase les brouillons locaux)</button>
+        <button onclick="openPdjModal()" style="height:44px;padding:0 20px;border-radius:var(--radius-sm);background:rgba(245,166,35,.12);color:var(--accent);border:1px solid rgba(245,166,35,.3);font-weight:700;font-size:13px;margin-bottom:12px;width:100%">⭐ Modifier le plat du jour</button>
         <div class="cat-tab-list" id="prod-cat-tabs"></div>
         <div id="prod-list"></div>
         <button onclick="openAddProduct()" style="height:44px;padding:0 20px;border-radius:var(--radius-sm);background:rgba(34,201,122,.1);color:var(--green);border:1px solid rgba(34,201,122,.2);font-weight:700;font-size:13px;margin-top:4px">+ Nouveau produit</button>
+        <!-- Action technique et rare : en bas du panneau, style discret (audit visuel 23/11) -->
+        <button onclick="resyncFromFirestore()" id="btn-resync" style="display:block;width:100%;min-height:40px;padding:8px 14px;margin-top:20px;border-radius:var(--radius-sm);background:none;border:1px dashed rgba(74,158,255,.35);color:var(--blue,#4a9eff);font-weight:600;font-size:12px;line-height:1.3">↻ Resynchroniser depuis le cloud (écrase les brouillons locaux)</button>
       </div>
 
       <!-- SETTINGS -->
@@ -984,12 +985,15 @@ else bootFirebaseListeners();
   </div>
 
   <!-- Canvas area -->
-  <div style="flex:1;display:flex;min-height:0;position:relative;overflow:hidden">
+  <div id="salle-body" style="flex:1;display:flex;min-height:0;position:relative;overflow:hidden">
     <div id="salle-canvas" style="flex:1;position:relative;overflow:hidden;background:var(--bg);cursor:default;touch-action:none">
       <!-- Floor grid drawn by JS -->
       <svg id="salle-grid-svg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>
       <div id="salle-elements" style="position:absolute;inset:0"></div>
     </div>
+
+    <!-- Portrait / téléphone : gros numéros de table sous le plan (mode Service) -->
+    <div id="salle-quick" aria-label="Tables"></div>
 
     <!-- Right panel: table detail in service mode -->
     <div id="salle-detail" style="width:300px;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;transition:width .2s">
@@ -1263,7 +1267,7 @@ else bootFirebaseListeners();
           <img id="pdj-img-preview" src="" style="display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
           <div id="pdj-img-ov" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff">Changer la photo</div>
           <span id="pdj-img-ph" style="font-size:36px">🍽️</span>
-          <span style="font-size:11px;color:var(--muted)">Cliquer pour importer</span>
+          <span style="font-size:11px;color:var(--muted)">Toucher pour ajouter une photo</span>
         </div>
         <div id="pdj-ia-img-status" style="font-size:11px;color:var(--muted);margin-top:6px;min-height:16px;text-align:center"></div>
       </div>
@@ -1284,10 +1288,10 @@ else bootFirebaseListeners();
     </div>
     <div class="modal-body" style="text-align:center;padding:24px 20px">
       <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Voulez-vous mettre à jour le plat du jour ?</div>
-      <div id="pdj-daily-current" style="background:var(--card);border-radius:var(--radius);padding:14px;margin-bottom:20px;font-size:14px;font-weight:600;color:var(--text)"></div>
+      <div id="pdj-daily-current" style="background:var(--card);border-radius:var(--radius);padding:14px;margin-bottom:0;font-size:14px;font-weight:600;color:var(--text)"></div>
     </div>
     <div class="modal-foot" style="gap:8px">
-      <button class="mbtn mbtn-cancel" onclick="closePdjDaily()">Non, garder tel quel</button>
+      <button class="mbtn mbtn-cancel" onclick="closePdjDaily()">Garder tel quel</button>
       <button class="mbtn mbtn-save" onclick="closePdjDaily();openPdjModal()">✏️ Modifier</button>
     </div>
   </div>
@@ -2334,10 +2338,10 @@ function renderTVASummaryHTML(items){
   if(d.totalTTC===0) return '';
   const rateKeys = Object.keys(d.rates).sort((a,b)=>parseFloat(a)-parseFloat(b));
   return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:3px">
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
       <span>Total HT</span><span>${fmt(d.totalHT)}</span>
     </div>
-    ${rateKeys.map(r=>`<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px">
+    ${rateKeys.map(r=>`<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:2px">
       <span>TVA ${r}%</span><span>${fmt(d.rates[r].tva)}</span>
     </div>`).join('')}
     <div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700;color:var(--text);margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,.06)">
@@ -2380,7 +2384,7 @@ function renderTicket(){
     const person=persons.find(p=>p.id===r.personId);
     const dot=person?`<span class="trow-who" style="background:${esc(person.color)}"></span>`:'<span class="trow-who" style="background:transparent"></span>';
     const optTxt = [r.cuisson, r.garniture].filter(Boolean).join(' · ');
-    const optHtml = optTxt ? `<div style="font-size:9px;color:var(--accent);font-weight:600;margin-top:1px">${esc(optTxt)}</div>` : '';
+    const optHtml = optTxt ? `<div style="font-size:11px;color:var(--accent);font-weight:600;margin-top:1px">${esc(optTxt)}</div>` : '';
     return `<div class="trow">${th}${dot}<span class="trow-qty">${Number(r.qty)||0}×</span><span class="trow-name">${esc(r.name)}${optHtml}</span><span class="trow-price">${fmt(r.qty*r.price)}</span><button class="trow-del" onclick="removeRow(${jsArg(r.rid)})">✕</button></div>`;
   }).join('');
   c.scrollTop=c.scrollHeight;
@@ -3620,7 +3624,7 @@ function renderProdList(){
       </div>
       <div class="acard-info">
         <div class="acard-name">${esc(p.name)}${p.pdj?' <span style="font-size:10px;background:var(--accent);color:#000;padding:1px 6px;border-radius:10px">PDJ</span>':''}</div>
-        <div class="acard-meta">${p.section?'<span style="color:var(--accent);font-size:10px;font-weight:700;margin-right:4px">§ '+esc(p.section)+'</span>':''} ${esc(p.sub||'—')} · ${p.active?'<span style="color:var(--green)">Visible</span>':'<span style="color:var(--red)">Masqué</span>'}</div>
+        <div class="acard-meta">${p.section?'<span style="color:var(--accent);font-size:11px;font-weight:700;margin-right:4px">§ '+esc(p.section)+'</span>':''} ${esc(p.sub||'—')} · ${p.active?'<span style="color:var(--green)">Visible</span>':'<span style="color:var(--red)">Masqué</span>'}</div>
       </div>
       <div class="acard-price">${fmt(p.price)}</div>
       <div class="acard-actions">
@@ -4382,8 +4386,10 @@ function applySalleMode(){
   document.getElementById('salle-legend').textContent = isEdit
     ? 'Faites glisser les éléments pour les repositionner'
     : 'Cliquez une table pour gérer le service';
-  document.getElementById('stab-service').style.opacity = isEdit ? '.5' : '1';
-  document.getElementById('stab-edit').style.opacity = isEdit ? '1' : '.5';
+  // .8 et non .5 : l'onglet inactif paraissait désactivé (audit visuel 23/11) ; l'actif garde son fond
+  document.getElementById('stab-service').style.opacity = isEdit ? '.8' : '1';
+  document.getElementById('stab-edit').style.opacity = isEdit ? '1' : '.8';
+  document.getElementById('salle-screen').classList.toggle('salle-editing', isEdit);
   // Toggle right panel
   document.getElementById('salle-detail').style.width = isEdit ? '0' : '300px';
   document.getElementById('salle-detail').style.overflow = 'hidden';
@@ -4439,7 +4445,34 @@ function renderSalle(){
     return;
   }
   salleElements.forEach(el => canvas.appendChild(makeElDOM(el)));
+  renderSalleQuick();
   applySalleScale();
+}
+
+// Grille de gros numéros sous le plan (visible en portrait, mode Service) :
+// sur téléphone ou tablette debout, le plan réduit rend les tables trop petites
+// pour le doigt. Même effet qu'un toucher sur la table du plan.
+function renderSalleQuick(){
+  const box = document.getElementById('salle-quick');
+  if(!box) return;
+  box.innerHTML = '';
+  const tables = (salleElements||[]).filter(e => e.type==='table-round' || e.type==='table-rect')
+    .sort((a,b) => String(a.number??'').localeCompare(String(b.number??''), 'fr', {numeric:true}));
+  tables.forEach(el => {
+    const st = tableStatus(el.id);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sq-btn' + (st==='occupied' ? ' sq-busy' : st==='partial' ? ' sq-partial' : '');
+    const n = document.createElement('span'); n.className = 'sq-num'; n.textContent = String(el.number ?? '');
+    b.appendChild(n);
+    if(st==='occupied' || st==='partial'){
+      const l = document.createElement('span'); l.className = 'sq-lbl'; l.textContent = st==='partial' ? 'PARTIEL' : 'EN COURS';
+      b.appendChild(l);
+    }
+    b.setAttribute('aria-label', 'Table ' + String(el.number ?? '') + (st==='free' ? ' (libre)' : ' (en cours)'));
+    b.addEventListener('click', () => { if(salleMode !== 'edit') openTableService(el.id); });
+    box.appendChild(b);
+  });
 }
 
 // Etat zoom/pan plan-salle
@@ -4459,6 +4492,9 @@ function applySalleScale(reset){
   const padding = 60;
   const planW = maxX + padding;
   const planH = maxY + padding;
+  // Proportion du plan pour le CSS (portrait : zone du plan à sa hauteur exacte,
+  // la grille de numéros prend le reste). Posée AVANT de mesurer la zone.
+  wrap.style.setProperty('--salle-ar', planW + ' / ' + planH);
   // Mode édition : pas de scale (besoin coordonnées exactes pour drag)
   if(salleMode==='edit'){
     canvas.style.transform = '';
@@ -4794,6 +4830,12 @@ function makeElDOM(el){
   if(el.type==='table-round'){
     const box = salleBox(el);
     const sz = Math.min(box.w, box.h);
+    // Textes proportionnels à la table (le plan est réduit à l'écran : en dur,
+    // numéro et « EN COURS » devenaient illisibles). Bornes basses = anciennes
+    // tailles ; un numéro long est plafonné pour rester dans la largeur.
+    const numLen = Math.max(2, String(el.number||'').length);
+    const fNum = Math.round(Math.min(Math.max(15, Math.min(48, sz*0.34)), box.w*0.8/(numLen*0.45)));
+    const fTxt = Math.round(Math.max(9, Math.min(18, sz*0.13)));
     const status = tableStatus(el.id);
     const tc = tableColors(status);
     const color = tc.color;
@@ -4814,9 +4856,9 @@ function makeElDOM(el){
     const noteRound = (tableData[el.id] && tableData[el.id].note) || '';
     div.innerHTML = `
       ${noteRound ? `<div style="position:absolute;top:6px;right:6px;font-size:14px;cursor:help;z-index:2" title="${esc(noteRound)}">📝</div>` : ''}
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:${sz>80?20:15}px;letter-spacing:1px;color:${color};line-height:1">${esc(el.number||'')}</div>
-      <div style="font-size:10px;color:var(--muted);font-weight:600">${Number(el.seats)||0} cvts</div>
-      ${tc.label?`<div style="font-size:9px;font-weight:800;color:${color};margin-top:2px">${tc.label}</div>`:''}
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:${fNum}px;letter-spacing:1px;color:${color};line-height:1">${esc(el.number||'')}</div>
+      <div style="font-size:${fTxt}px;line-height:1.2;color:var(--muted);font-weight:600">${Number(el.seats)||0} cvts</div>
+      ${tc.label?`<div style="font-size:${fTxt}px;line-height:1.2;font-weight:800;color:${color};margin-top:2px">${tc.label}</div>`:''}
     `;
     // Chaises autour (cercle seulement ; un ovale garde son contour net)
     if(box.w === box.h) drawChairs(div, el.seats||4, sz);
@@ -4824,6 +4866,10 @@ function makeElDOM(el){
 
   else if(el.type==='table-rect'){
     const box = salleBox(el);
+    const sz = Math.min(box.w, box.h);
+    const numLen = Math.max(2, String(el.number||'').length);
+    const fNum = Math.round(Math.min(Math.max(20, Math.min(48, sz*0.34)), box.w*0.8/(numLen*0.45)));
+    const fTxt = Math.round(Math.max(10, Math.min(18, sz*0.15)));
     const status = tableStatus(el.id);
     const tc = tableColors(status);
     const color = tc.color;
@@ -4844,9 +4890,9 @@ function makeElDOM(el){
     const noteRect = (tableData[el.id] && tableData[el.id].note) || '';
     div.innerHTML = `
       ${noteRect ? `<div style="position:absolute;top:6px;right:6px;font-size:14px;cursor:help;z-index:2" title="${esc(noteRect)}">📝</div>` : ''}
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1px;color:${color};line-height:1">${esc(el.number||'')}</div>
-      <div style="font-size:10px;color:var(--muted);font-weight:600">${Number(el.seats)||0} couverts</div>
-      ${tc.label?`<div style="font-size:9px;font-weight:800;color:${color};margin-top:2px">${tc.label}</div>`:''}
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:${fNum}px;letter-spacing:1px;color:${color};line-height:1">${esc(el.number||'')}</div>
+      <div style="font-size:${fTxt}px;line-height:1.2;color:var(--muted);font-weight:600">${Number(el.seats)||0} couverts</div>
+      ${tc.label?`<div style="font-size:${fTxt}px;line-height:1.2;font-weight:800;color:${color};margin-top:2px">${tc.label}</div>`:''}
     `;
   }
 
@@ -6841,7 +6887,7 @@ function checkPdjDailyPopup() {
   const p = products.find(x => x.pdj && x.active !== false);
   const current = document.getElementById('pdj-daily-current');
   if (p && p.sub && !pdjIsPlaceholder(p.sub)) {
-    current.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">PLAT ACTUEL</div><div style="font-size:16px">⭐ ' + esc(p.sub) + ' — ' + formatPrixSaisi(p.price) + ' €</div>' + (p.description ? '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + esc(p.description) + '</div>' : '');
+    current.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">PLAT ACTUEL</div><div style="font-size:16px">⭐ ' + esc(p.sub) + ' <span style="color:var(--accent);white-space:nowrap">— ' + formatPrixSaisi(p.price) + ' €</span></div>' + (p.description ? '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + esc(p.description) + '</div>' : '');
   } else {
     current.innerHTML = '<div style="color:var(--muted);font-size:13px">Aucun plat du jour défini</div>';
   }

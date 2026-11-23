@@ -406,7 +406,7 @@ try {
 export function requireStaff({ label = "", page = "" } = {}) {
   const DISMISS_KEY = "staff_banner_dismissed";
   let bar = null, wall = null;
-  const css = "position:fixed;left:0;right:0;z-index:2147483000;font-family:system-ui,-apple-system,sans-serif;";
+  const css = "position:fixed;left:0;right:0;z-index:2147483000;font-family:'DM Sans',system-ui,-apple-system,sans-serif;";
   const remove = (el) => { if (el && el.parentNode) el.parentNode.removeChild(el); };
 
   async function askAndEnroll(errEl, input, btn) {
@@ -428,8 +428,8 @@ export function requireStaff({ label = "", page = "" } = {}) {
   function form() {
     const box = document.createElement("div");
     box.innerHTML =
-      '<div style="font-weight:800;font-size:17px;margin-bottom:6px">🔒 Appareil non enregistré</div>' +
-      '<div style="font-size:13px;opacity:.8;margin-bottom:12px">Saisis le code d\'enregistrement du resto (une seule fois par appareil).</div>' +
+      '<div style="font-family:\'Bebas Neue\',sans-serif;font-weight:400;font-size:22px;letter-spacing:1px;line-height:1.1;color:#f5a623;margin-bottom:6px">🔒 Appareil non enregistré</div>' +
+      '<div style="font-size:13px;opacity:.8;margin-bottom:12px">Saisissez le code d\'enregistrement du resto (une seule fois par appareil).</div>' +
       '<input type="password" autocomplete="off" inputmode="text" placeholder="Code d\'enregistrement" style="width:100%;box-sizing:border-box;height:44px;border-radius:10px;border:1px solid #444;background:#111;color:#fff;padding:0 12px;font-size:16px">' +
       '<button type="button" style="margin-top:10px;width:100%;height:44px;border-radius:10px;border:0;background:#f5a623;color:#000;font-weight:800;font-size:15px">Enregistrer</button>' +
       '<div class="err" style="color:#ff6b6b;font-size:13px;margin-top:8px;min-height:16px"></div>';

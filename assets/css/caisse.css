@@ -9,7 +9,9 @@
   --accent:#f5a623;--accent2:#e8522a;--accentd:#c4841a;
   --green:#22c97a;--greend:#189a5c;
   --red:#e84040;--blue:#4a9eff;--purple:#9b6bff;
-  --text:#f0f0f4;--text2:#b0b3c4;--muted:#656878;
+  /* --muted : même valeur que design-system (#8b8fa3) — l'ancien #656878 (3:1)
+     faisait passer les boutons secondaires pour désactivés (audit visuel 23/11) */
+  --text:#f0f0f4;--text2:#b0b3c4;--muted:#8b8fa3;
   --radius:14px;--radius-sm:9px;--radius-lg:20px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -80,7 +82,7 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .mcard-ph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:32px;color:var(--muted)}
 .mcard-body{padding:8px 10px 10px;display:flex;flex-direction:column;gap:3px;flex:1}
 .mcard-name{font-size:12px;font-weight:700;line-height:1.3}
-.mcard-sub{font-size:10px;color:var(--muted);line-height:1.3}
+.mcard-sub{font-size:11px;color:var(--muted);line-height:1.3}
 .mcard-foot{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:5px}
 .mcard-price{font-family:'Bebas Neue',sans-serif;font-size:19px;color:var(--accent)}
 .mcard-add{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#000;font-size:17px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .1s}
@@ -103,6 +105,13 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .tlb-save{background:var(--green);color:#000;border:none}
 .tlb-save:active{transform:scale(.95)}
 .tlb-unlink{background:none;border:1px solid var(--border);color:var(--muted);width:30px;padding:0;font-size:13px}
+/* Barre table : nom sur sa propre ligne (panneau ticket de 280px en tablette portrait), gros bouton dessous */
+#table-link-bar .tlb-info{flex:1 1 100%}
+#table-link-bar .tlb-name{font-size:14px}
+#table-link-bar .tlb-actions{flex:1 1 100%}
+#table-link-bar .tlb-save{flex:1}
+#table-link-bar .tlb-btn{height:40px;font-size:12px}
+#table-link-bar .tlb-unlink{width:40px;flex-shrink:0;font-size:14px}
 /* Person selector bar */
 #person-bar{display:none;flex-shrink:0;padding:8px 10px;gap:6px;background:var(--card);border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none}
 #person-bar::-webkit-scrollbar{display:none}
@@ -121,10 +130,13 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .trow-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .trow-who{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--muted)}
 .trow-qty{font-family:'Bebas Neue',sans-serif;font-size:17px;color:var(--accent);min-width:22px;text-align:center;flex-shrink:0}
-.trow-name{flex:1;font-size:11px;font-weight:600;line-height:1.3}
-.trow-price{font-size:11px;font-weight:700;flex-shrink:0}
-.trow-del{width:24px;height:24px;border-radius:50%;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.15);color:var(--red);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .1s}
+/* min-width:0 + overflow-wrap : un nom long (« Garniture Supplémentaire ») passe à la ligne
+   au lieu de pousser le prix et le ✕ hors du panneau */
+.trow-name{flex:1;min-width:0;overflow-wrap:anywhere;font-size:13px;font-weight:600;line-height:1.3}
+.trow-price{font-size:13px;font-weight:700;flex-shrink:0}
+.trow-del{width:32px;height:32px;margin-left:4px;border-radius:50%;background:rgba(232,64,64,.1);border:1px solid rgba(232,64,64,.15);color:var(--red);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .1s}
 .trow-del:hover{background:var(--red);color:#fff}
+@media (pointer: coarse){.trow-del{width:36px;height:36px;font-size:14px}}
 .tkt-empty{padding:36px 16px;text-align:center;color:var(--muted)}
 .tkt-empty span{font-size:36px;display:block;margin-bottom:8px;opacity:.4}
 .tkt-empty p{font-size:12px}
@@ -135,7 +147,7 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .tfoot-big .lb{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px}
 .tfoot-big .vl{font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--accent)}
 #tkt-actions{display:flex;gap:6px;padding:0 12px 12px;flex-shrink:0}
-.ta{flex:1;height:44px;border-radius:var(--radius-sm);font-size:12px;font-weight:700;transition:all .1s}
+.ta{flex:1;height:44px;padding:0 4px;line-height:1.15;border-radius:var(--radius-sm);font-size:12px;font-weight:700;transition:all .1s}
 .ta:active{transform:scale(.96);opacity:.8}
 .ta-del{background:rgba(232,64,64,.1);color:var(--red);border:1px solid rgba(232,64,64,.18)}
 .ta-und{background:var(--card);color:var(--muted);border:1px solid var(--border)}
@@ -231,12 +243,32 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .btn-pay-all{height:40px;padding:0 18px;border-radius:var(--radius-sm);background:var(--accent);color:#000;font-weight:800;font-size:13px}
 .btn-add-articles{height:40px;padding:0 14px;border-radius:var(--radius-sm);background:rgba(74,158,255,.12);color:var(--blue);border:1px solid rgba(74,158,255,.25);font-weight:700;font-size:12px;white-space:nowrap}
 
+/* Tablette caisse : addition plus lisible (lignes à retaper sur la caisse du resto).
+   Les tailles des lignes sont en style inline (renderTableModal) : zoom agrandit tout d'un coup.
+   min-height exclut le téléphone tenu en paysage. */
+@media (min-width:768px) and (min-height:600px){
+  #table-modal{max-width:720px}
+  #tm-detail{zoom:1.25}
+  .tm-section h4{font-size:12px}
+  .tm-total-info{font-size:20px}
+  .tm-total-info span{font-size:30px}
+}
+
 /* ═══════════════════ RESPONSIVE ═══════════════════ */
 
 /* Tablette (≤900px) : ticket plus étroit */
 @media(max-width:900px){
   #ticket-panel{width:280px}
   .menu-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}
+  /* Tablette portrait : le header (520 px) passe sur 2 lignes au lieu de déborder
+     sur le ticket (Admin et 🔒 cachaient « TICKET » et la 1re ligne) */
+  #menu-panel{overflow:hidden}
+  #pos-header{flex-wrap:wrap;row-gap:6px;padding:8px 12px}
+  /* Ticket de 280 px : lignes resserrées pour que nom, prix et ✕ tiennent */
+  .trow{gap:6px;padding:8px 10px}
+  .trow-thumb{width:30px;height:30px}
+  .trow-name,.trow-price{font-size:12px}
+  .trow-del{margin-left:0}
 }
 
 /* Mobile (≤640px) : layout vertical avec onglets */
@@ -295,7 +327,17 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
   #salle-mode-tabs .hbtn{height:30px;padding:0 8px;font-size:10px}
   #salle-detail{width:0!important;display:none!important}
   #salle-canvas{overflow:auto!important;-webkit-overflow-scrolling:touch}
+
+  /* Modal table : pied de l'addition en rangées pleines (téléphone) */
+  .tm-total-info{flex:1 1 100%}
+  .tm-footer>button{flex:1 1 auto;height:46px}
+  .tm-close{width:40px;height:40px}
 }
+
+/* Panneau détail du plan de salle : jamais rempli (le clic sur une table ouvre
+   directement l'addition), on rend sa place au plan. !important car la largeur
+   et l'affichage sont en style inline / posés par applySalleMode(). */
+#salle-detail{display:none!important}
 
 /* Barre nav mobile (cachée par défaut, visible ≤640px) */
 #mob-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);z-index:90;height:56px;align-items:stretch}
@@ -305,9 +347,21 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .mob-nav-badge{position:absolute;top:8px;right:calc(50% - 18px);background:var(--accent);color:#000;font-size:9px;font-weight:800;width:16px;height:16px;border-radius:50%;display:none;align-items:center;justify-content:center}
 .mob-nav-badge.show{display:flex}
 
-/* Espace pour la nav mobile en bas */
+/* Nav mobile en bas : ce bloc vient APRÈS la règle de base #mob-nav (display:none),
+   sinon la barre ne s'affiche jamais et le ticket reste inaccessible sur téléphone */
 @media(max-width:640px){
-  #menu-scroll{padding-bottom:70px}
+  #mob-nav{display:flex;height:calc(56px + env(safe-area-inset-bottom,0px));padding-bottom:env(safe-area-inset-bottom,0px)}
+  .mob-nav-btn{font-size:11px}
+  /* la caisse s'arrête au-dessus de la barre : Vider / ↩ / Enregistrer & retour restent visibles */
+  #pos-screen{bottom:calc(56px + env(safe-area-inset-bottom,0px))}
+  /* la zone sûre du bas est déjà comptée dans « bottom » ci-dessus */
+  html.pwa-standalone #pos-screen{padding-bottom:0!important}
+  /* Salle et Admin recouvrent la barre (z 90) ; ils ont leur propre bouton ← */
+  #salle-screen,#admin-screen{z-index:95}
+  /* doublons de la barre du bas : l'en-tête tient sur 1 ligne */
+  #pos-header .hbtn-table,#pos-header .hbtn-admin,#pos-header .hbtn[onclick^="quickShowCA"]{display:none}
+  #pos-header>a{margin-right:auto}
+  #menu-scroll{padding-bottom:12px}
   #tkt-items{padding-bottom:0}
 }
 
@@ -315,6 +369,16 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 #admin-screen{background:var(--bg)}
 #admin-header{min-height:58px;display:flex;align-items:center;padding:0 20px;gap:14px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
 #admin-header h1{font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1.5px;color:var(--accent)}
+/* En-tête admin sur téléphone : titre sur une ligne (le ⚙️ ne part plus seul au-dessus),
+   note courte à droite. Placé APRÈS les 2 règles de base ci-dessus, qui sinon l'écraseraient. */
+#admin-header h1{white-space:nowrap}
+.hdr-note-short{display:none}
+@media(max-width:640px){
+  #admin-header{padding-left:12px;padding-right:12px;gap:10px}
+  #admin-header h1{font-size:18px}
+  .hdr-note-long{display:none}
+  .hdr-note-short{display:inline}
+}
 .btn-back{min-width:40px;height:36px;padding:0 10px;border-radius:var(--radius-sm);background:var(--card);border:1px solid var(--border);color:var(--text2);font-size:18px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;line-height:1}
 .btn-back:hover{border-color:var(--accent);color:var(--accent)}
 #admin-body{display:flex;flex:1;min-height:0}
@@ -401,6 +465,9 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .toggle input:checked+.toggle-track{background:var(--accent)}
 .toggle-track::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s}
 .toggle input:checked+.toggle-track::after{transform:translateX(20px)}
+/* Zone de toucher élargie (~60×38) : le pseudo-élément fait partie du <label>, il bascule
+   l'interrupteur. 7 px en vertical = moitié des 14 px entre 2 lignes → aucun chevauchement. */
+.toggle::before{content:'';position:absolute;inset:-7px -8px;cursor:pointer}
 
 /* Category tab list in admin */
 .cat-tab-list{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
@@ -431,11 +498,29 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .sec-card-icon{font-size:20px;flex-shrink:0}
 
 /* ═══════════════════ TOAST ═══════════════════ */
-#toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(12px);padding:11px 24px;border-radius:40px;font-weight:800;font-size:13px;opacity:0;transition:all .28s;z-index:1000;pointer-events:none;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+/* width:max-content + max-width : largeur naturelle, bornée à l'écran (sans width,
+   un fixed à left:50% serait limité à la moitié de l'écran). Les messages longs
+   passent à la ligne au lieu d'être coupés des deux côtés sur téléphone. */
+#toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(12px);padding:11px 24px;border-radius:20px;font-weight:800;font-size:13px;opacity:0;transition:opacity .28s,transform .28s;z-index:1000;pointer-events:none;width:max-content;max-width:calc(100% - 32px);white-space:normal;text-align:center;line-height:1.35;box-shadow:0 4px 20px rgba(0,0,0,.5)}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #toast.g{background:var(--green);color:#000}
 #toast.o{background:var(--accent);color:#000}
 #toast.r{background:var(--red);color:#fff}
+/* Toast centré sur la colonne carte quand le ticket est à droite (écran caisse seulement ;
+   Salle et Admin gardent un toast centré sur tout l'écran) */
+@media(min-width:901px){#pos-screen.active ~ #toast{left:calc((100% - 360px)/2);max-width:calc(100% - 392px)}}
+@media(min-width:751px) and (max-width:900px){#pos-screen.active ~ #toast{left:calc((100% - 280px)/2);max-width:calc(100% - 312px)}}
+/* 641-750 px : ticket en bas (240 px, cf. bloc max-width:750px) → toast au-dessus */
+@media(min-width:641px) and (max-width:750px){#pos-screen.active ~ #toast{bottom:256px}}
+/* Fenêtre ouverte (plat du jour, fiche produit…) : toast en haut, centré sur l'écran,
+   pour ne plus recouvrir Annuler / Valider. Sélecteur frère (pas de :has(), vieux Android) :
+   les .modal-overlay sont au niveau du body, avant #toast. Le préfixe « #pos-screen ~ »
+   (toujours présent avant les fenêtres) le fait passer devant les règles #pos-screen.active
+   ci-dessus, sinon bottom:256px + top étireraient le toast entre 641 et 750 px. */
+#pos-screen ~ .modal-overlay.show ~ #toast{top:calc(4px + env(safe-area-inset-top,0px));bottom:auto;left:50%;max-width:calc(100% - 32px);padding:8px 18px}
+@media(max-width:640px){
+  #pos-screen ~ .modal-overlay.show ~ #toast{padding:6px 14px;font-size:12px;line-height:1.3}
+}
 
 /* Responsive */
 @media(max-width:750px){
@@ -451,6 +536,37 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 }
 @media(max-width:500px){
   #admin-sidebar{display:none}
+  /* Fiche produit sur téléphone : photo à gauche sur 2 rangées, nom + description
+     sur toute la largeur restante, prix et ✏️ 🗑️ dessous (audit visuel 23/11) */
+  .acard{display:grid;grid-template-columns:54px 1fr auto;grid-template-areas:"img info info" "img price act";column-gap:12px;row-gap:8px;align-items:center;padding:12px}
+  .acard-img{grid-area:img}
+  .acard-info{grid-area:info}
+  .acard-price{grid-area:price;margin-right:0}
+  .acard-actions{grid-area:act}
+  .acard .aact{width:40px;height:40px}
+}
+
+/* Admin sur téléphone (≤640px) : onglets horizontaux sous l'en-tête.
+   Doit rester APRÈS les règles de base #admin-sidebar / .aside-btn (bloc ADMIN SCREEN)
+   et après les blocs 750/500 ci-dessus, qui annulaient celui du bloc « Mobile (≤640px) ». */
+@media(max-width:640px){
+  #admin-body{flex-direction:column}
+  #admin-sidebar{display:flex;flex-direction:row;width:100%;overflow-x:auto;overflow-y:hidden;border-right:none;border-bottom:1px solid var(--border);padding:6px;gap:4px;flex-shrink:0;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  #admin-sidebar::-webkit-scrollbar{display:none}
+  #admin-sidebar .aside-section,#admin-sidebar .aside-sep{display:none}
+  #admin-sidebar .aside-btn{flex:0 0 auto;flex-direction:column;justify-content:center;align-items:center;gap:3px;width:auto;min-width:68px;min-height:52px;padding:6px 10px;border-radius:var(--radius-sm);font-size:11px;text-align:center;white-space:nowrap}
+  #admin-sidebar .aside-btn span:not(.ai){display:inline}
+  #admin-sidebar .aside-btn .ai{font-size:20px;width:auto;line-height:1}
+  #admin-content{padding:14px}
+}
+
+/* Admin en paysage large : produits sur 2 colonnes, paramètres resserrés
+   (sinon prix et interrupteurs se retrouvent à ~800 px de leur libellé) */
+@media(min-width:1100px){
+  #prod-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px}
+  #prod-list .acard{margin-bottom:0}
+  #prod-list>:not(.acard){grid-column:1/-1}
+  #panel-settings{max-width:760px}
 }
 
 /* ═══════════════════ PIN KEYPAD ═══════════════════ */
@@ -461,9 +577,80 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .pkb-ok{background:rgba(245,166,35,.15);border-color:rgba(245,166,35,.3);color:#f5a623}
 @keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
 .shake{animation:shake .35s ease}
+/* PIN sur tablette : pavé et logo agrandis (styles inline → !important).
+   min-height exclut les téléphones tenus en paysage. */
+@media (min-width:700px) and (min-height:700px){
+  #pin-pad{width:320px!important;gap:14px!important}
+  .pkb{height:80px;font-size:32px}
+  #pin-logo{width:88px!important;height:88px!important}
+  #pin-title{font-size:34px!important}
+  #pin-sub{font-size:14px!important}
+}
 
 /* v88 — Mode addition (défaut) : la caisse du resto encaisse, l'app ne fait que
    l'addition. Aucun bouton qui enregistrerait une vente dans l'app. */
 html.mode-addition #btn-pay,
 html.mode-addition #btn-pay-all,
 html.mode-addition .ts-pay-btn{display:none !important}
+
+/* ═══════════════════ ADMIN TACTILE (audit visuel 23/11) ═══════════════════
+   En FIN de fichier exprès : dans le bloc (pointer: coarse) du haut, ces règles seraient
+   écrasées par les règles de base .aact / .modal-close / .cat-tab / .toggle, déclarées plus
+   loin avec la même spécificité. */
+@media (pointer: coarse){
+  /* Onglets de catégories et croix des fenêtres */
+  .cat-tab{height:40px;padding:0 16px}
+  .modal-close{width:40px;height:40px;font-size:18px}
+  /* Fiches produits : sur téléphone, prix et ✏️ 🗑️ ont leur propre rangée (bloc ≤500px),
+     on peut donc les agrandir partout */
+  .acard .acard-actions{gap:12px}
+  .acard .aact{width:44px;height:44px;font-size:18px}
+  /* Interrupteurs : 52×30, zone de toucher ~68×44 avec le ::before */
+  .toggle-row{min-height:44px}
+  .toggle{width:52px;height:30px}
+  .toggle-track::after{width:24px;height:24px}
+  .toggle input:checked+.toggle-track::after{transform:translateX(22px)}
+}
+/* Fiches catégories : ✏️ 🗑️ agrandis seulement à partir de 600 px (sur téléphone, le nom
+   de la catégorie n'aurait plus la place, les boutons restant sur la même ligne) */
+@media (pointer: coarse) and (min-width:600px){
+  .acard-actions{gap:12px}
+  .aact{width:44px;height:44px;font-size:18px}
+}
+/* Plat du jour : sans survol au doigt, l'indice « Changer la photo » reste affiché en
+   pastille en haut à droite dès qu'une photo est là (le JS met display:block sur l'image).
+   !important : passe devant le display/inset/background en style inline et devant
+   onmouseover/onmouseout. En haut car le bas de la photo est caché sous le pied à l'ouverture. */
+@media (hover: none), (pointer: coarse){
+  #pdj-img-preview[style*="block"] + #pdj-img-ov{
+    display:flex !important;
+    inset:8px 8px auto auto !important;
+    padding:6px 12px;
+    border-radius:20px;
+    background:rgba(0,0,0,.7) !important;
+    font-size:12px;
+    gap:4px;
+  }
+  #pdj-img-preview[style*="block"] + #pdj-img-ov::before{content:"\1F4F7"}
+}
+
+/* v89 — Plan de salle en portrait (téléphone, tablette debout), mode Service :
+   plan à sa proportion en haut, gros numéros de table dessous (renderSalleQuick).
+   flex en !important : #salle-canvas porte flex:1 en style inline. */
+#salle-quick{display:none}
+@media (orientation:portrait){
+  #salle-screen:not(.salle-editing) #salle-body{flex-direction:column}
+  #salle-screen:not(.salle-editing) #salle-canvas{flex:0 0 auto!important;width:100%;aspect-ratio:var(--salle-ar,16/9);max-height:58%}
+  #salle-screen:not(.salle-editing) #salle-quick{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:10px;align-content:start;flex:1;min-height:0;overflow-y:auto;padding:12px 16px calc(16px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--border);background:var(--bg)}
+}
+.sq-btn{height:60px;border-radius:14px;background:rgba(34,201,122,.1);border:2px solid #22c97a;color:#22c97a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;font-family:inherit}
+.sq-num{font-family:'Bebas Neue',sans-serif;font-size:28px;letter-spacing:1px;line-height:1}
+.sq-lbl{font-size:11px;font-weight:800;letter-spacing:.5px;line-height:1}
+.sq-btn.sq-busy{border-color:var(--accent);color:var(--accent);background:rgba(245,166,35,.12)}
+.sq-btn.sq-partial{border-color:#9b6bff;color:#9b6bff;background:rgba(155,107,255,.14)}
+.sq-btn:active{transform:scale(.97)}
+
+/* v89 — Mode addition : pas de ventes enregistrées dans l'app, donc pas de
+   raccourci « CA » (il afficherait 0 €). L'historique reste dans Admin. */
+html.mode-addition #pos-header .hbtn[onclick^="quickShowCA"],
+html.mode-addition #mobnav-ca{display:none!important}

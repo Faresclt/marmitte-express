@@ -533,6 +533,8 @@ test('v88 : mode addition par défaut ; « Encaisser dans l\'app » rallume les 
   expect(await page.evaluate(() => [encaissementActif(), document.documentElement.classList.contains('mode-addition')])).toEqual([false, true]);
   await page.evaluate(() => { closePdjDaily(); addToTicketDirect('p8'); renderTicket(); });
   await expect(page.locator('#btn-pay')).toBeHidden();
+  const caBtn = page.locator('#pos-header .hbtn[onclick^="quickShowCA"]');
+  await expect(caBtn).toBeHidden();   // pas de ventes dans l'app → pas de « CA » à 0 €
   const day = await page.evaluate(() => serviceDayKey());
   const nSales = () => page.evaluate((d) => JSON.parse(localStorage.getItem('sales_' + d) || '[]').length, day);
   const n0 = await nSales();
@@ -544,6 +546,7 @@ test('v88 : mode addition par défaut ; « Encaisser dans l\'app » rallume les 
   expect(await page.locator('#s-encaissement').isChecked()).toBe(false);
   await toggle(page, true);
   await expect(page.locator('#btn-pay')).toBeVisible();
+  await expect(caBtn).toBeVisible();
   await expect.poll(modeCloud, { timeout: 20_000 }).toBe(true);
   // Une 2e caisse neuve adopte le mode ; sa publication du menu ne touche pas au mode
   const C2 = await openEnrolled(browser, 'marmite-express-caisse.html?emu');
@@ -658,6 +661,7 @@ test('plat du jour : la patronne change le nom ET le prix → serveuses, carte Q
   const qCard = qp.locator('.prod-card', { hasText: pdj0.name });
   await expect(qCard).toBeVisible({ timeout: 30_000 });
   await expect(qCard).not.toContainText(/Ex\s*:/);
+  await expect(qp.locator('.pdj-banner')).toHaveCount(0);   // pas de bandeau « Plat du jour » sur un texte d'exemple
   // Prix illisible ou nul : refusé, rien ne change
   for (const bad of ['abc', '0', '-3', '12,345', '']) {
     await pg.fill('#pdj-nom', 'Essai');
@@ -694,6 +698,21 @@ test('plat du jour : la patronne change le nom ET le prix → serveuses, carte Q
   // Carte QR : nouveau prix, pas de « Ex : »
   // Carte QR déjà ouverte : le nouveau nom et le nouveau prix arrivent d'eux-mêmes
   await expect(qp.locator('.prod-card', { hasText: 'Rougail' })).toContainText('16,50', { timeout: 30_000 });
+  // Bandeau « ⭐ Plat du jour » en haut de la carte, sur tous les onglets ; il ouvre la fiche du plat
+  await qp.locator('#menu-tabs .mtab').first().click();
+  const banner = qp.locator('.pdj-banner');
+  await expect(banner).toContainText('Rougail <b>saucisses</b>');
+  await expect(banner).toContainText('16,50');
+  expect(await qp.locator('.pdj-banner b').count()).toBe(0);
+  await banner.click();
+  await expect(qp.locator('#detail-modal')).toHaveClass(/show/);
+  await expect(qp.locator('#detail-name')).toContainText(pdj0.name);
+  await qp.evaluate(() => closeDetail());
+  // Pendant une recherche, le bandeau s'efface (il revient quand on vide la recherche)
+  await qp.fill('#search-input', 'sodas');
+  await expect(qp.locator('.pdj-banner')).toHaveCount(0);
+  await qp.fill('#search-input', '');
+  await expect(qp.locator('.pdj-banner')).toHaveCount(1);
   // Nouveau changement de prix : la commande déjà à l'addition garde 16,50
   await pg.evaluate(() => openPdjModal());
   await pg.fill('#pdj-prix', '17');
@@ -710,4 +729,55 @@ test('plat du jour : la patronne change le nom ET le prix → serveuses, carte Q
   const noise = (e) => /\[SW\]|REST poll|permission|403|Notification/i.test(e);
   for (const d of [C, S, C2]) expect(d.errors.filter((e) => !noise(e))).toEqual([]);
   await C.ctx.close(); await S.ctx.close(); await C2.ctx.close(); await Q.close();
+});
+
+test('v89 : portrait — gros numéros de table sous le plan (caisse et serveuse)', async ({ browser }) => {
+  await adminSet('security/policy', { enforce: true });
+  const C = await openEnrolled(browser, 'marmite-express-caisse.html?emu');
+  const pg = C.pg;
+  await pg.evaluate(() => { LS.set('pdjDailyShown', new Date().toDateString()); pinEntry = '1234'; checkPin(); closePdjDaily(); });
+  await pg.waitForFunction(() => (window.salleElements || []).filter((e) => /^table/.test(e.type)).length >= 3, null, { timeout: 30_000 });
+  const tables = await pg.evaluate(() => salleElements.filter((e) => /^table/.test(e.type)).map((e) => ({ id: e.id, n: String(e.number ?? '') })));
+  // Tablette debout : grille visible, un bouton par table, triés par numéro
+  await pg.setViewportSize({ width: 800, height: 1280 });
+  await pg.evaluate(() => openSalle());
+  const quick = pg.locator('#salle-quick');
+  await expect(quick).toBeVisible();
+  await expect(quick.locator('.sq-btn')).toHaveCount(tables.length);
+  const nums = await quick.locator('.sq-num').allTextContents();
+  expect(nums).toEqual([...nums].sort((a, b) => a.localeCompare(b, 'fr', { numeric: true })));
+  // Le plan reste au-dessus, à sa proportion, sans être écrasé
+  const box = await pg.locator('#salle-canvas').boundingBox();
+  expect(box.width).toBeGreaterThan(700);
+  expect(box.height).toBeGreaterThan(150);
+  // Une table servie apparaît « EN COURS »
+  const t = tables[0];
+  await pg.evaluate((id) => { tableData[id] = { persons: [], ticket: [{ pid: 'x', name: 'Café', price: 1.9, qty: 1 }] }; renderSalle(); }, t.id);
+  const tBtn = quick.locator('.sq-btn', { has: pg.locator('.sq-num', { hasText: new RegExp('^' + t.n + '$') }) });
+  await expect(tBtn).toHaveClass(/sq-busy/);
+  await expect(tBtn).toContainText('EN COURS');
+  // Toucher le numéro ouvre l'addition de cette table
+  await tBtn.click();
+  await expect(pg.locator('#table-overlay')).toHaveClass(/show/);
+  expect(await pg.evaluate(() => window.currentTableId)).toBe(t.id);
+  await pg.evaluate((id) => { closeTableModal(); tableData[id] = { persons: [], ticket: [] }; LS.set('tableData', tableData); }, t.id);
+  // Mode Édition : pas de grille (le plan entier sert au glisser-déposer)
+  await pg.evaluate(() => { openSalle(); window._editUnlocked = true; setSalleMode('edit'); });
+  await expect(quick).toBeHidden();
+  await pg.evaluate(() => setSalleMode('service'));
+  // Tablette couchée : pas de grille, le plan prend toute la place
+  await pg.setViewportSize({ width: 1280, height: 800 });
+  await expect(quick).toBeHidden();
+  // Téléphone serveuse debout : grille sous le plan ; toucher « N » ouvre la carte de la table N
+  const S = await openEnrolled(browser, 'serveur.html?emu');
+  await S.pg.setViewportSize({ width: 390, height: 844 });
+  const tq = S.pg.locator('#table-quick');
+  await expect(tq).toBeVisible({ timeout: 30_000 });
+  await expect(tq.locator('.tq-btn')).toHaveCount(tables.length);
+  await tq.locator('.tq-btn', { hasText: new RegExp('^' + t.n + '$') }).click();
+  await S.pg.waitForFunction(() => getComputedStyle(document.getElementById('app')).display !== 'none', null, { timeout: 10_000 });
+  await expect(S.pg.locator('#table-display')).toHaveText(t.n);
+  const noise = (e) => /\[SW\]|REST poll|permission|403|Notification/i.test(e);
+  for (const d of [C, S]) expect(d.errors.filter((e) => !noise(e))).toEqual([]);
+  await C.ctx.close(); await S.ctx.close();
 });
