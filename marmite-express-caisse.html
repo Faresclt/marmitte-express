@@ -28,6 +28,14 @@ const ref = storageRef;
 
 // ── Expose Firebase functions to global scope ──
 window.FB = {
+  // v88 : mode addition/encaissement. Transaction = échoue franchement hors
+  // ligne (jamais mise en file d'attente pour partir plus tard et écraser un
+  // choix plus récent fait sur un autre appareil).
+  setMode: (on) => runTransaction(db, async (tx) => {
+    const r = doc(db, 'config', 'mode');
+    await tx.get(r);
+    tx.set(r, { encaissement: on === true, updatedAt: serverTimestamp() }, { merge: true });
+  }),
   db, storage,
   // Listen to a document in real-time
   listen: (path, id, cb) => onSnapshot(doc(db, path, id), snap => cb(snap.exists() ? snap.data() : null)),
@@ -96,7 +104,14 @@ window.initFirebaseListeners = function(){
         if(!fbT) return;
         // Skip la table actuellement éditée par CE device (pour ne pas écraser
         // les saisies non encore sync).
-        if(tid === window.currentTableId) return;
+        // v88 : seulement si elle est VRAIMENT en cours d'édition (fenêtre de
+        // table ouverte, ou ticket de caisse lié). Avant : la dernière table
+        // ouverte restait ignorée après fermeture, et cet appareil renvoyait
+        // ensuite au cloud son ancienne addition / ancienne note.
+        const editing = tid === window.currentTableId && (
+          (document.getElementById('table-overlay') || { classList: { contains: () => false } }).classList.contains('show') ||
+          (document.getElementById('pos-screen') || { classList: { contains: () => false } }).classList.contains('active'));
+        if(editing) return;
         const localT = tableData[tid];
         // Garde anti-fantôme : doc Firebase pas touché depuis >12h avec un
         // ticket = service jamais clos → on adopte un état VIDE, pas le vieux
@@ -107,10 +122,19 @@ window.initFirebaseListeners = function(){
         const fbTicket = isStale ? [] : (fbT.ticket || []);
         const fbPersons = isStale ? [] : (fbT.persons || []);
         const localTicket = (localT && localT.ticket) || [];
+        const fbNote = isStale ? '' : String(fbT.note || '').slice(0, 500);
+        const localNote = (localT && localT.note) || '';
         // Si Firebase a un état différent (par contenu), on l'adopte localement.
-        if(JSON.stringify(fbTicket) !== JSON.stringify(localTicket)){
+        // La note (allergie…) suit aussi : avant, elle était perdue ici puis
+        // effacée du cloud au sync suivant.
+        if(JSON.stringify(fbTicket) !== JSON.stringify(localTicket) || fbNote !== localNote){
           tableData[tid] = { persons: fbPersons, ticket: fbTicket };
+          if(fbNote) tableData[tid].note = fbNote;
           changed = true;
+          // Table encore « courante » mais fermée : la copie de travail suit aussi
+          if(tid === window.currentTableId){
+            try { persons = JSON.parse(JSON.stringify(fbPersons)); ticket = JSON.parse(JSON.stringify(fbTicket)); activePerson = null; } catch(e){}
+          }
         }
       });
       // ⚠️ On ne vide PAS les tables absentes de la collection `tables`
@@ -183,6 +207,12 @@ window.initFirebaseListeners = function(){
     // Marche même si l'import a échoué.
     if(typeof window.renderSalle === 'function') window.renderSalle();
   }
+
+  // v88 — Mode addition / encaissement : document à part, écrit seulement par
+  // la case « Encaisser dans l'app ». Absent = mode addition (sens sûr).
+  window.FB.listen('config', 'mode', (data) => {
+    if(typeof window.adoptEncaissement === 'function') window.adoptEncaissement(!!(data && data.encaissement === true));
+  });
 
   // Listen to menu published by caisse (for waiter app)
   window.FB.listen('config', 'menu', (data) => {
@@ -705,6 +735,7 @@ else bootFirebaseListeners();
       <div class="admin-panel" id="panel-settings">
         <div class="apanel-title">⚙️ Paramètres</div>
         <div class="apanel-sub">Options générales de la caisse</div>
+        <div class="toggle-row"><span class="toggle-lbl">Encaisser dans l'app<br><span style="font-size:11px;font-weight:400;color:var(--muted)">Désactivé (conseillé) : l'app fait l'addition, vous encaissez sur la caisse du resto. Activé : boutons Payer / Encaisser, les ventes sont enregistrées dans l'app.</span></span><label class="toggle"><input type="checkbox" id="s-encaissement" onchange="setEncaissement(this.checked)"><div class="toggle-track"></div></label></div>
         <div class="toggle-row"><span class="toggle-lbl">Afficher les photos sur les cartes</span><label class="toggle"><input type="checkbox" id="s-showimg" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
         <div class="toggle-row"><span class="toggle-lbl">Afficher les descriptions courtes</span><label class="toggle"><input type="checkbox" id="s-showsub" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
         <div class="toggle-row"><span class="toggle-lbl">Popup "Plat du jour" à la première ouverture du jour</span><label class="toggle"><input type="checkbox" id="s-pdjprompt" checked onchange="saveSettings()"><div class="toggle-track"></div></label></div>
@@ -1598,6 +1629,54 @@ let products = LS.get('products', DEFAULT_PRODUCTS);
 var branding = LS.get('branding', {name:'La Marmite Express',tagline:'SYSTÈME DE CAISSE · EST. 2024',emoji:'🍲',accent:'#f5a623'});
 let settings = LS.get('settings', {showImg:true,showSub:true,currency:'€',cuissons:'Bleu,Saignant,À point,Bien cuit',garnitures:'Frites maison,Salade,Pommes de terre sautées,Pâtes'});
 
+// v88 — Mode addition (défaut) : l'addition se fait ici, l'encaissement se fait
+// sur la caisse du resto. Les boutons Payer / Encaisser n'existent que si
+// « Encaisser dans l'app » est activé dans Admin → Paramètres.
+// Le réglage vit dans son propre document cloud (config/mode) : seule la case
+// l'écrit, la publication du menu ne le touche jamais (sinon une caisse restée
+// sur l'ancienne valeur le republiait pour tout le monde).
+function encaissementActif(){ return settings.encaissement === true; }
+function applyEncaissementMode(){
+  const addition = !encaissementActif();
+  document.documentElement.classList.toggle('mode-addition', addition);
+  const box = document.getElementById('s-encaissement');
+  if(box) box.checked = !addition;
+  // Une fenêtre d'encaissement restée ouverte se ferme : aucune vente possible
+  if(addition){
+    const ov = document.getElementById('pay-overlay');
+    if(ov && ov.classList.contains('show') && typeof closePay === 'function') closePay();
+  }
+}
+function adoptEncaissement(on){
+  on = on === true;
+  if(settings.encaissement !== on){ settings.encaissement = on; LS.set('settings', settings); }
+  applyEncaissementMode();
+}
+// Appliqué seulement quand le serveur a confirmé : un choix fait sans réseau
+// est refusé (sinon il serait perdu, ou repartirait plus tard en écrasant le
+// choix d'un autre appareil).
+function setEncaissement(on){
+  on = !!on;
+  const box = document.getElementById('s-encaissement');
+  if(!window.FB || typeof window.FB.setMode !== 'function'){
+    applyEncaissementMode();   // remet la case comme avant
+    toast('Réglage impossible sans connexion au serveur', 'r');
+    return;
+  }
+  if(box) box.disabled = true;
+  window.FB.setMode(on).then(() => {
+    adoptEncaissement(on);
+    toast(on ? "Encaissement dans l'app activé" : 'Mode addition : encaissement sur la caisse du resto');
+  }).catch(e => {
+    console.warn('[mode] non enregistré:', e && e.message);
+    applyEncaissementMode();   // remet la case comme avant
+    toast('Réglage pas changé : il faut du réseau', 'r');
+  }).finally(() => { if(box) box.disabled = false; });
+}
+window.setEncaissement = setEncaissement;
+window.adoptEncaissement = adoptEncaissement;
+applyEncaissementMode();
+
 // Horodate les produits modifiés LOCALEMENT (différents de la dernière version
 // cloud reçue). Le listener menu adopte une version cloud seulement si elle est
 // plus récente → un prix changé sur un autre appareil n'est plus ré-écrasé par
@@ -1732,7 +1811,7 @@ function quickShowCA(){
 }
 window.quickShowCA = quickShowCA;
 function showPOS(){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('pos-screen').classList.add('active'); applyBranding(); renderTabs(); renderMenu(); }
-function openSalle(){ if(currentTableId){tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};LS.set('tableData',tableData);syncTableToFirebase(currentTableId);} document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('salle-screen').classList.add('active'); initSalle(); }
+function openSalle(){ if(currentTableId){setTableState(currentTableId,[...persons],[...ticket]);LS.set('tableData',tableData);syncTableToFirebase(currentTableId);} document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('salle-screen').classList.add('active'); initSalle(); }
 function closeSalle(){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('pos-screen').classList.add('active'); }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2215,7 +2294,7 @@ function clearTicket(){
 // Auto-save ticket to tableData when a table is linked
 function autoSaveTable(){
   if(!currentTableId) return;
-  tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};
+  setTableState(currentTableId,[...persons],[...ticket]);
   LS.set('tableData',tableData);
   syncTableToFirebase(currentTableId);
 }
@@ -2305,6 +2384,13 @@ function renderTicket(){
 // ═══════════════════════════════════════════════════════════════
 //  TABLE / PERSONS
 // ═══════════════════════════════════════════════════════════════
+// Remplace convives + addition d'une table SANS perdre sa note (allergie…).
+// Avant : chaque ajout d'article recréait l'objet et la note disparaissait.
+function setTableState(tid, p, t){
+  const note = tableData[tid] && tableData[tid].note;
+  tableData[tid] = { persons: p, ticket: t };
+  if(note) tableData[tid].note = note;
+}
 function openTableModal(tableId){
   if(tableId){
     const tbl=salleElements.find(e=>e.id===tableId);
@@ -2346,9 +2432,7 @@ function closeTableModal(){
   // Save state back to tableData — ET pousse vers Firebase (avant : local
   // seulement → un autre appareil ou le listener réinjectait l'ancien ticket).
   if(currentTableId){
-    const note = tableData[currentTableId] && tableData[currentTableId].note;
-    tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};
-    if(note) tableData[currentTableId].note = note;
+    setTableState(currentTableId,[...persons],[...ticket]);
     LS.set('tableData',tableData);
     syncTableToFirebase(currentTableId);
   }
@@ -2375,14 +2459,14 @@ function setActivePerson(pid){
 function assignItemToPerson(rid, pid){
   const r=ticket.find(x=>x.rid===rid);
   if(r){ r.personId=pid; }
-  if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); }
+  if(currentTableId){ setTableState(currentTableId,[...persons],[...ticket]); LS.set('tableData',tableData); }
   renderTableModal(); renderTicket();
 }
 // Attribuer tous les articles non-attribués au convive actif
 function assignAllToActive(){
   if(!activePerson) return;
   ticket.forEach(r=>{ if(!r.personId) r.personId=activePerson; });
-  if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); }
+  if(currentTableId){ setTableState(currentTableId,[...persons],[...ticket]); LS.set('tableData',tableData); }
   renderTableModal(); renderTicket();
   const p=persons.find(x=>x.id===activePerson);
   toast('✓ Articles attribués à '+(p?p.name:'convive'));
@@ -2400,6 +2484,8 @@ function resetTable(){
     LS.set('tableData',tableData);
     syncTableToFirebase(currentTableId);
   }
+  // La note (allergie…) concernait les clients partis : on l'efface aussi à l'écran
+  const noteEl = document.getElementById('tm-note'); if(noteEl) noteEl.value = '';
   renderPersonBar(); renderTableModal(); renderTicket();
   if(typeof renderSalle === 'function') renderSalle();
   toast(hasData ? '✅ Table libérée' : 'Table déjà libre');
@@ -2452,7 +2538,7 @@ function renderTableModal(){
   // Tip about convives
   if(persons.length>0 && !ticket.length){
     grid.innerHTML+=`<div style="grid-column:1/-1;font-size:11px;color:var(--muted);padding:6px 0;line-height:1.5">
-      💡 <strong>Astuce :</strong> Sélectionnez un convive (clic) puis cliquez "Ajouter des articles" pour lui attribuer des articles. Vous pourrez encaisser chaque convive séparément.
+      💡 <strong>Astuce :</strong> Sélectionnez un convive (clic) puis cliquez "Ajouter des articles" pour lui attribuer des articles. ${encaissementActif() ? 'Vous pourrez encaisser chaque convive séparément.' : 'Le total de chacun s\'affiche ci-dessous.'}
     </div>`;
   }
 
@@ -2546,7 +2632,7 @@ function payPerson(pid){
     if(!recordSale({tableId: currentTableId, label: p.name, items:[...items]})) return;
     p.paid=true;
     ticket=ticket.filter(r=>r.personId!==pid);
-    if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); syncTableToFirebase(currentTableId); }
+    if(currentTableId){ setTableState(currentTableId,[...persons],[...ticket]); LS.set('tableData',tableData); syncTableToFirebase(currentTableId); }
     renderTicket(); renderPersonBar();
     toast('✓ '+p.name+' — '+fmt(window.lastReceipt ? window.lastReceipt.total : total)+' encaissé');
     checkAutoClose();
@@ -2561,7 +2647,7 @@ function payUnassigned(){
   openPayFor(total,()=>{
     if(!recordSale({tableId: currentTableId, label:'Non attribués', items:[...items]})) return;
     ticket=ticket.filter(r=>r.personId);
-    if(currentTableId){ tableData[currentTableId]={persons:[...persons],ticket:[...ticket]}; LS.set('tableData',tableData); syncTableToFirebase(currentTableId); }
+    if(currentTableId){ setTableState(currentTableId,[...persons],[...ticket]); LS.set('tableData',tableData); syncTableToFirebase(currentTableId); }
     renderTicket();
     toast('✓ Articles encaissés — '+fmt(window.lastReceipt ? window.lastReceipt.total : total));
     checkAutoClose();
@@ -2650,6 +2736,12 @@ function openPay(){
   });
 }
 function openPayFor(amount, cb, items){
+  // v88 : en mode addition, aucune vente ne doit pouvoir s'enregistrer ici
+  // (garde en plus des boutons masqués : raccourci, ancien écran resté ouvert…).
+  if(!encaissementActif()){
+    toast("Encaissement sur la caisse du resto — ici, l'addition seulement",'o');
+    return;
+  }
   // Fix #4 : reset complet de l'état entre 2 paiements (anciennement
   // _currentTip pouvait être hérité d'une session précédente)
   payCallback=cb; cashStr='0'; hasDot=false; currentPayType='';
@@ -2719,7 +2811,7 @@ document.addEventListener('keydown', (e) => {
 function goToPOSForTable(){
   // Sauvegarder l'état actuel de la table
   if(currentTableId){
-    tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};
+    setTableState(currentTableId,[...persons],[...ticket]);
     LS.set('tableData',tableData);
     // Audit fix #5 : push Firebase AVANT bascule POS pour que les autres
     // devices voient déjà la table comme occupée (ou avec ses items en cours).
@@ -2746,7 +2838,7 @@ function goToPOSForTable(){
 function saveAndReturnToTable(){
   if(!currentTableId){ toast('Aucune table liée','o'); return; }
   // Sauvegarder
-  tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};
+  setTableState(currentTableId,[...persons],[...ticket]);
   LS.set('tableData',tableData);
   syncTableToFirebase(currentTableId);
   // Retour au plan de salle et ouvrir le modal table
@@ -2764,7 +2856,7 @@ function saveAndReturnToTable(){
 function unlinkTable(){
   if(currentTableId){
     // Sauvegarder d'abord les articles actuels sur la table
-    tableData[currentTableId]={persons:[...persons],ticket:[...ticket]};
+    setTableState(currentTableId,[...persons],[...ticket]);
     LS.set('tableData',tableData);
     syncTableToFirebase(currentTableId);
   }
@@ -2900,6 +2992,12 @@ function updateCash(){
 }
 
 function validatePay(){
+  // v88 : le mode a pu passer en « addition » pendant que la fenêtre était ouverte
+  if(!encaissementActif()){
+    closePay();
+    toast("Encaissement sur la caisse du resto — ici, l'addition seulement",'o');
+    return;
+  }
   // Garde anti-double-clic (cf. audit modal encaissement #1)
   if(isValidating) return;
   // Garde mode payement valide (cf. audit #2) : empêche enregistrement
@@ -3856,6 +3954,7 @@ function applySettingsForm(){
   document.getElementById('s-showimg').checked=settings.showImg!==false;
   document.getElementById('s-showsub').checked=settings.showSub!==false;
   document.getElementById('s-pdjprompt').checked=settings.pdjPromptDaily!==false;
+  const enc=document.getElementById('s-encaissement'); if(enc) enc.checked=encaissementActif();
   document.getElementById('s-cuissons').value=settings.cuissons||'Bleu,Saignant,À point,Bien cuit';
   document.getElementById('s-garnitures').value=settings.garnitures||'Frites maison,Salade,Pommes de terre sautées,Pâtes';
   const gr=document.getElementById('s-google-review'); if(gr) gr.value=settings.googleReviewUrl||'';
@@ -4875,6 +4974,8 @@ function openTableService(tid){
 
   activePerson = null;
   currentTableId = tid;
+  const noteEl = document.getElementById('tm-note');
+  if(noteEl) noteEl.value = (tableData[tid] && tableData[tid].note) || '';
   document.getElementById('tm-table-title').textContent = '👥 Table '+(el.number||tid);
   renderPersonBar(); renderTableModal(); renderTicket();
   document.getElementById('table-overlay').classList.add('show');

@@ -461,3 +461,9 @@ input,textarea,select{font-family:'DM Sans',sans-serif;outline:none;border:none;
 .pkb-ok{background:rgba(245,166,35,.15);border-color:rgba(245,166,35,.3);color:#f5a623}
 @keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
 .shake{animation:shake .35s ease}
+
+/* v88 — Mode addition (défaut) : la caisse du resto encaisse, l'app ne fait que
+   l'addition. Aucun bouton qui enregistrerait une vente dans l'app. */
+html.mode-addition #btn-pay,
+html.mode-addition #btn-pay-all,
+html.mode-addition .ts-pay-btn{display:none !important}

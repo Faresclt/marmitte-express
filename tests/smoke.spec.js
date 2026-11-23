@@ -14,7 +14,7 @@ test.describe('index.html', () => {
 
     await expect(page.locator('a.app-card.caisse')).toBeVisible();
     await expect(page.locator('a.app-card.serveur')).toBeVisible();
-    await expect(page.locator('a.app-card.client')).toBeVisible();
+    await expect(page.locator('a.app-card.cuisine')).toBeVisible();   // v84 : tuile Client retirée (le QR suffit)
     await expect(page.locator('a.app-card.qrcode')).toBeVisible();
 
     expect(errors, `Erreurs console graves: ${errors.join(' | ')}`).toEqual([]);

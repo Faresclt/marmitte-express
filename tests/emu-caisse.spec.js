@@ -44,7 +44,7 @@ test.beforeAll(async () => {
 test('vente directe en ESPÈCES → historique ET cloud en espèces (pas CB), chaînée', async ({ page }) => {
   const errors = await openCaisse(page);
   const day = await page.evaluate(() => serviceDayKey());
-  await page.evaluate(() => { addToTicketDirect('p8'); openPay(); selectPayType('cash'); validatePay(); });
+  await page.evaluate(() => { settings.encaissement = true; addToTicketDirect('p8'); openPay(); selectPayType('cash'); validatePay(); });
   const local = await page.evaluate((d) => JSON.parse(localStorage.getItem('sales_' + d) || '[]'), day);
   expect(local).toHaveLength(1);
   expect(local[0].payType).toBe('cash');
@@ -69,7 +69,7 @@ test('table : convive payé en espèces + reste en CB → 2 ventes justes, part 
     setActivePerson(persons[1].id);
     return t.id;
   });
-  await page.evaluate(() => { payPerson(persons[0].id); selectPayType('cash'); validatePay(); });
+  await page.evaluate(() => { settings.encaissement = true; payPerson(persons[0].id); selectPayType('cash'); validatePay(); });
   // C2 : le cloud ne contient plus que la part de la Personne 2
   await expect.poll(async () => {
     const d = await adminGet(`tables/${tid}`);
@@ -125,7 +125,7 @@ test('commande client au prix truqué + nom piégé → prix et nom du MENU ; an
 test('annulation d\'une vente → doc cancel séparé, vente d\'origine intacte', async ({ page }) => {
   await openCaisse(page);
   const day = await page.evaluate(() => serviceDayKey());
-  await page.evaluate(() => { addToTicketDirect('p8'); openPay(); selectPayType('cash'); validatePay(); });
+  await page.evaluate(() => { settings.encaissement = true; addToTicketDirect('p8'); openPay(); selectPayType('cash'); validatePay(); });
   const key = await page.evaluate((d) => JSON.parse(localStorage.getItem('sales_' + d)).filter(s => !s._fromCloud).pop().cloudKey, day);
   await expect.poll(async () => !!(await adminGet(`sales/${day}/v/${key}`)), { timeout: 15_000 }).toBe(true);
   await page.evaluate((k) => { window._adminUnlocked = true; window._adminUnlockedUntil = Date.now() + 60000; cancelSale(k); }, key);
@@ -291,7 +291,7 @@ test('cartes 2026 appliquées une fois : prix, nouveautés, retraits, cafés, or
   await page.waitForFunction(() => !!(window.FB && window.FB.getCol), null, { timeout: 45_000 });
   expect(await page.evaluate(() => products.find(p => p.id === 'p47').price)).toBe(18);
   // Encaissement d'un café : bon prix, catégorie hors cuisine
-  await page.evaluate(() => { addToTicketDirect('p140'); openPay(); selectPayType('cash'); validatePay(); });
+  await page.evaluate(() => { settings.encaissement = true; addToTicketDirect('p140'); openPay(); selectPayType('cash'); validatePay(); });
   const day = await page.evaluate(() => serviceDayKey());
   const last = await page.evaluate((d) => JSON.parse(localStorage.getItem('sales_' + d)).filter(s => !s._fromCloud).pop(), day);
   expect([last.total, last.payType, last.items[0].name]).toEqual([1.9, 'cash', 'Café']);
@@ -422,6 +422,8 @@ test('service réel : la serveuse commande → la cuisine voit les plats → la 
 
   // Tablette caisse (enregistrée), ouverte comme pendant le service
   const C = await openEnrolled(browser, 'marmite-express-caisse.html?emu', process.env.DEBUG_CAISSE ? 'caisse' : '');
+  // Popup « Plat du jour » de la 1re ouverture du jour : ta mère le ferme d'un geste, le test aussi
+  await C.pg.evaluate(() => { LS.set('pdjDailyShown', new Date().toDateString()); closePdjDaily(); });
   await C.pg.waitForFunction(() => !!(window.FB && window.FB.setMerge), null, { timeout: 45_000 });
   await C.pg.evaluate((p) => window.FB.setMerge('config', 'menu', { salleLayout: p }), plan);
   await C.pg.waitForFunction(() => (window.salleElements || []).some((e) => e.id === 't5'), null, { timeout: 20_000 });
@@ -495,8 +497,16 @@ test('service réel : la serveuse commande → la cuisine voit les plats → la 
 
   // 4) Addition encaissée sur la caisse du resto → « Table réglée » libère la table, sans vente dans l'app
   const salesBefore = await C.pg.evaluate(() => (JSON.parse(localStorage.getItem('sales_' + serviceDayKey()) || '[]')).length);
+  // v88 — mode addition par défaut : aucun bouton qui enregistrerait une vente
+  await expect(C.pg.locator('#btn-pay-all')).toBeHidden();
+  expect(await C.pg.evaluate(() => document.documentElement.classList.contains('mode-addition'))).toBe(true);
+  expect(await C.pg.locator('.ts-pay-btn:visible').count()).toBe(0);
+  await C.pg.evaluate(() => { payAllAndClose(); openPay(); });   // même appelé par un raccourci : refusé
+  await expect(C.pg.locator('#pay-overlay')).not.toHaveClass(/show/);
+  expect(await C.pg.evaluate(() => (JSON.parse(localStorage.getItem('sales_' + serviceDayKey()) || '[]')).length)).toBe(salesBefore);
   const regle = C.pg.locator('#table-modal button', { hasText: 'Table réglée' });
   await expect(regle).toBeVisible();
+  await C.pg.evaluate(() => closePdjDaily());
   await regle.click();   // la confirmation est acceptée (comme ta mère qui valide)
   await C.pg.waitForFunction(() => !((window.tableData || {}).t5?.ticket || []).length, null, { timeout: 10_000 });
   expect(await C.pg.evaluate(() => (JSON.parse(localStorage.getItem('sales_' + serviceDayKey()) || '[]')).length)).toBe(salesBefore);
@@ -507,4 +517,116 @@ test('service réel : la serveuse commande → la cuisine voit les plats → la 
   expect(K.errors.filter((e) => !noise(e))).toEqual([]);
   expect(C.errors.filter((e) => !noise(e))).toEqual([]);
   await S.ctx.close(); await K.ctx.close(); await C.ctx.close();
+});
+
+test('v88 : mode addition par défaut ; « Encaisser dans l\'app » rallume les boutons et suit sur les autres caisses', async ({ browser }) => {
+  // Conditions réelles : protection active, caisses enregistrées, réglages vierges (appareils neufs)
+  await adminSet('security/policy', { enforce: true });
+  const modeCloud = async () => { const d = await adminGet('config/mode'); return d ? d.fields?.encaissement?.booleanValue : undefined; };
+  const toggle = (pg, on) => pg.evaluate((on) => { const c = document.getElementById('s-encaissement'); c.checked = on; c.dispatchEvent(new Event('change')); }, on);
+  const C = await openEnrolled(browser, 'marmite-express-caisse.html?emu');
+  const page = C.pg;
+  await page.waitForFunction(() => window._cloudMenuSeen === true, null, { timeout: 30_000 });
+  // Défaut (aucun document config/mode) : addition seulement
+  expect(await modeCloud()).toBeUndefined();
+  expect(await page.evaluate(() => [encaissementActif(), document.documentElement.classList.contains('mode-addition')])).toEqual([false, true]);
+  await page.evaluate(() => { closePdjDaily(); addToTicketDirect('p8'); renderTicket(); });
+  await expect(page.locator('#btn-pay')).toBeHidden();
+  const day = await page.evaluate(() => serviceDayKey());
+  const nSales = () => page.evaluate((d) => JSON.parse(localStorage.getItem('sales_' + d) || '[]').length, day);
+  const n0 = await nSales();
+  await page.evaluate(() => openPay());
+  await expect(page.locator('#pay-overlay')).not.toHaveClass(/show/);
+  expect(await nSales()).toBe(n0);
+  // La case (Admin → Paramètres) est décochée ; la cocher rallume « Payer » et écrit config/mode
+  await page.evaluate(() => applySettingsForm());
+  expect(await page.locator('#s-encaissement').isChecked()).toBe(false);
+  await toggle(page, true);
+  await expect(page.locator('#btn-pay')).toBeVisible();
+  await expect.poll(modeCloud, { timeout: 20_000 }).toBe(true);
+  // Une 2e caisse neuve adopte le mode ; sa publication du menu ne touche pas au mode
+  const C2 = await openEnrolled(browser, 'marmite-express-caisse.html?emu');
+  await C2.pg.waitForFunction(() => window.encaissementActif && encaissementActif() === true, null, { timeout: 30_000 });
+  expect(await C2.pg.evaluate(() => document.documentElement.classList.contains('mode-addition'))).toBe(false);
+  await C2.pg.waitForFunction(() => window._cloudMenuSeen === true, null, { timeout: 30_000 });
+  await C2.pg.evaluate(() => { settings.encaissement = false; publishMenu(true); });   // valeur locale périmée + publication complète
+  await page.waitForTimeout(3000);
+  expect(await modeCloud()).toBe(true);
+  expect((await adminGet('config/menu'))?.fields?.settings?.mapValue?.fields?.encaissement).toBeUndefined();
+  await C2.pg.evaluate(() => adoptEncaissement(true));
+  // Fenêtre d'encaissement ouverte sur la 1re caisse… on repasse en mode addition depuis la 2e
+  await page.evaluate(() => { applySettingsForm(); openPay(); });
+  await expect(page.locator('#pay-overlay')).toHaveClass(/show/);
+  await toggle(C2.pg, false);
+  await expect.poll(modeCloud, { timeout: 20_000 }).toBe(false);
+  await page.waitForFunction(() => encaissementActif() === false && document.documentElement.classList.contains('mode-addition'), null, { timeout: 30_000 });
+  await expect(page.locator('#pay-overlay')).not.toHaveClass(/show/);      // fermée d'office
+  await page.evaluate(() => { selectPayType('cash'); validatePay(); });       // même forcée : refusée
+  expect(await nSales()).toBe(n0);
+  // La case de la 1re caisse a suivi ; enregistrer un AUTRE réglage ne rallume rien
+  expect(await page.locator('#s-encaissement').isChecked()).toBe(false);
+  await page.evaluate(() => saveSettings());
+  await page.waitForTimeout(3500);
+  expect(await modeCloud()).toBe(false);
+  // Sans réseau : le choix est refusé (case remise), rien ne part plus tard
+  await C.ctx.setOffline(true);
+  await toggle(page, true);
+  await page.waitForFunction(() => !document.getElementById('s-encaissement').disabled, null, { timeout: 30_000 });
+  expect(await page.locator('#s-encaissement').isChecked()).toBe(false);
+  expect(await page.evaluate(() => encaissementActif())).toBe(false);
+  await C.ctx.setOffline(false);
+  await page.waitForTimeout(3000);
+  expect(await modeCloud()).toBe(false);
+  await page.evaluate(() => { ticket = []; renderTicket(); });
+  const noise = (e) => /\[SW\]|REST poll|permission|403|Notification/i.test(e);
+  expect(C.errors.filter((e) => !noise(e))).toEqual([]);
+  expect(C2.errors.filter((e) => !noise(e))).toEqual([]);
+  await C.ctx.close(); await C2.ctx.close();
+});
+
+test('note de table (allergie) : la bonne note à l\'ouverture, gardée quand on ajoute des articles et entre appareils', async ({ browser }) => {
+  await adminSet('security/policy', { enforce: true });
+  const C = await openEnrolled(browser, 'marmite-express-caisse.html?emu');
+  const pg = C.pg;
+  await pg.waitForFunction(() => (window.salleElements || []).filter((e) => /^table/.test(e.type)).length >= 2, null, { timeout: 30_000 });
+  const [a, b] = await pg.evaluate(() => salleElements.filter((e) => /^table/.test(e.type)).slice(0, 2).map((e) => e.id));
+  await pg.evaluate(() => closePdjDaily());
+  // Note sur la table A, puis ajout d'articles et retour au plan
+  await pg.evaluate((a) => { openTableService(a); }, a);
+  await pg.evaluate(() => { const n = document.getElementById('tm-note'); n.value = 'Allergie noix'; saveTableNote(n.value); });
+  await pg.evaluate(() => { addToTicketDirect('p8'); addToTicketDirect('p8'); closeTableModal(); });
+  expect(await pg.evaluate((a) => tableData[a].note, a)).toBe('Allergie noix');
+  // Table B : sa note à elle (vide), pas celle de A
+  await pg.evaluate((b) => openTableService(b), b);
+  expect(await pg.locator('#tm-note').inputValue()).toBe('');
+  await pg.evaluate(() => closeTableModal());
+  // Retour sur A : la note est là ; et dans le cloud
+  await pg.evaluate((a) => openTableService(a), a);
+  expect(await pg.locator('#tm-note').inputValue()).toBe('Allergie noix');
+  await pg.evaluate(() => closeTableModal());
+  await expect.poll(async () => (await adminGet('tables/' + a))?.fields?.note?.stringValue, { timeout: 15_000 }).toBe('Allergie noix');
+  // Une 2e caisse reçoit la table avec sa note, et ne l'efface pas en la resynchronisant
+  const C2 = await openEnrolled(browser, 'marmite-express-caisse.html?emu');
+  await C2.pg.waitForFunction((a) => (window.tableData || {})[a]?.note === 'Allergie noix', a, { timeout: 30_000 });
+  await C2.pg.evaluate((a) => { closePdjDaily(); openSalle(); openTableService(a); closeTableModal(); }, a);
+  await C2.pg.waitForTimeout(2000);
+  expect((await adminGet('tables/' + a))?.fields?.note?.stringValue).toBe('Allergie noix');
+  // « Table réglée » : table libérée, note effacée pour les clients suivants
+  await pg.evaluate((a) => { openTableService(a); resetTable(); }, a);
+  await expect.poll(async () => (await adminGet('tables/' + a))?.fields?.note?.stringValue ?? '', { timeout: 15_000 }).toBe('');
+  // Nouveaux clients : nouvelle note sur C. La 2e caisse (dont A est la dernière table ouverte) la reçoit
+  // et ne renvoie pas l'ancienne addition / l'ancienne note en repassant par le plan de salle.
+  await pg.evaluate(() => { const n = document.getElementById('tm-note'); n.value = 'Allergie arachide'; saveTableNote(n.value); });
+  await pg.evaluate(() => closeTableModal());
+  await expect.poll(async () => (await adminGet('tables/' + a))?.fields?.note?.stringValue, { timeout: 15_000 }).toBe('Allergie arachide');
+  await C2.pg.waitForFunction((a) => (window.tableData || {})[a]?.note === 'Allergie arachide' && !(window.tableData[a].ticket || []).length, a, { timeout: 30_000 });
+  await C2.pg.evaluate(() => openSalle());
+  await C2.pg.waitForTimeout(2500);
+  const fin = await adminGet('tables/' + a);
+  expect(fin?.fields?.note?.stringValue).toBe('Allergie arachide');
+  expect(decode(fin.fields.ticket)).toEqual([]);
+  const noise = (e) => /\[SW\]|REST poll|permission|403|Notification/i.test(e);
+  expect(C.errors.filter((e) => !noise(e))).toEqual([]);
+  expect(C2.errors.filter((e) => !noise(e))).toEqual([]);
+  await C.ctx.close(); await C2.ctx.close();
 });
