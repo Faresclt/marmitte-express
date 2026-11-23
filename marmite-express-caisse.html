@@ -746,11 +746,11 @@ else bootFirebaseListeners();
           <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Configurez les choix proposés aux clients (cuisson viande, garnitures). Séparez chaque option par une virgule.</div>
           <div class="form-group">
             <label class="form-label">🔥 Choix de cuisson</label>
-            <input class="form-input" id="s-cuissons" placeholder="Bleu, Saignant, À point, Bien cuit" oninput="saveSettings()">
+            <textarea class="form-input" id="s-cuissons" rows="2" style="resize:vertical;line-height:1.4;height:auto;padding-top:10px;padding-bottom:10px" placeholder="Bleu, Saignant, À point, Bien cuit" oninput="saveSettings()"></textarea>
           </div>
           <div class="form-group">
             <label class="form-label">🍟 Choix de garniture</label>
-            <input class="form-input" id="s-garnitures" placeholder="Frites maison, Salade, PDT sautées, Pâtes" oninput="saveSettings()">
+            <textarea class="form-input" id="s-garnitures" rows="2" style="resize:vertical;line-height:1.4;height:auto;padding-top:10px;padding-bottom:10px" placeholder="Frites maison, Salade, PDT sautées, Pâtes" oninput="saveSettings()"></textarea>
           </div>
         </div>
         <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
@@ -2211,9 +2211,9 @@ function openOptionsModal(pid){
   }
   if(p.hasCuisson && cuissons.length){
     html+=`<div style="margin-bottom:16px">
-      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🔥 Cuisson</div>
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px">🔥 Cuisson — à choisir</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px" id="opt-cuisson-btns">
-        ${cuissons.map((c,i)=>`<button class="opt-chip${i===0?' sel':''}" data-val="${esc(c)}" onclick="selectOptChip(this,'cuisson')">${esc(c)}</button>`).join('')}
+        ${cuissons.map((c,i)=>`<button class="opt-chip" data-val="${esc(c)}" onclick="selectOptChip(this,'cuisson')">${esc(c)}</button>`).join('')}
       </div>
     </div>`;
   }
@@ -2248,6 +2248,8 @@ function selectOptChip(el, group){
 function confirmOptions(){
   if(!pendingOptionsPid) return;
   const cuissonEl = document.querySelector('#opt-cuisson-btns .opt-chip.sel');
+  // Pas de cuisson par défaut : il faut la choisir (avant, « Bleu » partait d'office)
+  if(document.getElementById('opt-cuisson-btns') && !cuissonEl){ toast('Choisissez la cuisson', 'o'); return; }
   const garnitureEl = document.querySelector('#opt-garniture-btns .opt-chip.sel');
   const variantEl = document.querySelector('#opt-variant-btns .opt-chip.sel');
   const siropEl = document.querySelector('#opt-sirop-btns .opt-chip.sel');
@@ -4387,8 +4389,9 @@ function applySalleMode(){
     ? 'Faites glisser les éléments pour les repositionner'
     : 'Cliquez une table pour gérer le service';
   // .8 et non .5 : l'onglet inactif paraissait désactivé (audit visuel 23/11) ; l'actif garde son fond
-  document.getElementById('stab-service').style.opacity = isEdit ? '.8' : '1';
-  document.getElementById('stab-edit').style.opacity = isEdit ? '1' : '.8';
+  // Pleine opacité : l'onglet actif se distingue par son fond (un onglet estompé paraissait désactivé)
+  document.getElementById('stab-service').style.opacity = '1';
+  document.getElementById('stab-edit').style.opacity = '1';
   document.getElementById('salle-screen').classList.toggle('salle-editing', isEdit);
   // Toggle right panel
   document.getElementById('salle-detail').style.width = isEdit ? '0' : '300px';

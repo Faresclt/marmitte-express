@@ -699,11 +699,11 @@ document.getElementById('menu-tabs').addEventListener('click', (e) => {
 // (data-idx) vers les listes ci-dessous, jamais la valeur dans un onclick.
 let _optLists = { variant: [], cuisson: [], garniture: [] };
 const _optLabel = 'font-size:11px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:8px';
-function optGroup(id, title, labels){
+function optGroup(id, title, labels, preselect = true){
   return `<div style="margin-bottom:16px">
       <div style="${_optLabel}">${title}</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px" id="${id}">
-        ${labels.map((l,i)=>`<button type="button" class="opt-chip${i===0?' sel':''}" data-idx="${i}" onclick="selChip(this)">${escHtml(l)}</button>`).join('')}
+        ${labels.map((l,i)=>`<button type="button" class="opt-chip${(preselect && i===0)?' sel':''}" data-idx="${i}" onclick="selChip(this)">${escHtml(l)}</button>`).join('')}
       </div>
     </div>`;
 }
@@ -721,7 +721,8 @@ function openOptionsModal(p){
   if(variants.length){
     html += optGroup('opt-variant-btns', '📏 Taille', variants.map(v => v.label + ' — ' + fmtEur(v.price) + '€'));
   }
-  if(_optLists.cuisson.length) html += optGroup('opt-cuisson-btns', '🔥 Cuisson', _optLists.cuisson);
+  // Cuisson à choisir explicitement : aucune valeur par défaut (une viande partait « Bleu » sans qu'on le veuille)
+  if(_optLists.cuisson.length) html += optGroup('opt-cuisson-btns', '🔥 Cuisson — à choisir', _optLists.cuisson, false);
   if(_optLists.garniture.length) html += optGroup('opt-garniture-btns', '🍟 Garniture', _optLists.garniture);
   if(p.hasSirop){
     html+=`<div style="margin-bottom:16px">
@@ -755,6 +756,12 @@ function confirmOpt(){
   };
   const variant = pick('variant');
   if(_optLists.variant.length && !variant){ showServeurNotif('Choisis une taille'); return; }
+  if(_optLists.cuisson.length && !pick('cuisson')){
+    showServeurNotif('Choisis la cuisson');
+    const g = document.getElementById('opt-cuisson-btns');
+    if(g){ g.classList.remove('opt-missing'); void g.offsetWidth; g.classList.add('opt-missing'); }
+    return;
+  }
   const siropEl = document.querySelector('#opt-sirop-btns .opt-chip.sel');
   changeQty(makeLine(p, {
     variant,
@@ -1046,7 +1053,7 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 /* Tabs */
 #menu-tabs{display:flex;gap:8px;padding:10px 16px;overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;scrollbar-width:none}
 #menu-tabs::-webkit-scrollbar{display:none}
-.mtab{height:36px;padding:0 16px;border-radius:20px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .15s;flex-shrink:0}
+.mtab{height:44px;padding:0 16px;border-radius:20px;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .15s;flex-shrink:0}
 .mtab.active{background:rgba(245,166,35,.15);border-color:var(--accent);color:var(--accent)}
 
 /* Products */
@@ -1062,7 +1069,7 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 .prod-sub{font-size:12px;color:var(--muted);margin-bottom:6px;line-height:1.4}
 .prod-price{font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--green)}
 .prod-actions{flex-shrink:0}
-.add-btn{height:36px;padding:0 16px;border-radius:20px;background:rgba(245,166,35,.15);border:1px solid rgba(245,166,35,.3);color:var(--accent);font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
+.add-btn{height:44px;padding:0 18px;border-radius:20px;background:rgba(245,166,35,.15);border:1px solid rgba(245,166,35,.3);color:var(--accent);font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
 .add-btn:active{background:rgba(245,166,35,.3)}
 .qty-ctrl{display:flex;align-items:center;gap:8px}
 .qty-ctrl button{width:32px;height:32px;border-radius:50%;border:none;font-size:18px;font-weight:700;cursor:pointer}
@@ -1086,11 +1093,21 @@ body{height:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidde
 /* Cart panel */
 #cart-panel{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;display:none;align-items:flex-end}
 body.cart-open #cart-bar{visibility:hidden}
+/* Cuisson oubliée : le groupe clignote en rouge */
+@keyframes optMissing{0%,100%{box-shadow:none}30%,70%{box-shadow:0 0 0 2px #e84040}}
+.opt-missing{border-radius:22px;animation:optMissing .9s ease 2}
+/* Tablette debout : les 7 onglets tiennent sur une ligne */
+@media (min-width:700px) and (max-width:999px){.mtab{padding:0 12px}}
+/* Tablette debout : plus gros boutons de table (la place est là) */
+@media (orientation:portrait) and (min-width:700px){
+  #table-quick{grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:14px}
+  .tq-btn{height:80px;font-size:34px}
+}
 .cart-inner{background:var(--surface);border-radius:24px 24px 0 0;width:100%;max-width:640px;margin:0 auto;max-height:88dvh;display:flex;flex-direction:column}
 .cp-handle{width:40px;height:4px;border-radius:2px;background:var(--border);margin:12px auto 4px;flex-shrink:0}
 .cp-header{padding:10px 16px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
 .cp-header h3{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:1px}
-.cp-close{width:40px;height:40px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:16px;cursor:pointer}
+.cp-close{width:44px;height:44px;border-radius:50%;background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:16px;cursor:pointer}
 /* Boutons − / + du panier : 44 px, signe épais et contrasté */
 .cp-qty{width:44px;height:44px;padding:0;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;line-height:1;flex-shrink:0;cursor:pointer}
 .cp-minus{background:rgba(232,64,64,.18);color:#ff6b6b}
@@ -1144,8 +1161,8 @@ body.cart-open #cart-bar{visibility:hidden}
 <body>
 
 <div id="app-header">
-  <a href="index.html" style="text-decoration:none">
-    <div class="table-pill" style="background:var(--blue)">🍽️ SERVEUR</div>
+  <a href="index.html" style="text-decoration:none" aria-label="Retour à l'accueil" title="Retour à l'accueil">
+    <div class="table-pill" style="background:var(--blue)">‹ 🍽️ SERVEUR</div>
   </a>
   <div class="table-pill" id="table-pill-num" onclick="changeTable()" style="cursor:pointer" title="Changer de table">TABLE <span id="table-display">?</span> ✎</div>
   <img id="resto-logo" alt="" style="display:none;width:32px;height:32px;border-radius:7px;object-fit:cover;flex-shrink:0">

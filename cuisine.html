@@ -150,12 +150,21 @@ body{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidd
   .col:has(.col-scroll > .empty){flex:0 0 auto}
   .col:has(.col-scroll > .empty) .col-scroll{flex:none;overflow:visible}
   .col-scroll .empty{padding:14px}
+  /* En-tête compact et utilisable au doigt (« Activer le son » est indispensable aux alertes) */
+  #resto-name-cuisine,.kpi{display:none}
+  .hbtn{height:44px;font-size:13px}
+  .snd-btn,.voice-btn{width:44px;height:44px;font-size:20px}
+  .hdr-live{font-size:11px}
 }
 /* Tablette portrait (701-900 px) : 3 colonnes côte à côte comme en paysage, tickets un peu resserrés */
 @media(min-width:701px) and (max-width:900px){
   .tkt-hd,.tkt-body{padding-left:12px;padding-right:12px}
   .tkt-act{padding:8px}
   .tbtn{font-size:16px;letter-spacing:1px}
+  /* lisible de loin, comme en paysage */
+  .tkt-qty{font-size:26px}
+  .tkt-nm{font-size:22px}
+  .tkt-tag{font-size:16px;padding:4px 12px}
 }
 /* Tablette paysage (≥ 1024 px) : plats et options plus grands pour une lecture à distance */
 @media(min-width:1024px){

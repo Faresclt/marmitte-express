@@ -156,7 +156,7 @@ test('données du service : carte publiée, plan de salle, plat du jour, deux co
 for (const vp of VIEWPORTS) {
   test(`captures ${vp.name}`, async ({ browser }) => {
     // Accueil
-    const I = await newDevice(browser, vp, 'index.html', false);
+    const I = await newDevice(browser, vp, 'index.html', false);   // sans ?emu : lecture seule de la carte publiée (vrai logo)
     await shot(I, vp, 'accueil', { wait: 1200, fullPage: true });
     await I.ctx.close();
 
@@ -164,7 +164,14 @@ for (const vp of VIEWPORTS) {
     const Q = await newDevice(browser, vp, 'client.html?table=5&emu', false);
     await Q.pg.locator('.prod-card').first().waitFor({ timeout: 30_000 });
     await shot(Q, vp, 'client-carte', { wait: 1500 });
-    await shot(Q, vp, 'client-carte-complete', { fullPage: true, wait: 300 });
+    await Q.pg.evaluate(() => { const a = document.getElementById('app'); a.scrollTop = 700; });
+    await shot(Q, vp, 'client-carte-defilee', { wait: 500 });
+    await Q.pg.evaluate(() => { document.getElementById('app').scrollTop = 0; });
+    if (await Q.pg.locator('.pdj-banner').count()) {
+      await Q.pg.locator('.pdj-banner').click();
+      await shot(Q, vp, 'client-fiche-plat-du-jour', { wait: 900 });
+      await Q.pg.evaluate(() => closeDetail());
+    }
     await Q.pg.locator('.prod-card.has-img').first().click();
     await shot(Q, vp, 'client-fiche-produit', { wait: 900 });
     await Q.ctx.close();
@@ -215,7 +222,7 @@ for (const vp of VIEWPORTS) {
     await C.ctx.close();
 
     if (vp.viewport.width >= 800) {
-      const R = await newDevice(browser, vp, 'qrcodes.html?emu', false);
+      const R = await newDevice(browser, vp, 'qrcodes.html?emu', true);
       await shot(R, vp, 'qrcodes', { wait: 2500 });
       await R.ctx.close();
     }

@@ -228,7 +228,7 @@ function renderMenu(){
   sections.forEach(sec=>{
     if(sec.name) html+=`<div class="sec-sep">${escHtml(sec.name.toUpperCase())}</div>`;
     sec.items.forEach(p=>{
-      const img = safeUrl(optImg(p.imgUrl || productImages[p.id] || null, 'thumb'));
+      const img = clientImg(p, 'thumb');
       // src filtré par safeUrl (https, data:image raster, relatif) puis échappé ;
       // alt échappé pour bloquer toute injection via le nom de produit.
       const imgHtml = img
@@ -273,6 +273,16 @@ function renderMenu(){
 // texte, et soumis aux mêmes filtres que la liste (allergies déclarées,
 // Végé/Vegan…) pour ne jamais mettre en avant un plat que le client a exclu.
 // Toucher le bandeau ouvre la fiche via la délégation data-action="detail".
+// Photo générique livrée avec la carte pour le « Plat du jour » : elle ne montre
+// pas le plat du jour réel (ex. volaille sous « Rougail saucisses ») → jamais
+// affichée aux clients ; une vraie photo prise par la patronne, si.
+function isGenericPdjImg(u){ return /(^|\/)plat-du-jour(-(thumb|medium|full))?\.(png|webp|jpe?g)(\?.*)?$/i.test(String(u || '')); }
+function clientImg(p, size){
+  const raw = p.imgUrl || productImages[p.id] || null;
+  if(p.pdj && isGenericPdjImg(raw)) return '';
+  const u = optImg(raw, size);
+  return (p.pdj && isGenericPdjImg(u)) ? '' : safeUrl(u);
+}
 function renderPdjBanner(){
   if(String(searchQuery || '').trim()) return '';
   const p = (menu.products||[]).find(x => {
@@ -282,7 +292,7 @@ function renderPdjBanner(){
   });
   if(!p) return '';
   const name = String(p.sub ?? '').trim();
-  const img = safeUrl(optImg(p.imgUrl || productImages[p.id] || null, 'thumb'));
+  const img = clientImg(p, 'thumb');
   const outOfStock = p.stock === 0;
   return `<div class="pdj-wrap">
     <button type="button" class="pdj-banner${outOfStock?' sold-out':''}" data-action="detail" data-pid="${escHtml(p.id)}">
@@ -430,13 +440,16 @@ window.openProductDetail = function(pid){
   const p = (menu.products||[]).find(x=>x.id===pid);
   if(!p) return;
   // Image
-  const img = safeUrl(optImg(p.imgUrl || productImages[p.id] || null, 'full'));
+  const img = clientImg(p, 'full');
   const imgEl = document.getElementById('detail-img');
   const phEl = document.getElementById('detail-img-ph');
   if(img){ imgEl.src = img; imgEl.style.display='block'; phEl.style.display='none'; }
   else { imgEl.style.display='none'; phEl.style.display='flex'; }
   // Nom + prix
-  document.getElementById('detail-name').innerHTML = (p.pdj?'⭐ ':'') + escHtml(p.name);
+  // Plat du jour : la fiche porte le nom du plat du jour (« Rougail saucisses »), pas le libellé générique
+  const pdjSub = p.pdj ? String(p.sub ?? '').trim() : '';
+  const pdjTitle = (pdjSub && !/^\s*ex\s*:/i.test(pdjSub)) ? pdjSub : '';
+  document.getElementById('detail-name').innerHTML = (p.pdj?'⭐ ':'') + escHtml(pdjTitle || p.name);
   document.getElementById('detail-price').textContent = priceLabel(p);
   // Description
   const desc = p.description || (/^\s*ex\s*:/i.test(p.sub || '') ? '' : p.sub) || '';
@@ -534,6 +547,7 @@ body{display:flex;flex-direction:column}
 #filter-bar .chip{height:36px;padding:0 14px;font-size:13px;font-weight:700;flex-shrink:0}
 /* Petits téléphones : la 4e puce reste entamée à l'écran (indice qu'on peut faire glisser) */
 @media (max-width:374px){#filter-bar{gap:6px}#filter-bar .chip{padding:0 12px}}
+@media (min-width:900px){.pdj-banner{max-width:760px}}   /* pas étiré sur 1 280 px ; aligné sur la grille en 800 px */
 
 /* Skeleton */
 .skel-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
@@ -607,7 +621,7 @@ body{display:flex;flex-direction:column}
   .prod-name{font-size:16px}
   .prod-sub{font-size:13px}
   .pdj-wrap{padding:16px}
-  .pdj-banner{gap:16px;padding:12px 16px;max-width:760px}   /* pas étiré sur 1 280 px */
+  .pdj-banner{gap:16px;padding:12px 16px}
   .pdj-label{font-size:17px}
   .pdj-name{font-size:19px}
   .pdj-price{font-size:22px}

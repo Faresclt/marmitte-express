@@ -704,9 +704,11 @@ test('plat du jour : la patronne change le nom ET le prix → serveuses, carte Q
   await expect(banner).toContainText('Rougail <b>saucisses</b>');
   await expect(banner).toContainText('16,50');
   expect(await qp.locator('.pdj-banner b').count()).toBe(0);
+  expect(await banner.locator('img').count()).toBe(0);   // photo générique (« volaille ») jamais sous le vrai plat du jour
   await banner.click();
   await expect(qp.locator('#detail-modal')).toHaveClass(/show/);
-  await expect(qp.locator('#detail-name')).toContainText(pdj0.name);
+  await expect(qp.locator('#detail-name')).toContainText('Rougail <b>saucisses</b>');   // le vrai nom, pas « Plat du Jour »
+  await expect(qp.locator('#detail-img')).toBeHidden();
   await qp.evaluate(() => closeDetail());
   // Pendant une recherche, le bandeau s'efface (il revient quand on vide la recherche)
   await qp.fill('#search-input', 'sodas');
@@ -777,6 +779,50 @@ test('v89 : portrait — gros numéros de table sous le plan (caisse et serveuse
   await tq.locator('.tq-btn', { hasText: new RegExp('^' + t.n + '$') }).click();
   await S.pg.waitForFunction(() => getComputedStyle(document.getElementById('app')).display !== 'none', null, { timeout: 10_000 });
   await expect(S.pg.locator('#table-display')).toHaveText(t.n);
+  const noise = (e) => /\[SW\]|REST poll|permission|403|Notification/i.test(e);
+  for (const d of [C, S]) expect(d.errors.filter((e) => !noise(e))).toEqual([]);
+  await C.ctx.close(); await S.ctx.close();
+});
+
+test('cuisson à choisir : jamais « Bleu » par défaut (serveuse et caisse)', async ({ browser }) => {
+  await adminSet('security/policy', { enforce: true });
+  const m = decode({ mapValue: { fields: (await adminGet('config/menu')).fields } });
+  const viande = (m.products || []).find((p) => p.active !== false && p.hasCuisson);
+  expect(viande, 'un plat avec cuisson').toBeTruthy();
+  // Téléphone serveuse
+  const S = await openEnrolled(browser, 'serveur.html?table=4&id=t4&emu');
+  await S.pg.waitForFunction(() => getComputedStyle(document.getElementById('app')).display !== 'none', null, { timeout: 30_000 });
+  await S.pg.evaluate((id) => window.addProduct(id), viande.id);
+  await expect(S.pg.locator('#opt-modal')).toBeVisible();
+  expect(await S.pg.locator('#opt-cuisson-btns .opt-chip.sel').count()).toBe(0);   // rien de présélectionné
+  await S.pg.locator('#opt-modal button', { hasText: 'Ajouter' }).click();
+  await expect(S.pg.locator('#opt-modal')).toBeVisible();                           // refusé : la fenêtre reste
+  await expect(S.pg.locator('#serveur-toast')).toContainText(/cuisson/i);
+  await expect(S.pg.locator('#cart-count')).toContainText('0');
+  await S.pg.locator('#opt-cuisson-btns .opt-chip', { hasText: 'Saignant' }).click();
+  await S.pg.locator('#opt-modal button', { hasText: 'Ajouter' }).click();
+  await expect(S.pg.locator('#opt-modal')).toBeHidden();
+  await expect(S.pg.locator('#cart-count')).toContainText('1');
+  await S.pg.locator('#cart-bar').click();
+  await expect(S.pg.locator('#cp-items')).toContainText('Saignant');
+  await S.pg.locator('#cp-items .cp-minus').first().click();   // panier vidé pour les tests suivants
+  await expect(S.pg.locator('#cart-count')).toContainText('0');
+  // Tablette caisse
+  const C = await openEnrolled(browser, 'marmite-express-caisse.html?emu');
+  await C.pg.evaluate(() => { LS.set('pdjDailyShown', new Date().toDateString()); pinEntry = '1234'; checkPin(); closePdjDaily(); ticket = []; renderTicket(); });
+  await C.pg.waitForFunction((id) => (typeof products !== 'undefined' ? products : []).some((p) => p.id === id), viande.id, { timeout: 30_000 });
+  await C.pg.evaluate((id) => openOptionsModal(id), viande.id);
+  await expect(C.pg.locator('#options-modal')).toHaveClass(/show/);
+  expect(await C.pg.locator('#opt-cuisson-btns .opt-chip.sel').count()).toBe(0);
+  await C.pg.evaluate(() => confirmOptions());
+  await expect(C.pg.locator('#options-modal')).toHaveClass(/show/);
+  await expect(C.pg.locator('#toast')).toContainText(/cuisson/i);
+  expect(await C.pg.evaluate(() => ticket.length)).toBe(0);
+  await C.pg.locator('#opt-cuisson-btns .opt-chip', { hasText: 'À point' }).click();
+  await C.pg.evaluate(() => confirmOptions());
+  await expect(C.pg.locator('#options-modal')).not.toHaveClass(/show/);
+  expect(await C.pg.evaluate(() => ticket.map((r) => r.cuisson))).toEqual(['À point']);
+  await C.pg.evaluate(() => { ticket = []; renderTicket(); });
   const noise = (e) => /\[SW\]|REST poll|permission|403|Notification/i.test(e);
   for (const d of [C, S]) expect(d.errors.filter((e) => !noise(e))).toEqual([]);
   await C.ctx.close(); await S.ctx.close();
