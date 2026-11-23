@@ -364,7 +364,8 @@ test('test à blanc : serveuse → cuisine → « prête » ; panier gardé par 
   await btn('ready').click();
   await expect.poll(async () => decode((await adminGet('orders/' + order.id)).fields.status), { timeout: 15_000 }).toBe('ready');
   // La serveuse est prévenue
-  await expect(S.pg.getByText(/prête/i).first()).toBeVisible({ timeout: 20_000 });
+  // (avant : getByText(/prête/i) attrapait la phrase fixe « Table prête à servir » de l'écran de confirmation)
+  await expect(S.pg.locator('#serveur-toast')).toContainText(/Commande prête/i, { timeout: 20_000 });
   // « Annuler » (anciennement ✕) : libellé explicite, commande annulée
   await expect(btn('clear')).toHaveText(/Annuler/);
   await btn('clear').click();
@@ -629,4 +630,84 @@ test('note de table (allergie) : la bonne note à l\'ouverture, gardée quand on
   expect(C.errors.filter((e) => !noise(e))).toEqual([]);
   expect(C2.errors.filter((e) => !noise(e))).toEqual([]);
   await C.ctx.close(); await C2.ctx.close();
+});
+
+test('plat du jour : la patronne change le nom ET le prix → serveuses, carte QR et addition suivent', async ({ browser }) => {
+  await adminSet('security/policy', { enforce: true });
+  const menuCloud = async () => decode({ mapValue: { fields: (await adminGet('config/menu')).fields } });
+  const pdjCloud = async () => ((await menuCloud()).products || []).find((p) => p.pdj);
+  const C = await openEnrolled(browser, 'marmite-express-caisse.html?emu');
+  const pg = C.pg;
+  await pg.waitForFunction(() => window._cloudMenuSeen === true, null, { timeout: 30_000 });
+  await pg.evaluate(() => { pinEntry = '1234'; checkPin(); showAdmin(); showPanel('products'); openPdjModal(); });
+  // La popup « Bonjour — plat du jour » (3,5 s après l'ouverture) ne doit pas recouvrir la fenêtre déjà ouverte
+  await pg.waitForTimeout(4500);
+  await expect(pg.locator('#pdj-daily-modal')).not.toHaveClass(/show/);
+  await pg.waitForTimeout(500);
+  const pdj0 = await pdjCloud();
+  expect(pdj0, 'un produit plat du jour publié').toBeTruthy();
+  // Le formulaire montre ce qui est publié : prix actuel, jamais le texte d'exemple « Ex : … »
+  expect(await pg.locator('#pdj-prix').inputValue()).toBe(pdj0.price.toFixed(2).replace('.', ','));
+  expect(await pg.locator('#pdj-nom').inputValue()).toBe(/^\s*ex\s*:/i.test(pdj0.sub || '') ? '' : (pdj0.sub || ''));
+  // Carte QR AVANT la saisie : le texte d'exemple livré avec la carte (« Ex : … ») n'est jamais montré aux clients
+  expect(pdj0.sub, "précondition : sous-titre d'exemple publié").toMatch(/^\s*Ex\s*:/i);
+  const Q = await browser.newContext({ bypassCSP: true, serviceWorkers: 'block' });
+  const qp = await Q.newPage();
+  await qp.goto('client.html?emu', { waitUntil: 'domcontentloaded' });
+  await qp.locator(`#menu-tabs .mtab[data-cat="${pdj0.cat}"]`).click({ timeout: 30_000 });
+  const qCard = qp.locator('.prod-card', { hasText: pdj0.name });
+  await expect(qCard).toBeVisible({ timeout: 30_000 });
+  await expect(qCard).not.toContainText(/Ex\s*:/);
+  // Prix illisible ou nul : refusé, rien ne change
+  for (const bad of ['abc', '0', '-3', '12,345', '']) {
+    await pg.fill('#pdj-nom', 'Essai');
+    await pg.fill('#pdj-prix', bad);
+    await pg.locator('#pdj-modal .mbtn-save').click();
+    await expect(pg.locator('#pdj-modal')).toHaveClass(/show/);
+  }
+  expect(await pg.evaluate((id) => products.find((p) => p.id === id).price, pdj0.id)).toBe(pdj0.price);
+  // Saisie réelle : virgule française, nom avec balise piégée (affiché en texte)
+  await pg.fill('#pdj-nom', 'Rougail <b>saucisses</b>');
+  await pg.fill('#pdj-prix', '16,5');
+  await pg.fill('#pdj-desc', 'Riz, rougail tomate');
+  await pg.locator('#pdj-modal .mbtn-save').click();
+  await expect(pg.locator('#pdj-modal')).not.toHaveClass(/show/);
+  await expect.poll(async () => { const p = await pdjCloud(); return [p.price, p.sub, p.description]; }, { timeout: 20_000 })
+    .toEqual([16.5, 'Rougail <b>saucisses</b>', 'Riz, rougail tomate']);
+  // Le formulaire rouvert montre la nouvelle valeur
+  await pg.evaluate(() => openPdjModal());
+  expect(await pg.locator('#pdj-prix').inputValue()).toBe('16,50');
+  await pg.evaluate(() => closePdjModal());
+  // Téléphone serveuse : nouveau prix affiché, commande → addition au nouveau prix
+  const S = await openEnrolled(browser, 'serveur.html?table=7&id=t7&emu');
+  await S.pg.waitForFunction(() => getComputedStyle(document.getElementById('app')).display !== 'none', null, { timeout: 30_000 });
+  await S.pg.locator(`#menu-tabs .mtab[data-cat="${pdj0.cat}"]`).click();   // onglet du plat du jour (Plats)
+  const card = S.pg.locator('.prod-card', { hasText: 'Rougail <b>saucisses</b>' });
+  await expect(card).toContainText('16,50 €', { timeout: 20_000 });
+  expect(await S.pg.locator('.prod-sub b').count()).toBe(0);     // balise non interprétée
+  await S.pg.evaluate((id) => window.addProduct(id), pdj0.id);
+  await S.pg.locator('#cart-bar').click();
+  await S.pg.getByRole('button', { name: /Confirmer la commande/ }).click();
+  await pg.waitForFunction((id) => ((window.tableData || {}).t7?.ticket || []).some((r) => r.pid === id || /Plat du/i.test(r.name)), pdj0.id, { timeout: 30_000 });
+  const line = await pg.evaluate(() => window.tableData.t7.ticket.find((r) => /Plat du/i.test(r.name) || r.price === 16.5));
+  expect(line.price).toBe(16.5);
+  // Carte QR : nouveau prix, pas de « Ex : »
+  // Carte QR déjà ouverte : le nouveau nom et le nouveau prix arrivent d'eux-mêmes
+  await expect(qp.locator('.prod-card', { hasText: 'Rougail' })).toContainText('16,50', { timeout: 30_000 });
+  // Nouveau changement de prix : la commande déjà à l'addition garde 16,50
+  await pg.evaluate(() => openPdjModal());
+  await pg.fill('#pdj-prix', '17');
+  await pg.locator('#pdj-modal .mbtn-save').click();
+  await expect.poll(async () => (await pdjCloud()).price, { timeout: 20_000 }).toBe(17);
+  expect(await pg.evaluate(() => window.tableData.t7.ticket.find((r) => /Plat du/i.test(r.name) || r.price === 16.5).price)).toBe(16.5);
+  // Une 2e caisse reçoit le nouveau prix ; sa popup du matin l'affiche en texte (pas de HTML injecté)
+  const C2 = await openEnrolled(browser, 'marmite-express-caisse.html?emu');
+  await C2.pg.waitForFunction((id) => (typeof products !== 'undefined' ? products : []).find((p) => p.id === id)?.price === 17, pdj0.id, { timeout: 30_000 });
+  await C2.pg.evaluate(() => { LS.set('pdjDailyShown', ''); checkPdjDailyPopup(); });
+  await expect(C2.pg.locator('#pdj-daily-current')).toContainText('Rougail <b>saucisses</b> — 17,00 €', { timeout: 5000 });
+  expect(await C2.pg.locator('#pdj-daily-current b').count()).toBe(0);
+  await pg.evaluate(() => { const t = window.tableData.t7; if (t) { openTableService('t7'); resetTable(); } });
+  const noise = (e) => /\[SW\]|REST poll|permission|403|Notification/i.test(e);
+  for (const d of [C, S, C2]) expect(d.errors.filter((e) => !noise(e))).toEqual([]);
+  await C.ctx.close(); await S.ctx.close(); await C2.ctx.close(); await Q.close();
 });

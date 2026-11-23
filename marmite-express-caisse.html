@@ -1241,11 +1241,16 @@ else bootFirebaseListeners();
     <div class="modal-body">
       <div class="form-group">
         <label class="form-label">Produit à modifier</label>
-        <select class="form-input" id="pdj-prod-select" onchange="pdjLoadProductImg()"></select>
+        <select class="form-input" id="pdj-prod-select" onchange="pdjFillFromProduct()"></select>
       </div>
       <div class="form-group">
         <label class="form-label">Nom du plat du jour <span style="color:var(--accent)">*</span></label>
-        <input class="form-input" id="pdj-nom" placeholder="Ex : Pâtes Carbonara maison">
+        <input class="form-input" id="pdj-nom" placeholder="Ex : Pâtes Carbonara maison" maxlength="80">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="pdj-prix">Prix du jour (€) <span style="color:var(--accent)">*</span></label>
+        <input class="form-input" id="pdj-prix" type="text" inputmode="decimal" autocomplete="off" placeholder="Ex : 14,50" style="font-size:20px;font-weight:800;max-width:180px">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Les commandes déjà prises gardent leur prix ; le nouveau prix vaut pour les suivantes (serveuses et carte QR).</div>
       </div>
       <div class="form-group">
         <label class="form-label">Description courte</label>
@@ -2066,7 +2071,7 @@ function cardHTML(p){
     ?(img?`<div class="mcard-img"><img src="${img}" alt="${esc(p.name)}" loading="lazy"><div class="img-grad"></div></div>`
         :`<div class="mcard-img"><div class="mcard-ph">🍽️</div></div>`)
     :'';
-  const sub=settings.showSub&&p.sub?`<div class="mcard-sub">${esc(p.sub)}</div>`:'';
+  const sub=settings.showSub&&p.sub&&!/^\s*ex\s*:/i.test(p.sub)?`<div class="mcard-sub">${esc(p.sub)}</div>`:'';
   const isOutOfStock = p.stock!==undefined && p.stock>=0 && p.stock===0;
   // Seul « ÉPUISÉ » est affiché : personne ne compte le stock (v84).
   const stockBadge = isOutOfStock ? '<span style="position:absolute;top:6px;right:6px;background:var(--red);color:#fff;font-size:8px;font-weight:800;padding:2px 7px;border-radius:20px;letter-spacing:.5px;z-index:2">ÉPUISÉ</span>' : '';
@@ -6714,27 +6719,40 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 let pdjImgData = null;
 
+// Texte d'exemple livré avec la carte (« Ex : Pâtes maison du chef ») : jamais
+// affiché comme un vrai nom de plat.
+function pdjIsPlaceholder(s){ return /^\s*ex\s*:/i.test(String(s || '')); }
+// « 14,50 » / « 14.5 » / « 14,50 € » → 14.5 ; NaN si illisible
+function parsePrixSaisi(v){
+  const s = String(v == null ? '' : v).replace(/\s|€/g, '').replace(',', '.');
+  if(!/^\d{1,4}(\.\d{0,2})?$/.test(s)) return NaN;
+  return Math.round(parseFloat(s) * 100) / 100;
+}
+function formatPrixSaisi(n){ return (Number(n) || 0).toFixed(2).replace('.', ','); }
+
 function openPdjModal() {
   pdjImgData = null;
   const sel = document.getElementById('pdj-prod-select');
   const pdjProds = products.filter(p => p.pdj);
-  sel.innerHTML = pdjProds.length
-    ? pdjProds.map(p => '<option value="' + p.id + '">' + p.name + '</option>').join('')
-    : '<option value="">Aucun produit marqué "Plat du jour"</option>';
   // (valeurs échappées : id/nom viennent du menu synchronisé)
-  if (pdjProds.length) sel.innerHTML = pdjProds.map(p => '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join('');
+  sel.innerHTML = pdjProds.length
+    ? pdjProds.map(p => '<option value="' + esc(p.id) + '">' + esc(p.name) + '</option>').join('')
+    : '<option value="">Aucun produit marqué "Plat du jour"</option>';
   const saved = LS.get('platDuJour', null);
-  if (saved) {
-    document.getElementById('pdj-nom').value = saved.nom || '';
-    document.getElementById('pdj-desc').value = saved.desc || '';
-    if (saved.selectedId) sel.value = saved.selectedId;
-  } else {
-    document.getElementById('pdj-nom').value = '';
-    document.getElementById('pdj-desc').value = '';
-  }
+  if (saved && saved.selectedId && pdjProds.some(p => p.id === saved.selectedId)) sel.value = saved.selectedId;
   document.getElementById('pdj-ia-img-status').textContent = '';
-  pdjLoadProductImg();
+  pdjFillFromProduct();
   document.getElementById('pdj-modal').classList.add('show');
+}
+
+// Le formulaire montre ce qui est réellement publié pour ce produit (nom,
+// prix, description) : même valeur sur toutes les caisses, rien de caché.
+function pdjFillFromProduct() {
+  const p = products.find(x => x.id === document.getElementById('pdj-prod-select').value);
+  document.getElementById('pdj-nom').value = p && !pdjIsPlaceholder(p.sub) ? (p.sub || '') : '';
+  document.getElementById('pdj-prix').value = p ? formatPrixSaisi(p.price) : '';
+  document.getElementById('pdj-desc').value = p ? (p.description || '') : '';
+  pdjLoadProductImg();
 }
 
 function pdjLoadProductImg() {
@@ -6791,21 +6809,25 @@ function handlePdjImg(e) {
 
 
 function savePlatDuJour() {
-  const nom = document.getElementById('pdj-nom').value.trim();
-  if (!nom) return toast('Le nom du plat est requis', 'r');
-  const desc = document.getElementById('pdj-desc').value.trim();
   const selectedId = document.getElementById('pdj-prod-select').value;
-  LS.set('platDuJour', { nom, desc, selectedId, date: new Date().toDateString() });
   const p = products.find(x => x.id === selectedId);
-  if (p) {
-    p.sub = nom;
-    if (pdjImgData) { setImg(selectedId, pdjImgData); setImg(p.name, pdjImgData); p.imgUrl = pdjImgData; }
-    saveAll();
-    renderProdList();
-    renderMenu();
-  }
+  if (!p) return toast('Aucun produit « Plat du jour » : cochez-le sur un produit (Admin → Produits)', 'r');
+  const nom = document.getElementById('pdj-nom').value.trim().slice(0, 80);
+  if (!nom) return toast('Le nom du plat est requis', 'r');
+  const prix = parsePrixSaisi(document.getElementById('pdj-prix').value);
+  if (!(prix > 0) || prix > 500) return toast('Prix invalide — exemple : 14,50', 'r');
+  const desc = document.getElementById('pdj-desc').value.trim().slice(0, 500);
+  const ancienPrix = Number(p.price) || 0;
+  p.sub = nom;
+  p.price = prix;
+  p.description = desc;
+  if (pdjImgData) { setImg(selectedId, pdjImgData); setImg(p.name, pdjImgData); p.imgUrl = pdjImgData; }
+  LS.set('platDuJour', { nom, desc, prix, selectedId, date: new Date().toDateString() });
+  saveAll();
+  renderProdList();
+  renderMenu();
   closePdjModal();
-  toast('⭐ Plat du jour mis à jour : ' + nom, 'g');
+  toast('⭐ Plat du jour : ' + nom + ' — ' + formatPrixSaisi(prix) + ' €' + (prix !== ancienPrix ? ' (avant ' + formatPrixSaisi(ancienPrix) + ' €)' : ''), 'g');
 }
 
 function checkPdjDailyPopup() {
@@ -6815,14 +6837,19 @@ function checkPdjDailyPopup() {
   const lastShown = LS.get('pdjDailyShown', '');
   if (lastShown === today) return;
   LS.set('pdjDailyShown', today);
-  const saved = LS.get('platDuJour', null);
+  // Plat actuel = produit réellement publié (pas un brouillon local)
+  const p = products.find(x => x.pdj && x.active !== false);
   const current = document.getElementById('pdj-daily-current');
-  if (saved && saved.nom) {
-    current.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">PLAT ACTUEL</div><div style="font-size:16px">⭐ ' + saved.nom + '</div>' + (saved.desc ? '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + saved.desc + '</div>' : '');
+  if (p && p.sub && !pdjIsPlaceholder(p.sub)) {
+    current.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">PLAT ACTUEL</div><div style="font-size:16px">⭐ ' + esc(p.sub) + ' — ' + formatPrixSaisi(p.price) + ' €</div>' + (p.description ? '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + esc(p.description) + '</div>' : '');
   } else {
     current.innerHTML = '<div style="color:var(--muted);font-size:13px">Aucun plat du jour défini</div>';
   }
-  setTimeout(() => document.getElementById('pdj-daily-modal').classList.add('show'), 1500);
+  // Pas par-dessus la fenêtre du plat du jour déjà ouverte (elle bloquait « Valider »)
+  setTimeout(() => {
+    if (document.getElementById('pdj-modal').classList.contains('show')) return;
+    document.getElementById('pdj-daily-modal').classList.add('show');
+  }, 1500);
 }
 
 function closePdjDaily() {
@@ -6832,6 +6859,7 @@ function closePdjDaily() {
 window.openPdjModal = openPdjModal;
 window.closePdjModal = closePdjModal;
 window.pdjLoadProductImg = pdjLoadProductImg;
+window.pdjFillFromProduct = pdjFillFromProduct;
 window.handlePdjImg = handlePdjImg;
 window.savePlatDuJour = savePlatDuJour;
 window.closePdjDaily = closePdjDaily;

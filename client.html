@@ -239,7 +239,7 @@ function renderMenu(){
       // Pastille allergènes (visible AVANT clic = conformité INCO 2014 art. 9)
       const allergens = Array.isArray(p.allergens) ? p.allergens : [];
       const allergenHint = allergens.length ? `<div class="prod-allergens-hint">⚠️ Allergènes (${allergens.length})</div>` : '';
-      const displaySub = p.sub;
+      const displaySub = /^\s*ex\s*:/i.test(p.sub || '') ? '' : p.sub;   // « Ex : … » = texte d'exemple, jamais affiché
       const vText = variantsText(p);
       const optHint = [p.hasCuisson?'🔥 Cuisson au choix':'', p.hasGarniture?'🍟 Garniture au choix':''].filter(Boolean).join(' · ');
       html+=`<div class="prod-card${img?' has-img':''}${outOfStock?' sold-out':''}" data-pid="${escHtml(p.id)}" data-action="detail">
@@ -409,7 +409,7 @@ window.openProductDetail = function(pid){
   document.getElementById('detail-name').innerHTML = (p.pdj?'⭐ ':'') + escHtml(p.name);
   document.getElementById('detail-price').textContent = priceLabel(p);
   // Description
-  const desc = p.description || p.sub || '';
+  const desc = p.description || (/^\s*ex\s*:/i.test(p.sub || '') ? '' : p.sub) || '';
   document.getElementById('detail-desc').textContent = desc || 'Aucune description disponible.';
   // Tailles (prix par variante) + supplément sirop : lecture seule
   const vText = variantsText(p);

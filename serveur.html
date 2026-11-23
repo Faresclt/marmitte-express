@@ -594,7 +594,7 @@ function renderMenu(){
       // de produit exécutait du JS sur la tablette serveur. Idem alt="${p.name}" (XSS via
       // <img onerror=...> si name = '"><img onerror=...>').
       const safeName = escHtml(p.name);
-      const safeSub = escHtml(p.sub || '');
+      const safeSub = /^\s*ex\s*:/i.test(p.sub || '') ? '' : escHtml(p.sub || '');   // « Ex : … » = texte d'exemple
       const imgHtml = img
         ? `<div class="prod-img"><img src="${escHtml(img)}" alt="${safeName}" loading="lazy"></div>`
         : '';
